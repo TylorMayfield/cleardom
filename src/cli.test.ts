@@ -22,7 +22,8 @@ test("scan text output shows installed-command guidance and finding fixes", asyn
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
   assert.match(result.stdout, /Fix: Add visible text, aria-label, aria-labelledby/);
-  assert.match(result.stdout, /Learn: cleardom explain CDOM001/);
+  assert.match(result.stdout, /Learn: cleardom explain CDOM001 \| https:\/\/github\.com\/cleardom\/cleardom#cdom001/);
+  assert.match(result.stdout, /New findings:/);
   assert.match(result.stdout, /cleardom explain CDOM001/);
   assert.match(result.stdout, /cleardom rules/);
   assert.match(result.stdout, /cleardom scan \. --write-baseline cleardom-baseline\.json/);
@@ -82,7 +83,7 @@ test("install --agents writes idempotent project-level agent guidance", async ()
   await fs.writeFile(path.join(directory, "AGENTS.md"), "# Project Notes\n\nKeep this.\n", "utf8");
 
   const first = await execFileAsync(process.execPath, [cliPath, "install", "--agents"], { cwd: directory });
-  assert.match(first.stdout, /Installed ClearDOM agent guidance/);
+  assert.match(first.stdout, /Installed ClearDOM developer workflow/);
   assert.match(first.stdout, /AGENTS\.md/);
   assert.match(first.stdout, /CLAUDE\.md/);
   assert.match(first.stdout, /\.cursor\/rules\/cleardom\.mdc/);
@@ -102,6 +103,26 @@ test("install --agents writes idempotent project-level agent guidance", async ()
 
   assert.match(second.stdout, /unchanged|updated/);
   assert.equal((updated.match(/<!-- cleardom:start -->/g) ?? []).length, 1);
+});
+
+test("install writes a GitHub Actions PR workflow by default", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  const result = await execFileAsync(process.execPath, [cliPath, "install"], { cwd: directory });
+  const workflow = await fs.readFile(path.join(directory, ".github", "workflows", "cleardom.yml"), "utf8");
+
+  assert.match(result.stdout, /GitHub Actions PR review/);
+  assert.match(workflow, /npx cleardom@latest github-pr \./);
+  assert.match(workflow, /pull-requests: write/);
+  assert.match(workflow, /issues: write/);
+});
+
+test("github-pr --dry-run prints a pull request summary without GitHub credentials", async () => {
+  const fixture = await createFixture('<button aria-label="Close"><X /></button>');
+  const result = await execFileAsync(process.execPath, [cliPath, "github-pr", fixture, "--dry-run", "--fail-on", "none"]);
+
+  assert.match(result.stdout, /<!-- cleardom:pr-summary -->/);
+  assert.match(result.stdout, /# ClearDOM review/);
+  assert.match(result.stdout, /Score: \*\*/);
 });
 
 test("agents commands detect, target, and uninstall ClearDOM guidance", async () => {

@@ -19,8 +19,8 @@ const runtimeRules = [
   skipLinkRuntimeRule
 ];
 
-export async function auditRuntimeUrl(url: string, options: ResolvedScanOptions): Promise<Finding[]> {
-  const executablePath = process.env.CHROME_PATH ?? process.env.PUPPETEER_EXECUTABLE_PATH;
+export async function auditRuntimeUrl(url: string, options: ResolvedScanOptions, chromePath?: string): Promise<Finding[]> {
+  const executablePath = chromePath ?? process.env.CHROME_PATH ?? process.env.PUPPETEER_EXECUTABLE_PATH;
   if (!executablePath) {
     throw new Error("Runtime checks require CHROME_PATH or PUPPETEER_EXECUTABLE_PATH to point to a Chromium/Chrome executable.");
   }

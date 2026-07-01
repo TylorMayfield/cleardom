@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import type { Finding, RuleCategory, RuleSummary, ScanResult, Severity, StandardDefinition } from "./types.js";
 
 const severityLabels: Record<Severity, string> = {
@@ -20,7 +21,7 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
   lines.push("Issue counts");
   lines.push(`  Active: ${result.summary.activeFindings}`);
   lines.push(`  Baseline: ${result.summary.baselineFindings}`);
-  lines.push(`  Regressions: ${result.summary.regressions}`);
+  lines.push(`  ${result.baseline ? "Regressions" : "New findings"}: ${result.summary.regressions}`);
   lines.push(`  Critical: ${result.summary.critical}`);
   lines.push(`  Warnings: ${result.summary.warning}`);
   lines.push(`  Info: ${result.summary.info}`);
@@ -45,12 +46,12 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
     lines.push(severityLabels[severity]);
     for (const finding of findings) {
       const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
-      lines.push(`  ${finding.ruleId} ${finding.file}:${finding.line}:${finding.column} ${finding.title}`);
+      lines.push(`  ${finding.ruleId} ${formatFindingLocation(finding)} ${finding.title}`);
       lines.push(`     ${finding.message}`);
       if (rule?.guidance) {
         lines.push(`     Fix: ${rule.guidance}`);
       }
-      lines.push(`     Learn: cleardom explain ${finding.ruleId}`);
+      lines.push(`     Learn: cleardom explain ${finding.ruleId}${rule?.docsUrl ? ` | ${rule.docsUrl}` : ""}`);
       if (verbose) {
         lines.push(`     ${finding.excerpt}`);
         lines.push(`     Standards: ${formatStandardRefs(finding.standards)}`);
@@ -159,6 +160,17 @@ export function formatFindingJson(findings: Finding[]): string {
 
 function pluralize(word: string, count: number): string {
   return count === 1 ? word : `${word}s`;
+}
+
+function formatFindingLocation(finding: Finding): string {
+  if (/^https?:\/\//i.test(finding.file)) {
+    return `${finding.file}:${finding.line}:${finding.column}`;
+  }
+  return `${normalizePath(path.relative(process.cwd(), finding.file))}:${finding.line}:${finding.column}`;
+}
+
+function normalizePath(value: string): string {
+  return value.replace(/\\/g, "/");
 }
 
 function formatStandardRefs(standards: RuleSummary["standards"]): string {

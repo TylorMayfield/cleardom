@@ -72,8 +72,8 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
     const source = await page.content();
     const findings: Finding[] = [];
     
-    // Scan the static HTML source
     findings.push(...scanSource(source, url, resolvedOptions));
+    findings.push(...await auditRuntimeUrl(url, resolvedOptions, executablePath));
 
     const baseline = await readBaseline(resolvedOptions.baseline, resolvedOptions.rootDir);
     const marked = markBaselineFindings(findings, baseline);

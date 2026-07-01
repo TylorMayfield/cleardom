@@ -8,13 +8,13 @@ It is a CLI-first scanner for React, Next.js, React Native, and web apps. The v0
 
 ```sh
 npx cleardom@latest scan .
-npx cleardom@latest install --agents
+npx cleardom@latest install
 npx cleardom@latest init
 npx cleardom@latest scan . --write-baseline cleardom-baseline.json
 npx cleardom@latest ci .
 ```
 
-Use `scan` for local feedback, `install --agents` to teach coding agents the ClearDOM workflow, and `ci` for pull-request regression checks. Existing projects should commit a baseline first so legacy issues remain visible without blocking merges; new issues are reported as regressions.
+Use `scan` for local feedback, `install` to add the GitHub Actions PR reviewer and coding-agent guidance, and `ci` for pull-request regression checks. Existing projects should commit a baseline first so legacy issues remain visible without blocking merges; new issues are reported as regressions.
 
 ## Local development
 
@@ -48,10 +48,11 @@ See `examples/wcag-benchmark/manifest.json` for the WCAG 2.2 A/AA coverage map a
 ## Commands
 
 ```sh
-cleardom install --agents [--agent codex|claude|cursor] [--yes]
+cleardom install [--yes] [--agents] [--github-actions] [--no-github-actions] [--agent codex|claude|cursor]
 cleardom init [--dry-run]
 cleardom scan [path|url] [--format text|json|sarif] [--standard wcag22-aa] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom github-pr [path] [--dry-run] [--max-comments 20]
 cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
 cleardom explain CDOM001
 cleardom rules
@@ -61,23 +62,30 @@ cleardom fix
 
 `fix` is intentionally still a stub. ClearDOM should only auto-edit when a rule has a truly safe static fix.
 
-## Agent install
+## Developer workflow install
 
-ClearDOM can install project-level guidance for coding agents so accessibility checks happen while code is being written, not only after CI fails:
+ClearDOM can install the project-level workflow pieces that make it behave like a PR reviewer:
 
 ```sh
-npx cleardom@latest install --agents
+npx cleardom@latest install
 ```
 
-By default this writes or updates ClearDOM-managed blocks in `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/cleardom.mdc`. Existing file content is preserved, and rerunning the command refreshes the managed block without duplicating it.
+By default this writes `.github/workflows/cleardom.yml` and ClearDOM-managed agent guidance in `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/cleardom.mdc`. Existing file content is preserved, and rerunning the command refreshes managed content without duplicating it.
 
-Install one target with `--agent`:
+Install only agent guidance or one target with `--agents` and `--agent`:
 
 ```sh
+cleardom install --agents --no-github-actions
 cleardom agents install --agent cursor
 cleardom agents detect
 cleardom agents upgrade
 cleardom agents uninstall --agent cursor
+```
+
+The installed GitHub Actions workflow runs `cleardom github-pr .` on pull requests. In Actions, that command uses `GITHUB_TOKEN` to create or update one sticky PR summary comment and add capped inline comments on changed lines with finding details, fix guidance, and rule documentation links. Outside Actions, use `--dry-run` to preview the same Markdown summary locally:
+
+```sh
+cleardom github-pr . --dry-run
 ```
 
 ## Config
@@ -136,16 +144,26 @@ jobs:
   cleardom:
     runs-on: ubuntu-latest
     permissions:
-      security-events: write
       contents: read
+      pull-requests: write
+      issues: write
+      security-events: write
+      statuses: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - run: npx cleardom@latest github-pr .
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: npx cleardom@latest ci . --format sarif > cleardom.sarif
+        if: github.event_name != 'pull_request'
       - uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         with:
           sarif_file: cleardom.sarif
 ```

@@ -1,0 +1,317 @@
+import { promises as fs } from "node:fs";
+import * as path from "node:path";
+import { writeBaseline } from "./baseline.js";
+import { resolveScanOptions } from "./config.js";
+import { scanPath, shouldFail } from "./scanner.js";
+import type { Finding, OutputFormat, ResolvedScanOptions, ScanOptions, ScanResult } from "./types.js";
+
+const marker = "<!-- cleardom:pr-summary -->";
+const inlineMarker = "<!-- cleardom:inline -->";
+const defaultWorkflowPath = path.join(".github", "workflows", "cleardom.yml");
+
+type GithubPrOptions = {
+  target: string;
+  options: ScanOptions;
+  format?: OutputFormat;
+  writeBaseline?: string;
+  dryRun?: boolean;
+  maxComments?: number;
+};
+
+type GithubContext = {
+  token: string;
+  repository: string;
+  apiUrl: string;
+  serverUrl: string;
+  pullRequest: {
+    number: number;
+    headSha: string;
+  };
+};
+
+type GithubChangedFile = {
+  filename: string;
+  patch?: string;
+};
+
+type GithubComment = {
+  id: number;
+  body?: string;
+  path?: string;
+  line?: number;
+};
+
+export async function installGithubActions(rootDir = process.cwd()): Promise<{ filePath: string; status: "created" | "updated" | "unchanged" }> {
+  const resolved = path.join(rootDir, defaultWorkflowPath);
+  const existing = await readOptional(resolved);
+  const workflow = githubWorkflow();
+
+  if (existing === workflow) {
+    return { filePath: defaultWorkflowPath, status: "unchanged" };
+  }
+
+  await fs.mkdir(path.dirname(resolved), { recursive: true });
+  await fs.writeFile(resolved, workflow, "utf8");
+  return { filePath: defaultWorkflowPath, status: existing === undefined ? "created" : "updated" };
+}
+
+export async function runGithubPr(options: GithubPrOptions): Promise<{ result: ScanResult; posted: boolean; summary: string }> {
+  const resolvedOptions = await resolveScanOptions(options.options);
+  const result = await scanPath(options.target, resolvedOptions);
+
+  if (options.writeBaseline) {
+    await writeBaseline(options.writeBaseline, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
+  }
+
+  const summary = formatPullRequestSummary(result, resolvedOptions);
+  const context = await githubContext();
+
+  if (context && !options.dryRun) {
+    await postStickySummary(context, summary);
+    await postInlineComments(context, result, resolvedOptions, options.maxComments ?? 20);
+  }
+
+  process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
+  return { result, posted: Boolean(context && !options.dryRun), summary };
+}
+
+export function formatPullRequestSummary(result: ScanResult, options: ResolvedScanOptions): string {
+  const lines = [
+    marker,
+    "# ClearDOM review",
+    "",
+    `Score: **${result.score}/100**`,
+    `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"}`,
+    `Standard: **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
+    "",
+    "| Type | Count |",
+    "| --- | ---: |",
+    `| Active findings | ${result.summary.activeFindings} |`,
+    `| Baseline findings | ${result.summary.baselineFindings} |`,
+    `| ${result.baseline ? "Regressions" : "New findings"} | ${result.summary.regressions} |`,
+    `| Critical | ${result.summary.critical} |`,
+    `| Warnings | ${result.summary.warning} |`,
+    `| Info | ${result.summary.info} |`,
+    ""
+  ];
+
+  const findings = result.activeFindings.slice(0, 30);
+  if (findings.length > 0) {
+    lines.push("## Findings", "");
+    for (const finding of findings) {
+      const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
+      lines.push(`- **${finding.ruleId}** ${markdownLocation(finding, options)}: ${finding.title}`);
+      lines.push(`  ${finding.message}`);
+      if (rule?.guidance) lines.push(`  Fix: ${rule.guidance}`);
+      if (rule?.docsUrl) lines.push(`  Docs: ${rule.docsUrl}`);
+    }
+    if (result.activeFindings.length > findings.length) {
+      lines.push("", `Showing ${findings.length} of ${result.activeFindings.length} active findings. See the workflow logs for the complete scan.`);
+    }
+  } else {
+    lines.push("No active ClearDOM findings on this run.");
+  }
+
+  lines.push("", "<sub>ClearDOM updates this comment on each run.</sub>");
+  return lines.join("\n");
+}
+
+export function githubWorkflow(): string {
+  return `name: ClearDOM
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  cleardom:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      security-events: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: ClearDOM PR review
+        if: github.event_name == 'pull_request'
+        run: npx cleardom@latest github-pr .
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+      - name: ClearDOM main scan
+        if: github.event_name != 'pull_request'
+        run: npx cleardom@latest ci . --format sarif > cleardom.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always() && github.event_name != 'pull_request'
+        with:
+          sarif_file: cleardom.sarif
+`;
+}
+
+async function githubContext(): Promise<GithubContext | undefined> {
+  const token = process.env.GITHUB_TOKEN;
+  const repository = process.env.GITHUB_REPOSITORY;
+  const eventPath = process.env.GITHUB_EVENT_PATH;
+  if (!token || !repository || !eventPath) return undefined;
+
+  const event = JSON.parse(await fs.readFile(eventPath, "utf8")) as {
+    pull_request?: {
+      number: number;
+      head: { sha: string };
+    };
+  };
+  if (!event.pull_request) return undefined;
+
+  return {
+    token,
+    repository,
+    apiUrl: process.env.GITHUB_API_URL ?? "https://api.github.com",
+    serverUrl: process.env.GITHUB_SERVER_URL ?? "https://github.com",
+    pullRequest: {
+      number: event.pull_request.number,
+      headSha: event.pull_request.head.sha
+    }
+  };
+}
+
+async function postStickySummary(context: GithubContext, summary: string): Promise<void> {
+  const comments = await githubRequest<GithubComment[]>(context, `/repos/${context.repository}/issues/${context.pullRequest.number}/comments?per_page=100`);
+  const existing = comments.find((comment) => comment.body?.includes(marker));
+  if (existing) {
+    await githubRequest(context, `/repos/${context.repository}/issues/comments/${existing.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ body: summary })
+    });
+    return;
+  }
+
+  await githubRequest(context, `/repos/${context.repository}/issues/${context.pullRequest.number}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body: summary })
+  });
+}
+
+async function postInlineComments(context: GithubContext, result: ScanResult, options: ResolvedScanOptions, maxComments: number): Promise<void> {
+  const files = await githubRequest<GithubChangedFile[]>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/files?per_page=100`);
+  const addedLines = new Map(files.map((file) => [file.filename, parseAddedLines(file.patch ?? "")]));
+  const existing = await githubRequest<GithubComment[]>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/comments?per_page=100`);
+  const existingKeys = new Set(existing.filter((comment) => comment.body?.includes(inlineMarker)).map((comment) => `${comment.path}:${comment.line}:${extractRuleId(comment.body ?? "")}`));
+
+  let posted = 0;
+  for (const finding of result.activeFindings) {
+    if (posted >= maxComments) return;
+    const file = relativeFindingPath(finding, options);
+    const lines = addedLines.get(file);
+    if (!lines?.has(finding.line)) continue;
+
+    const key = `${file}:${finding.line}:${finding.ruleId}`;
+    if (existingKeys.has(key)) continue;
+
+    await githubRequest(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        body: inlineCommentBody(finding, result),
+        commit_id: context.pullRequest.headSha,
+        path: file,
+        line: finding.line,
+        side: "RIGHT"
+      })
+    });
+    posted += 1;
+  }
+}
+
+function inlineCommentBody(finding: Finding, result: ScanResult): string {
+  const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
+  return [
+    inlineMarker,
+    `**${finding.ruleId}: ${finding.title}**`,
+    "",
+    finding.message,
+    rule?.guidance ? `Fix: ${rule.guidance}` : undefined,
+    rule?.docsUrl ? `Docs: ${rule.docsUrl}` : undefined
+  ].filter(Boolean).join("\n");
+}
+
+function markdownLocation(finding: Finding, options: ResolvedScanOptions): string {
+  const file = relativeFindingPath(finding, options);
+  return `\`${file}:${finding.line}:${finding.column}\``;
+}
+
+function relativeFindingPath(finding: Finding, options: ResolvedScanOptions): string {
+  if (/^https?:\/\//i.test(finding.file)) return finding.file;
+  const relative = path.relative(options.rootDir, finding.file);
+  return relative && !relative.startsWith("..") ? normalizePath(relative) : normalizePath(path.relative(process.cwd(), finding.file));
+}
+
+function parseAddedLines(patch: string): Set<number> {
+  const added = new Set<number>();
+  let line = 0;
+
+  for (const raw of patch.split("\n")) {
+    const header = raw.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (header) {
+      line = Number(header[1]);
+      continue;
+    }
+
+    if (raw.startsWith("+") && !raw.startsWith("+++")) {
+      added.add(line);
+      line += 1;
+      continue;
+    }
+
+    if (raw.startsWith("-") && !raw.startsWith("---")) {
+      continue;
+    }
+
+    if (line > 0) line += 1;
+  }
+
+  return added;
+}
+
+function extractRuleId(body: string): string {
+  return body.match(/\*\*(CDOM\d+):/)?.[1] ?? "";
+}
+
+async function githubRequest<T = unknown>(context: GithubContext, route: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${context.apiUrl}${route}`, {
+    ...init,
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${context.token}`,
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...init.headers
+    }
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`GitHub API ${init.method ?? "GET"} ${route} failed: ${response.status} ${text}`);
+  }
+
+  if (response.status === 204) return undefined as T;
+  return await response.json() as T;
+}
+
+async function readOptional(resolved: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(resolved, "utf8");
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function normalizePath(value: string): string {
+  return value.replace(/\\/g, "/");
+}

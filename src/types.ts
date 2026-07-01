@@ -209,6 +209,7 @@ export type RuleSummary = {
   platforms: Platform[];
   fixable: boolean;
   guidance: string;
+  docsUrl: string;
 };
 
 export type StandardDefinition = {

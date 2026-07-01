@@ -5,6 +5,7 @@ import { detectAgents, installAgents, parseAgentId } from "./agents.js";
 import { createBaseline, writeBaseline } from "./baseline.js";
 import { resolveScanOptions } from "./config.js";
 import { formatRules, formatSarif, formatScanJson, formatScanResult, formatStandards } from "./format.js";
+import { installGithubActions, runGithubPr } from "./github.js";
 import { findRule, rules, summarizeRule } from "./rules/index.js";
 import { scanPath, scanUrl, shouldFail } from "./scanner.js";
 import { standards } from "./standards.js";
@@ -20,6 +21,8 @@ try {
     await installCommand(args.slice(1));
   } else if (command === "agents") {
     await agentsCommand(args.slice(1));
+  } else if (command === "github-pr") {
+    await githubPrCommand(args.slice(1));
   } else if (command === "init") {
     await initConfig(args.slice(1));
   } else if (command === "explain") {
@@ -154,14 +157,24 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
 }
 
 async function installCommand(values: string[]): Promise<void> {
-  const parsed = parseAgentArgs(values);
-  if (!parsed.agents) {
-    console.log("Run `cleardom install --agents` to install ClearDOM guidance for coding agents.");
-    return;
+  const parsed = parseInstallArgs(values);
+  const lines = ["Installed ClearDOM developer workflow", ""];
+
+  if (parsed.githubActions) {
+    const workflow = await installGithubActions(process.cwd());
+    lines.push(`  ${workflow.status.padEnd(9)} ${workflow.filePath} (GitHub Actions PR review)`);
   }
 
-  const results = await installAgents(process.cwd(), parsed.agentIds, "install");
-  console.log(formatAgentInstallResults("Installed ClearDOM agent guidance", results));
+  if (parsed.agents) {
+    const results = await installAgents(process.cwd(), parsed.agentIds, "install");
+    lines.push(...results.map((result) => `  ${result.status.padEnd(9)} ${result.filePath} (${result.label})`));
+  }
+
+  if (!parsed.githubActions && !parsed.agents) {
+    lines.push("  nothing   No install targets selected");
+  }
+
+  console.log(lines.join("\n"));
 }
 
 async function agentsCommand(values: string[]): Promise<void> {
@@ -218,6 +231,48 @@ function parseAgentArgs(values: string[]): { agents: boolean; agentIds: Array<Re
   return { agents, agentIds };
 }
 
+function parseInstallArgs(values: string[]): { agents: boolean; githubActions: boolean; agentIds: Array<ReturnType<typeof parseAgentId>> } {
+  const agentIds: Array<ReturnType<typeof parseAgentId>> = [];
+  let agents = values.length === 0;
+  let githubActions = values.length === 0;
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+
+    if (value === "--yes" || value === "-y") {
+      agents = true;
+      githubActions = true;
+      continue;
+    }
+
+    if (value === "--agents") {
+      agents = true;
+      continue;
+    }
+
+    if (value === "--github-actions") {
+      githubActions = true;
+      continue;
+    }
+
+    if (value === "--no-github-actions") {
+      githubActions = false;
+      continue;
+    }
+
+    if (value === "--agent") {
+      agentIds.push(parseAgentId(requireValue(values, index, "--agent")));
+      agents = true;
+      index += 1;
+      continue;
+    }
+
+    throw new Error("Usage: cleardom install [--yes] [--agents] [--github-actions] [--no-github-actions] [--agent codex|claude|cursor]");
+  }
+
+  return { agents, githubActions, agentIds };
+}
+
 function formatAgentInstallResults(title: string, results: Awaited<ReturnType<typeof installAgents>>): string {
   return [
     title,
@@ -247,6 +302,51 @@ async function runScan(command: "scan" | "ci", values: string[]): Promise<void> 
   }
   console.log(formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose));
   process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
+}
+
+async function githubPrCommand(values: string[]): Promise<void> {
+  let dryRun = false;
+  let maxComments: number | undefined;
+  const scanArgs: string[] = [];
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    if (value === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    if (value === "--max-comments") {
+      maxComments = Number(requireValue(values, index, "--max-comments"));
+      if (!Number.isInteger(maxComments) || maxComments < 0) {
+        throw new Error("--max-comments must be a non-negative integer");
+      }
+      index += 1;
+      continue;
+    }
+    scanArgs.push(value);
+  }
+
+  const parsed = parseScanArgs(scanArgs);
+  const result = await runGithubPr({
+    target: parsed.target,
+    options: await ciOptions(parsed.target, parsed.options),
+    format: parsed.format,
+    writeBaseline: parsed.writeBaseline,
+    dryRun,
+    maxComments
+  });
+
+  if (parsed.format === "json") {
+    console.log(formatScanJson(result.result));
+    return;
+  }
+
+  if (parsed.format === "sarif") {
+    console.log(formatSarif(result.result));
+    return;
+  }
+
+  console.log(result.summary);
 }
 
 async function ciOptions(target: string, options: ScanOptions): Promise<ScanOptions> {
@@ -315,10 +415,11 @@ function help(): void {
   console.log(`ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
 
 Usage:
-  cleardom install --agents [--agent codex|claude|cursor] [--yes]
+  cleardom install [--yes] [--agents] [--github-actions] [--agent codex|claude|cursor]
   cleardom init [--dry-run]
   cleardom scan [path|url] [--format text|json|sarif] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
   cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json]
+  cleardom github-pr [path] [--dry-run] [--max-comments 20]
   cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
   cleardom explain CDOM001
   cleardom rules

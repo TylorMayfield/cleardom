@@ -23,7 +23,7 @@ The benchmark starts this fixture site, runs ClearDOM, Axe, and pa11y, then writ
 - `examples/wcag-benchmark/reports/benchmark-report.html`
 - `examples/wcag-benchmark/reports/benchmark-report.json`
 
-The report includes finding counts, normalized finding details, elapsed time, peak RSS, expected detection buckets, observed WCAG criterion coverage, and criteria only one tool surfaced. False-positive counts include violations only, not informational notices or manual review candidates. Set `CHROME_PATH=/path/to/chrome` if Chrome is not installed in a standard location.
+The report includes finding counts, normalized finding details, elapsed time, peak RSS, expected detection buckets, credited WCAG criterion coverage, and criteria only one tool surfaced. Coverage credit requires both a reported finding and a matching expected detector in `manifest.json`, so manual-only scenarios are not credited to ClearDOM or other automated tools. False-positive counts include violations only, not informational notices or manual review candidates. Set `CHROME_PATH=/path/to/chrome` if Chrome is not installed in a standard location.
 
 Use `manifest.json` as the benchmark index. It lists every WCAG 2.2 A/AA criterion covered here, the DOM target, the intentional failure, and whether the issue is expected to be detectable by ClearDOM's runtime checks, other DOM automation, or manual review.
 

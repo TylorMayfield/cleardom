@@ -74,6 +74,11 @@ export function summarizeRule(rule: RuleDefinition, severity: Severity = rule.se
     standards: rule.standards,
     platforms: rule.platforms,
     fixable: rule.fixable,
-    guidance: rule.guidance
+    guidance: rule.guidance,
+    docsUrl: ruleDocsUrl(rule.id)
   };
+}
+
+export function ruleDocsUrl(ruleId: string): string {
+  return `https://github.com/cleardom/cleardom#${ruleId.toLowerCase()}`;
 }

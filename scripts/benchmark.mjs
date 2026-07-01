@@ -289,7 +289,9 @@ function normalizeLiveUrl(value) {
 function renderHtml(report, manifest) {
   const totals = report.results.map((result) => ({
     ...result,
-    criteria: criteriaCovered(result.findings)
+    reportedCriteria: criteriaCovered(result.findings),
+    // Coverage credit is stricter than raw WCAG tags: the manifest must expect this tool.
+    criteria: creditedCriteriaCovered(result, manifest)
   }));
   const falsePositiveTotals = (report.falsePositiveResults ?? []).map((result) => ({
     ...result,
@@ -302,7 +304,6 @@ function renderHtml(report, manifest) {
   const wcagCoverageCharts = buildWcagCoverageCharts(totals, manifest);
   const uniqueRows = buildUniqueCoverage(totals);
   const toolSummaries = buildToolSummaries(totals, manifest);
-  const manualOnly = (manifest.criteria ?? []).filter((criterion) => criterion.detection?.length === 1 && criterion.detection.includes("manual")).length;
 
   return `<!doctype html>
 <html lang="en">
@@ -373,15 +374,15 @@ function renderHtml(report, manifest) {
       <section class="takeaways">
         <article class="callout">
           <h2>At A Glance</h2>
-          <p>The benchmark covers <strong>${manifest.criteria.length}</strong> WCAG A/AA criteria. The headline comparison is total criteria reported, not whether a tool matched our expected-detection labels.</p>
+          <p>The benchmark covers <strong>${manifest.criteria.length}</strong> WCAG A/AA criteria. The headline comparison is credited criteria: findings mapped to criteria the manifest expects that tool to detect.</p>
         </article>
         <article class="callout">
           <h2>How To Read It</h2>
-          <p>WCAG coverage shows how much of the total benchmark surface each tool reported. Finding count is only volume.</p>
+          <p>WCAG coverage shows how much of the total benchmark surface each tool gets credit for. Finding count is only volume.</p>
         </article>
         <article class="callout">
           <h2>Important Caveat</h2>
-          <p>More findings does not mean better coverage. This benchmark counts reported violations and excludes informational notices from false-positive totals.</p>
+          <p>More findings does not mean better coverage. Manual-only scenarios are not credited to automated tools unless the manifest labels that tool as an expected detector.</p>
         </article>
       </section>
 
@@ -400,7 +401,7 @@ function renderHtml(report, manifest) {
               <div class="mini"><strong>${formatMs(summary.durationMs)}</strong><span class="muted small">runtime</span></div>
             </div>
             <div class="bar"><span style="width:${summary.coveragePercent}%"></span></div>
-            <p class="muted small">${summary.observedManifestCriteria} of ${summary.manifestCriteriaTotal} WCAG benchmark criteria reported. Peak memory: ${formatMb(summary.peakRssMb)}.</p>
+            <p class="muted small">${summary.observedManifestCriteria} of ${summary.manifestCriteriaTotal} WCAG benchmark criteria credited. Peak memory: ${formatMb(summary.peakRssMb)}.</p>
           </article>
         `).join("")}
       </section>
@@ -447,7 +448,7 @@ function renderHtml(report, manifest) {
 
       <section class="panel">
         <h2>WCAG Standard Coverage</h2>
-        <p class="muted">Each bar uses the same denominator: total benchmark criteria in that WCAG principle. The filled portion shows how many criteria the tool reported.</p>
+        <p class="muted">Each bar uses the same denominator: total benchmark criteria in that WCAG principle. The filled portion shows how many criteria the tool reported and was expected to detect.</p>
         <div class="wcag-charts">
           ${wcagCoverageCharts.map((group) => `
             <article class="wcag-chart">
@@ -500,7 +501,7 @@ function renderHtml(report, manifest) {
 
       <section class="panel">
         <h2>Observed WCAG Coverage</h2>
-        <p class="muted">Rows show manifest expectations and whether each tool produced at least one finding mapped to that criterion.</p>
+        <p class="muted">Rows show manifest expectations and whether each tool produced at least one credited finding mapped to that criterion. Manual-only criteria do not count as automated coverage.</p>
         <div class="table-wrap">
           <table>
             <thead>
@@ -672,6 +673,17 @@ function buildUniqueCoverage(results) {
 
 function criteriaCovered(findings) {
   return [...new Set(findings.flatMap((finding) => finding.wcag ?? []))].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+}
+
+function creditedCriteriaCovered(result, manifest) {
+  const reportedCriteria = criteriaCovered(result.findings);
+  return reportedCriteria.filter((criterionId) => isCreditedCriterion(result.id, criterionId, manifest));
+}
+
+function isCreditedCriterion(toolId, criterionId, manifest) {
+  const criterion = (manifest.criteria ?? []).find((candidate) => candidate.id === criterionId);
+  if (!criterion) return false;
+  return (criterion.detection ?? []).includes(toolId);
 }
 
 function formatMs(ms) {
