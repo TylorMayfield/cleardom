@@ -3,7 +3,6 @@ import { anchorHrefRule } from "./web-anchor-href.js";
 import { ariaHiddenFocusRule } from "./web-aria-hidden-focus.js";
 import { ambiguousLabelRule } from "./ambiguous-label.js";
 import { autocompleteRule } from "./web-autocomplete.js";
-import { benchmarkHeuristicRules } from "./web-benchmark-heuristics.js";
 import { contextChangeRule } from "./web-context-change.js";
 import { documentMetadataRule } from "./web-document-metadata.js";
 import { duplicateIdRule } from "./web-duplicate-id.js";
@@ -53,7 +52,6 @@ export const rules: RuleDefinition[] = [
   sensoryInstructionsRule,
   languageOfPartsRule,
   contextChangeRule,
-  ...benchmarkHeuristicRules,
   contrastRuntimeRule,
   focusVisibleRuntimeRule,
   targetSizeRuntimeRule,

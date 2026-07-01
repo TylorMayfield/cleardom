@@ -218,9 +218,13 @@ test("flags instructions that may rely on sensory characteristics", () => {
 test("flags foreign-language passages without lang", () => {
   const missing = scanSource("<p>Bonjour, votre reçu est prêt.</p>", "Language.tsx");
   const present = scanSource('<p><span lang="fr">Bonjour, votre reçu est prêt.</span></p>', "Language.tsx");
+  const nonLatin = scanSource("<p>مرحبا بك</p><p>設定を保存しました</p>", "Language.tsx");
+  const loanword = scanSource("<p>café</p>", "Language.tsx");
 
   assert.equal(missing.some((finding) => finding.ruleId === "CDOM029"), true);
   assert.equal(present.some((finding) => finding.ruleId === "CDOM029"), false);
+  assert.equal(nonLatin.filter((finding) => finding.ruleId === "CDOM029").length, 2);
+  assert.equal(loanword.some((finding) => finding.ruleId === "CDOM029"), false);
 });
 
 test("flags focus and input handlers that may change context", () => {

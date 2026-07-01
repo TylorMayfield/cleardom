@@ -9,7 +9,6 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const siteDir = resolve(root, "examples/wcag-benchmark");
-const fixturePath = resolve(siteDir, "Fixture.tsx");
 const falsePositiveFixturePath = resolve(siteDir, "FalsePositiveFixture.tsx");
 const manifestPath = resolve(siteDir, "manifest.json");
 const reportDir = resolve(siteDir, "reports");
@@ -34,7 +33,7 @@ const liveMode = !useLocal;
 try {
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
   const tools = [
-    { id: "cleardom", label: liveMode ? "ClearDOM Runtime" : "ClearDOM", input: liveMode ? url : fixturePath },
+    { id: "cleardom", label: "ClearDOM Runtime", input: url },
     { id: "axe", label: "Axe", input: url },
     { id: "pa11y", label: "pa11y", input: url }
   ];
@@ -44,8 +43,7 @@ try {
     process.stdout.write(`Running ${tool.label}...\n`);
     results.push(await runMeasured(tool, {
       url,
-      fixturePath: liveMode ? undefined : fixturePath,
-      runtimeUrl: liveMode ? url : undefined,
+      sourceDir: emptySourceDir,
       chromePath
     }));
   }
@@ -55,9 +53,9 @@ try {
     process.stdout.write(`Running ${tool.label} false-positive benchmark...\n`);
     falsePositiveResults.push(await runMeasured(tool, {
       url: falsePositiveUrl,
-      fixturePath: liveMode ? undefined : falsePositiveFixturePath,
+      sourceDir: emptySourceDir,
       chromePath,
-      includeReviewCandidates: true
+      includeReviewCandidates: false
     }));
   }
 
@@ -66,7 +64,7 @@ try {
     url,
     mode: liveMode ? "live" : "fixture",
     falsePositiveUrl: liveMode ? localFalsePositiveUrl : falsePositiveUrl,
-    fixturePath: liveMode ? null : fixturePath,
+    fixturePath: null,
     falsePositiveFixturePath,
     chromePath,
     manifest: {
@@ -369,7 +367,7 @@ function renderHtml(report, manifest) {
   <body>
     <main>
       <h1>Accessibility Benchmark Report</h1>
-      <p class="lede muted">${report.mode === "live" ? `Live-site ${escapeHtml(manifest.standard)} scanner comparison. ClearDOM runs runtime checks only because source files are not available from a URL.` : `A deliberately broken ${escapeHtml(manifest.standard)} fixture for comparing static source checks, browser automation, and issues that still need human review.`}</p>
+      <p class="lede muted">${report.mode === "live" ? `Live-site ${escapeHtml(manifest.standard)} scanner comparison.` : `A deliberately broken ${escapeHtml(manifest.standard)} fixture served over HTTP for a browser-runtime comparison.`}</p>
       <p class="muted small">Generated ${escapeHtml(new Date(report.generatedAt).toLocaleString())} against <code>${escapeHtml(report.url)}</code>. ${manifest.criteria.length} WCAG benchmark criteria.</p>
 
       <section class="takeaways">
@@ -383,7 +381,7 @@ function renderHtml(report, manifest) {
         </article>
         <article class="callout">
           <h2>Important Caveat</h2>
-          <p>More findings does not mean better coverage. Some tools report many notices for manual checks, while ClearDOM reports static source patterns.</p>
+          <p>More findings does not mean better coverage. This benchmark counts reported violations and excludes informational notices from false-positive totals.</p>
         </article>
       </section>
 
@@ -411,7 +409,7 @@ function renderHtml(report, manifest) {
         <h2>Detection Buckets</h2>
         <p class="muted">The manifest labels each scenario by the kind of review expected to catch it.</p>
         <div class="chips">
-          <span class="chip static">Static source: ${detectionSummary.static}</span>
+          <span class="chip static">ClearDOM automated: ${detectionSummary.cleardom}</span>
           <span class="chip runtime">Browser runtime: ${detectionSummary.runtime}</span>
           <span class="chip manual">Manual review: ${detectionSummary.manual}</span>
         </div>
@@ -471,7 +469,7 @@ function renderHtml(report, manifest) {
 
       <section class="panel">
         <h2>False Positive Benchmark</h2>
-        <p class="muted">Each tool also runs against a clean accessible fixture. Violations, warnings, notices, or review candidates on this fixture are counted as false positive candidates.</p>
+        <p class="muted">Each tool also runs against a clean accessible fixture. Only reported violations are counted as false positive candidates; informational notices and review-only candidates are excluded.</p>
         <div class="table-wrap">
           <table>
             <thead>
@@ -613,7 +611,7 @@ function buildWcagCoverageCharts(results, manifest) {
 function summarizeDetection(manifest) {
   const criteria = manifest.criteria ?? [];
   return {
-    static: criteria.filter((criterion) => criterion.detection?.includes("cleardom")).length,
+    cleardom: criteria.filter((criterion) => criterion.detection?.includes("cleardom")).length,
     runtime: criteria.filter((criterion) => criterion.detection?.includes("axe") || criterion.detection?.includes("pa11y")).length,
     manual: criteria.filter((criterion) => criterion.detection?.includes("manual")).length
   };

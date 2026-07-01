@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { scanSource } from "./scanner.js";
 
-test("WCAG benchmark fixture exercises every static ClearDOM rule", async () => {
+test("WCAG benchmark fixture exercises every product static ClearDOM rule", async () => {
   const source = await fs.readFile(path.resolve("examples/wcag-benchmark/Fixture.tsx"), "utf8");
   const findings = scanSource(source, "examples/wcag-benchmark/Fixture.tsx");
   const ruleIds = new Set(findings.map((finding) => finding.ruleId));
@@ -34,35 +34,7 @@ test("WCAG benchmark fixture exercises every static ClearDOM rule", async () => 
     "CDOM027",
     "CDOM028",
     "CDOM029",
-    "CDOM030",
-    "CDOM031",
-    "CDOM032",
-    "CDOM033",
-    "CDOM034",
-    "CDOM035",
-    "CDOM036",
-    "CDOM037",
-    "CDOM038",
-    "CDOM039",
-    "CDOM040",
-    "CDOM041",
-    "CDOM042",
-    "CDOM043",
-    "CDOM044",
-    "CDOM045",
-    "CDOM046",
-    "CDOM047",
-    "CDOM048",
-    "CDOM049",
-    "CDOM050",
-    "CDOM051",
-    "CDOM052",
-    "CDOM053",
-    "CDOM054",
-    "CDOM055",
-    "CDOM056",
-    "CDOM057",
-    "CDOM058"
+    "CDOM030"
   ]);
 });
 

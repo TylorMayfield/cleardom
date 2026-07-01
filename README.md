@@ -33,7 +33,7 @@ The repo includes an intentionally broken benchmark site for comparing ClearDOM,
 pnpm benchmark
 ```
 
-The benchmark starts the fixture site, runs all three tools, measures runtime and peak RSS, and writes `examples/wcag-benchmark/reports/benchmark-report.html`. The report compares total WCAG criterion coverage, finding volume, and false-positive candidates. Set `CHROME_PATH=/path/to/chrome` if Chrome is not installed in a standard location.
+The benchmark starts the fixture site, runs all three tools through Chromium, measures runtime and peak RSS, and writes `examples/wcag-benchmark/reports/benchmark-report.html`. The report compares observed WCAG criterion coverage, finding volume, and violation-only false-positive candidates. Set `CHROME_PATH=/path/to/chrome` if Chrome is not installed in a standard location.
 
 To compare the tools against a live site, pass a URL:
 
@@ -41,7 +41,7 @@ To compare the tools against a live site, pass a URL:
 pnpm benchmark -- --url https://example.com/
 ```
 
-Live-site mode runs Axe and pa11y against the URL and runs ClearDOM's runtime checks against the same page. ClearDOM source-only rules are not available in live mode because source files are not available from a URL.
+Live-site mode runs Axe and pa11y against the URL and runs ClearDOM's runtime checks against the same page. ClearDOM source-only rules are not included in benchmark timing because source files are not available from a URL and would make the runtime comparison uneven.
 
 See `examples/wcag-benchmark/manifest.json` for the WCAG 2.2 A/AA coverage map and expected detection type for each scenario.
 
@@ -213,6 +213,10 @@ cleardom scan src --standard wcag30-draft
 - `CDOM024`: interactive target is smaller than WCAG minimum
 - `CDOM025`: page causes horizontal overflow at narrow viewport
 - `CDOM026`: skip link is missing or not visible on focus
+- `CDOM027`: instructions may rely on color alone
+- `CDOM028`: instructions may rely on sensory characteristics
+- `CDOM029`: foreign-language text is not marked with lang
+- `CDOM030`: focus or input handler may change context unexpectedly
 
 The score is automated guidance for developer workflow quality. It is not a legal compliance claim and does not replace manual accessibility testing.
 

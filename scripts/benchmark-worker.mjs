@@ -1,7 +1,7 @@
 import { AxePuppeteer } from "@axe-core/puppeteer";
 import pa11y from "pa11y";
 import puppeteer from "puppeteer-core";
-import { scanPath, scanUrl } from "../dist/scanner.js";
+import { scanPath } from "../dist/scanner.js";
 
 const tool = process.argv[2];
 const options = JSON.parse(process.argv[3] ?? "{}");
@@ -24,18 +24,11 @@ async function runTool(name, options) {
   throw new Error(`Unknown benchmark tool: ${name}`);
 }
 
-async function runClearDOM({ url, fixturePath, chromePath }) {
-  let result;
-  
-  if (url && !fixturePath) {
-    // Scan live URL using scanUrl
-    result = await scanUrl(url, { standard: "wcag22-aa", format: "json" }, chromePath);
-  } else if (fixturePath) {
-    // Scan local fixture using scanPath
-    result = await scanPath(fixturePath, { standard: "wcag22-aa", format: "json" });
-  } else {
-    throw new Error("Either url or fixturePath must be provided");
-  }
+async function runClearDOM({ url, sourceDir }) {
+  if (!url) throw new Error("ClearDOM benchmark runs require a URL");
+  if (!sourceDir) throw new Error("ClearDOM runtime benchmark requires an empty source directory");
+
+  const result = await scanPath(sourceDir, { standard: "wcag22-aa", format: "json", runtimeUrl: url });
 
   return {
     ok: true,
@@ -107,8 +100,8 @@ async function runAxe({ url, chromePath, includeReviewCandidates = false }) {
 async function runPa11y({ url, chromePath }) {
   const result = await pa11y(url, {
     standard: "WCAG2AA",
-    includeWarnings: true,
-    includeNotices: true,
+    includeWarnings: false,
+    includeNotices: false,
     timeout: 30000,
     wait: 500,
     chromeLaunchConfig: {

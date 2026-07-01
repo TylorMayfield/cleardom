@@ -17,7 +17,7 @@ export const languageOfPartsRule: RuleDefinition = {
   platforms: ["web"],
   fixable: false,
   summary: "Assistive technologies need language changes marked so pronunciation and braille output can switch correctly.",
-  guidance: "Wrap foreign-language passages in an element with an appropriate lang attribute, such as lang=\"fr\" or lang=\"es\".",
+  guidance: "Wrap language changes in an element with an appropriate lang attribute, such as lang=\"fr\", lang=\"ar\", or lang=\"ja\".",
   examples: [
     { label: "Marked phrase", code: '<p>Receipt status: <span lang="fr">Votre reçu est prêt.</span></p>' }
   ],
@@ -36,8 +36,45 @@ function textOwnedByElement(element: JsxElement, context: RuleContext): string {
 
 function looksLikeForeignLanguage(text: string): boolean {
   const value = normalize(text).toLowerCase();
-  return /[àâçéèêëîïôûùüÿñ¿¡]/.test(value)
-    || /\b(bonjour|merci|votre|reçu|prêt|hola|adiós|gracias|señor|señora)\b/.test(value);
+  if (!value || isCommonEnglishLoanword(value)) return false;
+
+  return hasNonLatinScriptRun(value) || hasMarkedLatinLanguagePhrase(value);
+}
+
+function hasNonLatinScriptRun(text: string): boolean {
+  const matches = text.match(/[\p{Script=Arabic}\p{Script=Cyrillic}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Devanagari}\p{Script=Hebrew}]/gu);
+  return (matches?.length ?? 0) >= 2;
+}
+
+function hasMarkedLatinLanguagePhrase(text: string): boolean {
+  return /\b(bonjour|merci|votre|reçu|prêt|hola|adiós|gracias|señor|señora|guten tag|danke|bitte|ciao|grazie|prego)\b/u.test(text);
+}
+
+function isCommonEnglishLoanword(text: string): boolean {
+  const words = text.match(/\p{Letter}[\p{Letter}'-]*/gu) ?? [];
+  if (words.length !== 1) return false;
+  return new Set([
+    "cafe",
+    "café",
+    "resume",
+    "résumé",
+    "naive",
+    "naïve",
+    "cliche",
+    "cliché",
+    "pinata",
+    "piñata",
+    "facade",
+    "façade",
+    "expose",
+    "exposé",
+    "fiance",
+    "fiancé",
+    "fiancee",
+    "fiancée",
+    "jalapeno",
+    "jalapeño"
+  ]).has(words[0]);
 }
 
 function hasLanguageInAncestry(element: JsxElement, context: RuleContext): boolean {
