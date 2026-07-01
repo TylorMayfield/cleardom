@@ -1,0 +1,23 @@
+name: ClearDOM
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  cleardom:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npx cleardom@latest ci . --format sarif > cleardom.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: cleardom.sarif

@@ -17,6 +17,18 @@ test("scan prints text output", async () => {
   assert.match(result.stdout, /Score:/);
 });
 
+test("scan text output shows installed-command guidance and finding fixes", async () => {
+  const fixture = await createFixture("<button />");
+  const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
+
+  assert.match(result.stdout, /Fix: Add visible text, aria-label, aria-labelledby/);
+  assert.match(result.stdout, /Learn: cleardom explain CDOM001/);
+  assert.match(result.stdout, /cleardom explain CDOM001/);
+  assert.match(result.stdout, /cleardom rules/);
+  assert.match(result.stdout, /cleardom scan \. --write-baseline cleardom-baseline\.json/);
+  assert.doesNotMatch(result.stdout, /pnpm start --/);
+});
+
 test("scan --json includes score, findings, and rules", async () => {
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--json"]);
@@ -65,6 +77,51 @@ test("init --dry-run prints default config", async () => {
   assert.equal(json.failOn, "critical");
 });
 
+test("install --agents writes idempotent project-level agent guidance", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "AGENTS.md"), "# Project Notes\n\nKeep this.\n", "utf8");
+
+  const first = await execFileAsync(process.execPath, [cliPath, "install", "--agents"], { cwd: directory });
+  assert.match(first.stdout, /Installed ClearDOM agent guidance/);
+  assert.match(first.stdout, /AGENTS\.md/);
+  assert.match(first.stdout, /CLAUDE\.md/);
+  assert.match(first.stdout, /\.cursor\/rules\/cleardom\.mdc/);
+
+  const agents = await fs.readFile(path.join(directory, "AGENTS.md"), "utf8");
+  const claude = await fs.readFile(path.join(directory, "CLAUDE.md"), "utf8");
+  const cursor = await fs.readFile(path.join(directory, ".cursor", "rules", "cleardom.mdc"), "utf8");
+
+  assert.match(agents, /# Project Notes/);
+  assert.match(agents, /<!-- cleardom:start -->/);
+  assert.match(agents, /npx cleardom@latest scan \. --fail-on none/);
+  assert.match(claude, /ClearDOM Agent Skill/);
+  assert.match(cursor, /ClearDOM Agent Skill/);
+
+  const second = await execFileAsync(process.execPath, [cliPath, "install", "--agents"], { cwd: directory });
+  const updated = await fs.readFile(path.join(directory, "AGENTS.md"), "utf8");
+
+  assert.match(second.stdout, /unchanged|updated/);
+  assert.equal((updated.match(/<!-- cleardom:start -->/g) ?? []).length, 1);
+});
+
+test("agents commands detect, target, and uninstall ClearDOM guidance", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+
+  const missing = await execFileAsync(process.execPath, [cliPath, "agents", "detect"], { cwd: directory });
+  assert.match(missing.stdout, /missing\s+AGENTS\.md/);
+
+  await execFileAsync(process.execPath, [cliPath, "agents", "install", "--agent", "cursor"], { cwd: directory });
+  await assert.rejects(fs.readFile(path.join(directory, "AGENTS.md"), "utf8"), /ENOENT/);
+
+  const detected = await execFileAsync(process.execPath, [cliPath, "agents", "detect", "--agent", "cursor"], { cwd: directory });
+  assert.match(detected.stdout, /installed \.cursor\/rules\/cleardom\.mdc/);
+
+  const removed = await execFileAsync(process.execPath, [cliPath, "agents", "uninstall", "--agent", "cursor"], { cwd: directory });
+  const cursor = await fs.readFile(path.join(directory, ".cursor", "rules", "cleardom.mdc"), "utf8");
+  assert.match(removed.stdout, /removed\s+\.cursor\/rules\/cleardom\.mdc/);
+  assert.doesNotMatch(cursor, /cleardom:start/);
+});
+
 test("scan --format sarif emits SARIF", async () => {
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--format", "sarif"]);
@@ -72,6 +129,15 @@ test("scan --format sarif emits SARIF", async () => {
 
   assert.equal(sarif.version, "2.1.0");
   assert.equal(sarif.runs[0].results.length > 0, true);
+});
+
+test("scan routes URL targets to live URL scanning", async () => {
+  await assert.rejects(
+    execFileAsync(process.execPath, [cliPath, "scan", "https://example.com", "--json"], {
+      env: { ...process.env, CHROME_PATH: "", PUPPETEER_EXECUTABLE_PATH: "" }
+    }),
+    /Scanning live URLs requires CHROME_PATH/
+  );
 });
 
 test("standards command lists every supported WCAG profile", async () => {
@@ -139,6 +205,28 @@ test("baseline fails on new regressions", async () => {
     execFileAsync(process.execPath, [cliPath, "scan", directory, "--baseline", baselinePath, "--fail-on", "regression"]),
     (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === 1
   );
+});
+
+test("ci uses the default baseline and fails only on new regressions", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "Fixture.tsx"), "<button />", "utf8");
+  await execFileAsync(process.execPath, [cliPath, "scan", directory, "--write-baseline", path.join(directory, "cleardom-baseline.json"), "--format", "json"]);
+
+  const passing = await execFileAsync(process.execPath, [cliPath, "ci", directory, "--format", "json"]);
+  const json = JSON.parse(passing.stdout) as { summary: { baselineFindings: number; regressions: number } };
+  assert.equal(json.summary.baselineFindings > 0, true);
+  assert.equal(json.summary.regressions, 0);
+
+  await fs.writeFile(path.join(directory, "Fixture.tsx"), "<button /><a>Receipt</a>", "utf8");
+  await assert.rejects(
+    execFileAsync(process.execPath, [cliPath, "ci", directory]),
+    (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === 1
+  );
+});
+
+test("ci lets explicit fail-on override the default regression gate", async () => {
+  const fixture = await createFixture("<h2>Billing</h2><h4>Details</h4>");
+  await execFileAsync(process.execPath, [cliPath, "ci", fixture, "--fail-on", "critical"]);
 });
 
 test("config can exclude files and disable rules", async () => {

@@ -4,20 +4,25 @@ ClearDOM finds accessibility, readability, and assistive-tech regressions before
 
 It is a CLI-first scanner for React, Next.js, React Native, and web apps. The v0.2 scanner is dependency-light: TypeScript for development, Node built-ins at runtime, and a small in-repo JSX reader for static checks.
 
-## Local usage
+## Quickstart
+
+```sh
+npx cleardom@latest scan .
+npx cleardom@latest install --agents
+npx cleardom@latest init
+npx cleardom@latest scan . --write-baseline cleardom-baseline.json
+npx cleardom@latest ci .
+```
+
+Use `scan` for local feedback, `install --agents` to teach coding agents the ClearDOM workflow, and `ci` for pull-request regression checks. Existing projects should commit a baseline first so legacy issues remain visible without blocking merges; new issues are reported as regressions.
+
+## Local development
 
 ```sh
 pnpm install
 pnpm build
-pnpm start -- scan src
-pnpm start -- scan src --json
-pnpm start -- scan src --standard wcag22-aa
-pnpm start -- scan src --runtime-url http://localhost:3000
-pnpm start -- scan src --component-preset mui
 pnpm start -- scan examples/react-app
-pnpm start -- explain CDOM001
-pnpm start -- rules
-pnpm start -- standards
+pnpm test
 ```
 
 ## WCAG benchmark
@@ -43,8 +48,11 @@ See `examples/wcag-benchmark/manifest.json` for the WCAG 2.2 A/AA coverage map a
 ## Commands
 
 ```sh
+cleardom install --agents [--agent codex|claude|cursor] [--yes]
 cleardom init [--dry-run]
-cleardom scan [path] [--format text|json|sarif] [--standard wcag22-aa] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom scan [path|url] [--format text|json|sarif] [--standard wcag22-aa] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
 cleardom explain CDOM001
 cleardom rules
 cleardom standards
@@ -52,6 +60,25 @@ cleardom fix
 ```
 
 `fix` is intentionally still a stub. ClearDOM should only auto-edit when a rule has a truly safe static fix.
+
+## Agent install
+
+ClearDOM can install project-level guidance for coding agents so accessibility checks happen while code is being written, not only after CI fails:
+
+```sh
+npx cleardom@latest install --agents
+```
+
+By default this writes or updates ClearDOM-managed blocks in `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/cleardom.mdc`. Existing file content is preserved, and rerunning the command refreshes the managed block without duplicating it.
+
+Install one target with `--agent`:
+
+```sh
+cleardom agents install --agent cursor
+cleardom agents detect
+cleardom agents upgrade
+cleardom agents uninstall --agent cursor
+```
 
 ## Config
 
@@ -95,10 +122,32 @@ Rule options can be `"off"`, `"critical"`, `"warning"`, `"info"`, or an object l
 
 ## CI example
 
-```sh
-pnpm install --frozen-lockfile
-pnpm build
-pnpm start -- scan src --fail-on critical
+`cleardom ci` defaults to `--baseline cleardom-baseline.json --fail-on regression` when the baseline exists. Generate and commit the baseline once, then make the CI check required.
+
+```yaml
+name: ClearDOM
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  cleardom:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npx cleardom@latest ci . --format sarif > cleardom.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: cleardom.sarif
 ```
 
 ## Baseline adoption
@@ -107,7 +156,7 @@ Legacy projects can adopt ClearDOM without failing existing debt:
 
 ```sh
 cleardom scan src --write-baseline cleardom-baseline.json
-cleardom scan src --baseline cleardom-baseline.json --fail-on regression
+cleardom ci src
 ```
 
 The baseline stores stable finding fingerprints. Existing findings are still visible in JSON output as `baselineFindings`; new findings are reported as `regressions`.

@@ -3,20 +3,49 @@
   "version": "0.1.0",
   "description": "Developer-first accessibility and readability scanner for React and React Native.",
   "type": "module",
+  "license": "MIT",
+  "homepage": "https://github.com/cleardom/cleardom#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cleardom/cleardom.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cleardom/cleardom/issues"
+  },
+  "keywords": [
+    "accessibility",
+    "a11y",
+    "react",
+    "react-native",
+    "wcag",
+    "cli",
+    "sarif"
+  ],
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "cleardom": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "test": "pnpm build && node --test dist/**/*.test.js",
     "start": "pnpm build && node dist/cli.js",
-    "benchmark": "pnpm build && node scripts/benchmark.mjs"
+    "benchmark": "pnpm build && node scripts/benchmark.mjs",
+    "prepack": "pnpm build"
+  },
+  "dependencies": {
+    "puppeteer-core": "^25.2.1"
   },
   "devDependencies": {
     "@axe-core/puppeteer": "^4.12.1",
     "@types/node": "^26.0.1",
     "pa11y": "^9.1.1",
-    "puppeteer-core": "^25.2.1",
     "typescript": "^5.5.4"
   },
   "pnpm": {

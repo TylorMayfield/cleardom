@@ -44,8 +44,13 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
 
     lines.push(severityLabels[severity]);
     for (const finding of findings) {
+      const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
       lines.push(`  ${finding.ruleId} ${finding.file}:${finding.line}:${finding.column} ${finding.title}`);
       lines.push(`     ${finding.message}`);
+      if (rule?.guidance) {
+        lines.push(`     Fix: ${rule.guidance}`);
+      }
+      lines.push(`     Learn: cleardom explain ${finding.ruleId}`);
       if (verbose) {
         lines.push(`     ${finding.excerpt}`);
         lines.push(`     Standards: ${formatStandardRefs(finding.standards)}`);
@@ -59,8 +64,14 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
   }
 
   lines.push("Run:");
-  lines.push("  pnpm start -- explain CDOM001");
-  lines.push("  pnpm start -- rules");
+  const topFinding = topPriorityFinding(result.activeFindings);
+  if (topFinding) {
+    lines.push(`  cleardom explain ${topFinding.ruleId}`);
+  }
+  lines.push("  cleardom rules");
+  if (result.activeFindings.length > 0 && !result.baseline) {
+    lines.push("  cleardom scan . --write-baseline cleardom-baseline.json");
+  }
 
   return lines.join("\n");
 }
@@ -153,6 +164,15 @@ function pluralize(word: string, count: number): string {
 function formatStandardRefs(standards: RuleSummary["standards"]): string {
   const unique = new Set(standards.map((reference) => reference.level ? `${reference.version} ${reference.criterion} ${reference.level.toUpperCase()}` : `${reference.version} ${reference.criterion}`));
   return [...unique].join("; ");
+}
+
+function topPriorityFinding(findings: Finding[]): Finding | undefined {
+  const severityOrder: Severity[] = ["critical", "warning", "info"];
+  for (const severity of severityOrder) {
+    const finding = findings.find((candidate) => candidate.severity === severity);
+    if (finding) return finding;
+  }
+  return undefined;
 }
 
 function sarifLevel(severity: Severity): "error" | "warning" | "note" {

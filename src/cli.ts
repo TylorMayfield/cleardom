@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import { detectAgents, installAgents, parseAgentId } from "./agents.js";
 import { createBaseline, writeBaseline } from "./baseline.js";
 import { resolveScanOptions } from "./config.js";
 import { formatRules, formatSarif, formatScanJson, formatScanResult, formatStandards } from "./format.js";
@@ -15,6 +16,10 @@ const command = args[0] ?? "help";
 try {
   if (command === "scan" || command === "ci") {
     await runScan(command, args.slice(1));
+  } else if (command === "install") {
+    await installCommand(args.slice(1));
+  } else if (command === "agents") {
+    await agentsCommand(args.slice(1));
   } else if (command === "init") {
     await initConfig(args.slice(1));
   } else if (command === "explain") {
@@ -148,6 +153,87 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
   return { target, format, writeBaseline: writeBaselinePath, options };
 }
 
+async function installCommand(values: string[]): Promise<void> {
+  const parsed = parseAgentArgs(values);
+  if (!parsed.agents) {
+    console.log("Run `cleardom install --agents` to install ClearDOM guidance for coding agents.");
+    return;
+  }
+
+  const results = await installAgents(process.cwd(), parsed.agentIds, "install");
+  console.log(formatAgentInstallResults("Installed ClearDOM agent guidance", results));
+}
+
+async function agentsCommand(values: string[]): Promise<void> {
+  const subcommand = values[0] ?? "detect";
+  const parsed = parseAgentArgs(values.slice(1));
+
+  if (subcommand === "detect") {
+    const results = await detectAgents(process.cwd(), parsed.agentIds);
+    console.log(formatAgentDetectionResults(results));
+    return;
+  }
+
+  if (subcommand === "install" || subcommand === "upgrade") {
+    const results = await installAgents(process.cwd(), parsed.agentIds, "install");
+    console.log(formatAgentInstallResults(subcommand === "upgrade" ? "Upgraded ClearDOM agent guidance" : "Installed ClearDOM agent guidance", results));
+    return;
+  }
+
+  if (subcommand === "uninstall") {
+    const results = await installAgents(process.cwd(), parsed.agentIds, "uninstall");
+    console.log(formatAgentInstallResults("Removed ClearDOM agent guidance", results));
+    return;
+  }
+
+  throw new Error("Usage: cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]");
+}
+
+function parseAgentArgs(values: string[]): { agents: boolean; agentIds: Array<ReturnType<typeof parseAgentId>> } {
+  const agentIds: Array<ReturnType<typeof parseAgentId>> = [];
+  let agents = false;
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+
+    if (value === "--agents") {
+      agents = true;
+      continue;
+    }
+
+    if (value === "--yes" || value === "-y") {
+      continue;
+    }
+
+    if (value === "--agent") {
+      agentIds.push(parseAgentId(requireValue(values, index, "--agent")));
+      agents = true;
+      index += 1;
+      continue;
+    }
+
+    throw new Error("Usage: cleardom install --agents [--agent codex|claude|cursor] [--yes]");
+  }
+
+  return { agents, agentIds };
+}
+
+function formatAgentInstallResults(title: string, results: Awaited<ReturnType<typeof installAgents>>): string {
+  return [
+    title,
+    "",
+    ...results.map((result) => `  ${result.status.padEnd(9)} ${result.filePath} (${result.label})`)
+  ].join("\n");
+}
+
+function formatAgentDetectionResults(results: Awaited<ReturnType<typeof detectAgents>>): string {
+  return [
+    "ClearDOM agent guidance",
+    "",
+    ...results.map((result) => `  ${result.installed ? "installed" : "missing  "} ${result.filePath} (${result.label})`)
+  ].join("\n");
+}
+
 async function runScan(command: "scan" | "ci", values: string[]): Promise<void> {
   const parsed = parseScanArgs(values);
   const options = command === "ci" ? await ciOptions(parsed.target, parsed.options) : parsed.options;
@@ -177,8 +263,9 @@ async function defaultCiBaseline(target: string, options: ScanOptions): Promise<
   try {
     const stat = await fs.stat(root);
     const directory = stat.isDirectory() ? root : path.dirname(root);
-    await fs.access(path.join(directory, baseline));
-    return baseline;
+    const baselinePath = path.join(directory, baseline);
+    await fs.access(baselinePath);
+    return baselinePath;
   } catch {
     return undefined;
   }
@@ -228,9 +315,11 @@ function help(): void {
   console.log(`ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
 
 Usage:
+  cleardom install --agents [--agent codex|claude|cursor] [--yes]
   cleardom init [--dry-run]
   cleardom scan [path|url] [--format text|json|sarif] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
   cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json]
+  cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
   cleardom explain CDOM001
   cleardom rules
   cleardom standards
