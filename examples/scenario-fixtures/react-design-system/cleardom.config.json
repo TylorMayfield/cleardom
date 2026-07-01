@@ -1,0 +1,20 @@
+{
+  "include": ["src/**/*.{js,jsx,ts,tsx}"],
+  "componentPresets": ["mui"],
+  "components": {
+    "PrimaryAction": {
+      "role": "button",
+      "nameProps": ["aria-label"],
+      "labelProps": ["children"]
+    },
+    "SearchField": {
+      "role": "textbox",
+      "nameProps": ["label", "aria-label"]
+    },
+    "IconOnlyAction": {
+      "role": "button",
+      "nameProps": ["label", "aria-label"]
+    }
+  }
+}
+

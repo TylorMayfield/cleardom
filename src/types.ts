@@ -208,6 +208,7 @@ export type RuleSummary = {
   standards: StandardReference[];
   platforms: Platform[];
   fixable: boolean;
+  guidance: string;
 };
 
 export type StandardDefinition = {

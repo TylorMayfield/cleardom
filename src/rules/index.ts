@@ -75,6 +75,7 @@ export function summarizeRule(rule: RuleDefinition, severity: Severity = rule.se
     wcag: rule.wcag,
     standards: rule.standards,
     platforms: rule.platforms,
-    fixable: rule.fixable
+    fixable: rule.fixable,
+    guidance: rule.guidance
   };
 }

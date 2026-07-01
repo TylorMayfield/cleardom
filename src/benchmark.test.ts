@@ -59,7 +59,10 @@ test("WCAG benchmark fixture exercises every static ClearDOM rule", async () => 
     "CDOM052",
     "CDOM053",
     "CDOM054",
-    "CDOM055"
+    "CDOM055",
+    "CDOM056",
+    "CDOM057",
+    "CDOM058"
   ]);
 });
 

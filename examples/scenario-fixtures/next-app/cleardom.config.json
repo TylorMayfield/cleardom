@@ -1,0 +1,8 @@
+{
+  "include": ["app/**/*.{js,jsx,ts,tsx}"],
+  "exclude": ["app/**/*.test.tsx"],
+  "rules": {
+    "CDOM014": "off"
+  }
+}
+

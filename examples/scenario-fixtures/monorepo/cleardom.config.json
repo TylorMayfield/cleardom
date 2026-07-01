@@ -1,0 +1,5 @@
+{
+  "include": ["packages/*/src/**/*.{js,jsx,ts,tsx}"],
+  "exclude": ["packages/*/src/**/*.spec.tsx"]
+}
+

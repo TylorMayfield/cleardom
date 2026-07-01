@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>ClearDOM Runtime Demo</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+      }
+
+      .low-contrast {
+        color: #aaaaaa;
+        background: #ffffff;
+      }
+
+      .no-focus:focus {
+        outline: none;
+        box-shadow: none;
+      }
+
+      .tiny-target {
+        width: 18px;
+        height: 18px;
+        padding: 0;
+      }
+
+      .wide-panel {
+        width: 680px;
+      }
+
+      .skip-link {
+        position: absolute;
+        left: -9999px;
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/settings">Settings</a>
+    </nav>
+    <main id="main">
+      <p class="low-contrast">This text intentionally has low contrast.</p>
+      <button class="no-focus">No focus indicator</button>
+      <button class="tiny-target" aria-label="Tiny target">x</button>
+      <section class="wide-panel">This fixed-width panel should overflow at 320px.</section>
+    </main>
+  </body>
+</html>
+

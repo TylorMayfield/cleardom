@@ -5,7 +5,7 @@ import { createBaseline, writeBaseline } from "./baseline.js";
 import { resolveScanOptions } from "./config.js";
 import { formatRules, formatSarif, formatScanJson, formatScanResult, formatStandards } from "./format.js";
 import { findRule, rules, summarizeRule } from "./rules/index.js";
-import { scanPath, shouldFail } from "./scanner.js";
+import { scanPath, scanUrl, shouldFail } from "./scanner.js";
 import { standards } from "./standards.js";
 import type { ComponentPreset, FailOn, OutputFormat, RuleOption, ScanOptions } from "./types.js";
 
@@ -13,15 +13,8 @@ const args = process.argv.slice(2).filter((arg, index) => index !== 0 || arg !==
 const command = args[0] ?? "help";
 
 try {
-  if (command === "scan") {
-    const parsed = parseScanArgs(args.slice(1));
-    const resolvedOptions = await resolveScanOptions(parsed.options);
-    const result = await scanPath(parsed.target, resolvedOptions);
-    if (parsed.writeBaseline) {
-      await writeBaseline(parsed.writeBaseline, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
-    }
-    console.log(formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose));
-    process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
+  if (command === "scan" || command === "ci") {
+    await runScan(command, args.slice(1));
   } else if (command === "init") {
     await initConfig(args.slice(1));
   } else if (command === "explain") {
@@ -155,6 +148,46 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
   return { target, format, writeBaseline: writeBaselinePath, options };
 }
 
+async function runScan(command: "scan" | "ci", values: string[]): Promise<void> {
+  const parsed = parseScanArgs(values);
+  const options = command === "ci" ? await ciOptions(parsed.target, parsed.options) : parsed.options;
+  const resolvedOptions = await resolveScanOptions(options);
+  const result = isUrlTarget(parsed.target)
+    ? await scanUrl(parsed.target, resolvedOptions)
+    : await scanPath(parsed.target, resolvedOptions);
+
+  if (parsed.writeBaseline) {
+    await writeBaseline(parsed.writeBaseline, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
+  }
+  console.log(formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose));
+  process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
+}
+
+async function ciOptions(target: string, options: ScanOptions): Promise<ScanOptions> {
+  return {
+    ...options,
+    baseline: options.baseline ?? await defaultCiBaseline(target, options),
+    failOn: options.failOn ?? "regression"
+  };
+}
+
+async function defaultCiBaseline(target: string, options: ScanOptions): Promise<string | undefined> {
+  const baseline = "cleardom-baseline.json";
+  const root = options.configPath ? path.dirname(path.resolve(options.configPath)) : path.resolve(isUrlTarget(target) ? "." : target);
+  try {
+    const stat = await fs.stat(root);
+    const directory = stat.isDirectory() ? root : path.dirname(root);
+    await fs.access(path.join(directory, baseline));
+    return baseline;
+  } catch {
+    return undefined;
+  }
+}
+
+function isUrlTarget(target: string): boolean {
+  return /^https?:\/\//i.test(target);
+}
+
 function parseFailOn(value: string): FailOn {
   if (value === "none" || value === "critical" || value === "warning" || value === "findings" || value === "regression") {
     return value;
@@ -196,7 +229,8 @@ function help(): void {
 
 Usage:
   cleardom init [--dry-run]
-  cleardom scan [path] [--format text|json|sarif] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
+  cleardom scan [path|url] [--format text|json|sarif] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
+  cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json]
   cleardom explain CDOM001
   cleardom rules
   cleardom standards

@@ -1,0 +1,5 @@
+{
+  "include": ["src/**/*.{js,jsx,ts,tsx}"],
+  "componentPresets": ["react-native"]
+}
+
