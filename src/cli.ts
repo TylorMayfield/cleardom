@@ -337,7 +337,7 @@ async function githubPrCommand(values: string[]): Promise<void> {
   });
 
   if (parsed.format === "json") {
-    console.log(formatScanJson(result.result));
+    console.log(result.comparison ? JSON.stringify(result.comparison, null, 2) : formatScanJson(result.result));
     return;
   }
 

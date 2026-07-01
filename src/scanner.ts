@@ -10,7 +10,7 @@ import { findStandard, referencesForStandard, resolveStandardId, ruleAppliesToSt
 import type { Finding, JsxAttribute, JsxElement, ResolvedScanOptions, RuleDefinition, ScanOptions, ScanResult, ScoreBreakdown, Severity } from "./types.js";
 
 const scanExtensions = new Set([".jsx", ".tsx", ".js", ".ts", ".html"]);
-const ignoredDirectories = new Set([".git", "node_modules", "dist", "build", ".next", "coverage"]);
+const ignoredDirectories = new Set([".git", ".cleardom", "node_modules", "dist", "build", ".next", "coverage"]);
 
 export async function scanPath(targetPath: string, options: ScanOptions = {}): Promise<ScanResult> {
   const resolvedOptions = await resolveScanOptions(options);

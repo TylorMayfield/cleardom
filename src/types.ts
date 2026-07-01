@@ -166,6 +166,23 @@ export type ScanResult = {
   baseline?: BaselineFile;
 };
 
+export type ComparisonResult = {
+  base: ScanResult;
+  head: ScanResult;
+  newFindings: Finding[];
+  fixedFindings: Finding[];
+  unchangedFindings: Finding[];
+  summary: ComparisonSummary;
+};
+
+export type ComparisonSummary = {
+  newFindings: number;
+  fixedFindings: number;
+  unchangedFindings: number;
+  headActiveFindings: number;
+  baseActiveFindings: number;
+};
+
 export type ScanSummary = {
   totalFindings: number;
   activeFindings: number;

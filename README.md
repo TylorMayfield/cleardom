@@ -82,7 +82,7 @@ cleardom agents upgrade
 cleardom agents uninstall --agent cursor
 ```
 
-The installed GitHub Actions workflow runs `cleardom github-pr .` on pull requests. In Actions, that command uses `GITHUB_TOKEN` to create or update one sticky PR summary comment and add capped inline comments on changed lines with finding details, fix guidance, and rule documentation links. Outside Actions, use `--dry-run` to preview the same Markdown summary locally:
+The installed GitHub Actions workflow runs `cleardom github-pr .` on pull requests. In Actions, that command uses `GITHUB_TOKEN` to scan the PR head and base commit, create or update one sticky PR summary comment, and add capped inline comments on changed lines for newly introduced findings. The summary shows new, fixed, and existing findings; pull requests fail only on new findings so legacy debt stays visible without blocking unrelated work. Outside Actions, use `--dry-run` to preview the same Markdown summary locally:
 
 ```sh
 cleardom github-pr . --dry-run

@@ -1,13 +1,18 @@
 import { promises as fs } from "node:fs";
+import { execFile } from "node:child_process";
+import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { promisify } from "node:util";
 import { writeBaseline } from "./baseline.js";
+import { compareScanResults } from "./compare.js";
 import { resolveScanOptions } from "./config.js";
 import { scanPath, shouldFail } from "./scanner.js";
-import type { Finding, OutputFormat, ResolvedScanOptions, ScanOptions, ScanResult } from "./types.js";
+import type { ComparisonResult, Finding, OutputFormat, ResolvedScanOptions, ScanOptions, ScanResult } from "./types.js";
 
 const marker = "<!-- cleardom:pr-summary -->";
 const inlineMarker = "<!-- cleardom:inline -->";
 const defaultWorkflowPath = path.join(".github", "workflows", "cleardom.yml");
+const execFileAsync = promisify(execFile);
 
 type GithubPrOptions = {
   target: string;
@@ -26,6 +31,8 @@ type GithubContext = {
   pullRequest: {
     number: number;
     headSha: string;
+    baseSha: string;
+    baseRef: string;
   };
 };
 
@@ -55,24 +62,29 @@ export async function installGithubActions(rootDir = process.cwd()): Promise<{ f
   return { filePath: defaultWorkflowPath, status: existing === undefined ? "created" : "updated" };
 }
 
-export async function runGithubPr(options: GithubPrOptions): Promise<{ result: ScanResult; posted: boolean; summary: string }> {
+export async function runGithubPr(options: GithubPrOptions): Promise<{ result: ScanResult; comparison?: ComparisonResult; posted: boolean; summary: string }> {
   const resolvedOptions = await resolveScanOptions(options.options);
+  const context = await githubContext();
   const result = await scanPath(options.target, resolvedOptions);
+  const comparison = context && !options.dryRun
+    ? await compareWithBaseTree(context, options.target, resolvedOptions, result)
+    : undefined;
 
   if (options.writeBaseline) {
     await writeBaseline(options.writeBaseline, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
   }
 
-  const summary = formatPullRequestSummary(result, resolvedOptions);
-  const context = await githubContext();
+  const summary = comparison
+    ? formatPullRequestComparisonSummary(comparison, resolvedOptions)
+    : formatPullRequestSummary(result, resolvedOptions);
 
   if (context && !options.dryRun) {
     await postStickySummary(context, summary);
-    await postInlineComments(context, result, resolvedOptions, options.maxComments ?? 20);
+    await postInlineComments(context, result, resolvedOptions, options.maxComments ?? 20, comparison?.newFindings);
   }
 
-  process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
-  return { result, posted: Boolean(context && !options.dryRun), summary };
+  process.exitCode = comparison ? (comparison.newFindings.length > 0 ? 1 : 0) : (shouldFail(result, resolvedOptions.failOn) ? 1 : 0);
+  return { result, comparison, posted: Boolean(context && !options.dryRun), summary };
 }
 
 export function formatPullRequestSummary(result: ScanResult, options: ResolvedScanOptions): string {
@@ -113,6 +125,52 @@ export function formatPullRequestSummary(result: ScanResult, options: ResolvedSc
   }
 
   lines.push("", "<sub>ClearDOM updates this comment on each run.</sub>");
+  return lines.join("\n");
+}
+
+export function formatPullRequestComparisonSummary(comparison: ComparisonResult, options: ResolvedScanOptions): string {
+  const result = comparison.head;
+  const lines = [
+    marker,
+    "# ClearDOM review",
+    "",
+    `Score: **${result.score}/100**`,
+    `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"}`,
+    `Standard: **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
+    "",
+    "| Delta | Count |",
+    "| --- | ---: |",
+    `| New findings | ${comparison.summary.newFindings} |`,
+    `| Fixed findings | ${comparison.summary.fixedFindings} |`,
+    `| Existing findings | ${comparison.summary.unchangedFindings} |`,
+    `| Head active findings | ${comparison.summary.headActiveFindings} |`,
+    `| Base active findings | ${comparison.summary.baseActiveFindings} |`,
+    ""
+  ];
+
+  if (comparison.newFindings.length > 0) {
+    lines.push("## New Findings", "");
+    for (const finding of comparison.newFindings.slice(0, 30)) {
+      pushFinding(lines, finding, result, options);
+    }
+    if (comparison.newFindings.length > 30) {
+      lines.push("", `Showing 30 of ${comparison.newFindings.length} new findings. See the workflow logs for the complete scan.`);
+    }
+  } else {
+    lines.push("No new ClearDOM findings introduced by this pull request.");
+  }
+
+  if (comparison.fixedFindings.length > 0) {
+    lines.push("", "## Fixed Findings", "");
+    for (const finding of comparison.fixedFindings.slice(0, 10)) {
+      lines.push(`- **${finding.ruleId}** ${markdownLocation(finding, options)}: ${finding.title}`);
+    }
+    if (comparison.fixedFindings.length > 10) {
+      lines.push("", `Showing 10 of ${comparison.fixedFindings.length} fixed findings.`);
+    }
+  }
+
+  lines.push("", "<sub>ClearDOM updates this comment on each run. Pull requests fail only on new findings.</sub>");
   return lines.join("\n");
 }
 
@@ -164,6 +222,7 @@ async function githubContext(): Promise<GithubContext | undefined> {
   const event = JSON.parse(await fs.readFile(eventPath, "utf8")) as {
     pull_request?: {
       number: number;
+      base: { ref: string; sha: string };
       head: { sha: string };
     };
   };
@@ -176,9 +235,42 @@ async function githubContext(): Promise<GithubContext | undefined> {
     serverUrl: process.env.GITHUB_SERVER_URL ?? "https://github.com",
     pullRequest: {
       number: event.pull_request.number,
-      headSha: event.pull_request.head.sha
+      headSha: event.pull_request.head.sha,
+      baseSha: event.pull_request.base.sha,
+      baseRef: event.pull_request.base.ref
     }
   };
+}
+
+async function compareWithBaseTree(context: GithubContext, target: string, options: ResolvedScanOptions, head: ScanResult): Promise<ComparisonResult> {
+  const worktree = await fs.mkdtemp(path.join(tmpdir(), "cleardom-base-"));
+
+  try {
+    await execFileAsync("git", ["fetch", "--no-tags", "--depth=1", "origin", context.pullRequest.baseSha], { cwd: options.rootDir });
+    await execFileAsync("git", ["worktree", "add", "--detach", worktree, context.pullRequest.baseSha], { cwd: options.rootDir });
+    const configPath = rebaseOptionalPath(options.configPath ?? await defaultConfigPath(options.rootDir), options.rootDir, worktree);
+    const baseOptions: ScanOptions = {
+      include: options.include,
+      exclude: options.exclude,
+      rules: options.rules,
+      standard: options.standard,
+      failOn: options.failOn,
+      format: options.format,
+      verbose: options.verbose,
+      runtimeUrl: options.runtimeUrl,
+      componentPresets: options.componentPresets,
+      components: options.components,
+      configPath,
+      baseline: rebaseOptionalPath(options.baseline, options.rootDir, worktree)
+    };
+    const baseTarget = rebaseTarget(target, options.rootDir, worktree);
+    const base = await scanPath(baseTarget, baseOptions);
+    return compareScanResults(base, head, { baseRoot: worktree, headRoot: options.rootDir });
+  } finally {
+    await execFileAsync("git", ["worktree", "remove", "--force", worktree], { cwd: options.rootDir }).catch(async () => {
+      await fs.rm(worktree, { recursive: true, force: true });
+    });
+  }
 }
 
 async function postStickySummary(context: GithubContext, summary: string): Promise<void> {
@@ -198,14 +290,14 @@ async function postStickySummary(context: GithubContext, summary: string): Promi
   });
 }
 
-async function postInlineComments(context: GithubContext, result: ScanResult, options: ResolvedScanOptions, maxComments: number): Promise<void> {
+async function postInlineComments(context: GithubContext, result: ScanResult, options: ResolvedScanOptions, maxComments: number, findings = result.activeFindings): Promise<void> {
   const files = await githubRequest<GithubChangedFile[]>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/files?per_page=100`);
   const addedLines = new Map(files.map((file) => [file.filename, parseAddedLines(file.patch ?? "")]));
   const existing = await githubRequest<GithubComment[]>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/comments?per_page=100`);
   const existingKeys = new Set(existing.filter((comment) => comment.body?.includes(inlineMarker)).map((comment) => `${comment.path}:${comment.line}:${extractRuleId(comment.body ?? "")}`));
 
   let posted = 0;
-  for (const finding of result.activeFindings) {
+  for (const finding of findings) {
     if (posted >= maxComments) return;
     const file = relativeFindingPath(finding, options);
     const lines = addedLines.get(file);
@@ -240,6 +332,14 @@ function inlineCommentBody(finding: Finding, result: ScanResult): string {
   ].filter(Boolean).join("\n");
 }
 
+function pushFinding(lines: string[], finding: Finding, result: ScanResult, options: ResolvedScanOptions): void {
+  const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
+  lines.push(`- **${finding.ruleId}** ${markdownLocation(finding, options)}: ${finding.title}`);
+  lines.push(`  ${finding.message}`);
+  if (rule?.guidance) lines.push(`  Fix: ${rule.guidance}`);
+  if (rule?.docsUrl) lines.push(`  Docs: ${rule.docsUrl}`);
+}
+
 function markdownLocation(finding: Finding, options: ResolvedScanOptions): string {
   const file = relativeFindingPath(finding, options);
   return `\`${file}:${finding.line}:${finding.column}\``;
@@ -249,6 +349,32 @@ function relativeFindingPath(finding: Finding, options: ResolvedScanOptions): st
   if (/^https?:\/\//i.test(finding.file)) return finding.file;
   const relative = path.relative(options.rootDir, finding.file);
   return relative && !relative.startsWith("..") ? normalizePath(relative) : normalizePath(path.relative(process.cwd(), finding.file));
+}
+
+async function defaultConfigPath(rootDir: string): Promise<string | undefined> {
+  const candidate = path.join(rootDir, "cleardom.config.json");
+  try {
+    await fs.access(candidate);
+    return candidate;
+  } catch {
+    return undefined;
+  }
+}
+
+function rebaseOptionalPath(value: string | undefined, fromRoot: string, toRoot: string): string | undefined {
+  if (!value) return undefined;
+  const absolute = path.isAbsolute(value) ? value : path.resolve(fromRoot, value);
+  const relative = path.relative(fromRoot, absolute);
+  if (relative.startsWith("..")) return value;
+  return path.join(toRoot, relative);
+}
+
+function rebaseTarget(target: string, fromRoot: string, toRoot: string): string {
+  if (/^https?:\/\//i.test(target)) return target;
+  const absolute = path.isAbsolute(target) ? target : path.resolve(process.cwd(), target);
+  const relative = path.relative(fromRoot, absolute);
+  if (relative.startsWith("..")) return path.join(toRoot, path.basename(target));
+  return path.join(toRoot, relative);
 }
 
 function parseAddedLines(patch: string): Set<number> {
