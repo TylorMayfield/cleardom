@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Accessible Checkout Benchmark</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link-ok" href="#content">Skip to content</a>
+    <header>
+      <h1>Accessible Checkout Benchmark</h1>
+      <nav aria-label="Primary">
+        <a href="/orders">Orders</a>
+        <a href="/support">Support</a>
+      </nav>
+    </header>
+    <main id="content">
+      <h2>Payment details</h2>
+      <p>Required fields are marked with an asterisk and red border.</p>
+      <p>Press Continue to review the order.</p>
+      <p>Greeting: <span lang="fr">Bonjour, votre recu est pret.</span></p>
+      <p class="readable-gradient">Readable text over a high-contrast gradient background.</p>
+      <img src="revenue-chart.png" alt="Revenue increased every quarter.">
+      <video controls>
+        <track kind="captions" src="captions.vtt" srclang="en" label="English">
+      </video>
+      <audio controls aria-describedby="transcript" src="interview.mp3"></audio>
+      <p id="transcript">Transcript available below the player.</p>
+      <form>
+        <fieldset>
+          <legend>Shipping speed</legend>
+          <label><input type="radio" name="shipping"> Economy</label>
+        </fieldset>
+        <label for="email">Email <span aria-hidden="true">*</span></label>
+        <input id="email" name="email" autocomplete="email">
+        <label for="card">Card number <span aria-hidden="true">*</span></label>
+        <input id="card" name="cc-number" autocomplete="cc-number" aria-describedby="card-help">
+        <p id="card-help">Enter the card number without spaces.</p>
+        <button type="button">Continue</button>
+        <p role="status">Saved payment method.</p>
+      </form>
+    </main>
+  </body>
+</html>

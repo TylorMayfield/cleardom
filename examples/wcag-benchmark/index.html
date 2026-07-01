@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Benchmark</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to content</a>
+    <header>
+      <h1>ClearDOM WCAG Benchmark</h1>
+      <nav>
+        <a href="#media">Media</a>
+        <a href="#forms">Forms</a>
+        <a href="#forms">Forms</a>
+      </nav>
+    </header>
+
+    <main id="content">
+      <h2 id="media">Perceivable</h2>
+      <div class="grid">
+        <section class="case" data-case="1.1.1"><h3>1.1.1</h3><img src="chart-missing-alt.png"><button><span aria-hidden="true">×</span></button></section>
+        <section class="case" data-case="1.2.1"><h3>1.2.1</h3><audio controls src="interview.mp3"></audio><p>No transcript is provided.</p></section>
+        <section class="case" data-case="1.2.2"><h3>1.2.2</h3><video controls src="demo-no-captions.mp4"></video><p>Captions are missing.</p></section>
+        <section class="case" data-case="1.2.3"><h3>1.2.3</h3><video controls src="tour-no-description.mp4"></video><p>No audio description or media alternative.</p></section>
+        <section class="case" data-case="1.2.4"><h3>1.2.4</h3><video controls src="live-townhall.mp4"></video><p>Live stream has no captions.</p></section>
+        <section class="case" data-case="1.2.5"><h3>1.2.5</h3><video controls src="product-walkthrough.mp4"></video><p>Prerecorded video has no audio description.</p></section>
+        <section class="case" data-case="1.3.1"><h3>1.3.1</h3><div class="fake-table"><b>Name&nbsp;&nbsp;Amount</b><br>Plan&nbsp;&nbsp;$20</div><label class="hidden-label" for="orphan">Hidden</label><input id="orphan"></section>
+        <section class="case" data-case="1.3.2"><h3>1.3.2</h3><p>Step 2: Pay.</p><p>Step 1: Create account.</p></section>
+        <section class="case" data-case="1.3.3"><h3>1.3.3</h3><p>Press the round button on the right to continue.</p><button>Square button on left</button></section>
+        <section class="case" data-case="1.3.4"><h3>1.3.4</h3><p>This checkout only works in portrait orientation.</p></section>
+        <section class="case" data-case="1.3.5"><h3>1.3.5</h3><input placeholder="First name"><input placeholder="Email"></section>
+        <section class="case color-only" data-case="1.4.1"><h3>1.4.1</h3><p>Fields in <span class="status">red</span> are required.</p></section>
+        <section class="case" data-case="1.4.2"><h3>1.4.2</h3><audio autoplay src="loop.mp3"></audio><p>Audio autoplays without a visible pause control.</p></section>
+        <section class="case low-contrast" data-case="1.4.3"><h3>1.4.3</h3><p>This paragraph has insufficient contrast.</p></section>
+        <section class="case tiny-text" data-case="1.4.4"><h3>1.4.4</h3><p>Fixed tiny text becomes unusable when zoomed.</p></section>
+        <section class="case" data-case="1.4.5"><h3>1.4.5</h3><div class="image-text">SALE ENDS TODAY</div></section>
+        <section class="case" data-case="1.4.10"><h3>1.4.10</h3><div class="reflow-box">This content forces horizontal scrolling at 320 CSS pixels.</div></section>
+        <section class="case" data-case="1.4.11"><h3>1.4.11</h3><button class="low-contrast">Submit</button></section>
+        <section class="case overlap" data-case="1.4.12"><h3>1.4.12</h3><span>Increasing text spacing causes this text to overlap.</span><span>Another line occupies the same visual area.</span></section>
+        <section class="case hover-panel" data-case="1.4.13"><h3>1.4.13</h3><button>Hover me</button><div class="details">Tooltip cannot be dismissed or hovered independently.</div></section>
+      </div>
+
+      <h2>Operable</h2>
+      <div class="grid">
+        <section class="case" data-case="2.1.1"><h3>2.1.1</h3><div onclick="alert('opened')">Mouse-only open details</div></section>
+        <section class="case" data-case="2.1.2" tabindex="0"><h3>2.1.2</h3><button>Focus trap start</button><button>Focus trap end</button></section>
+        <section class="case" data-case="2.1.4"><h3>2.1.4</h3><p>Press single-letter shortcut S to submit, with no way to disable it.</p></section>
+        <section class="case" data-case="2.2.1"><h3>2.2.1</h3><p class="timeout-warning">Session expires in 3 seconds.</p></section>
+        <section class="case" data-case="2.2.2"><h3>2.2.2</h3><p class="moving">Moving content starts automatically.</p></section>
+        <section class="case flashing" data-case="2.3.1"><h3>2.3.1</h3><p>Rapid flashing region.</p></section>
+        <section class="case" data-case="2.4.1"><h3>2.4.1</h3><p>The skip link remains off-screen even on focus.</p></section>
+        <section class="case" data-case="2.4.2"><h3>2.4.2</h3><p>The document title is vague.</p></section>
+        <section class="case" data-case="2.4.3"><h3>2.4.3</h3><button>Third</button><button autofocus>First</button><button>Second</button></section>
+        <section class="case" data-case="2.4.4"><h3>2.4.4</h3><a href="/details">Read more</a></section>
+        <section class="case" data-case="2.4.5"><h3>2.4.5</h3><p>This page has only one path to support content.</p></section>
+        <section class="case" data-case="2.4.6"><h3>2.4.6</h3><label for="mystery">Input</label><input id="mystery"></section>
+        <section class="case" data-case="2.4.7"><h3>2.4.7</h3><button class="focus-hidden">Invisible focus indicator</button></section>
+        <section class="case" data-case="2.4.11"><h3>2.4.11</h3><button>Covered focus</button><div style="position:relative;top:-28px;background:white">Overlay covers focused control.</div></section>
+        <section class="case" data-case="2.5.1"><h3>2.5.1</h3><canvas width="220" height="80">Path drawing widget has no single-pointer alternative.</canvas></section>
+        <section class="case" data-case="2.5.2"><h3>2.5.2</h3><button onmousedown="alert('fires on down')">Activates on pointer down</button></section>
+        <section class="case" data-case="2.5.3"><h3>2.5.3</h3><button aria-label="Send invoice">Go</button></section>
+        <section class="case" data-case="2.5.4"><h3>2.5.4</h3><p>Shake the device to undo. No button alternative is available.</p></section>
+        <section class="case" data-case="2.5.7"><h3>2.5.7</h3><p>Drag cards into priority order. No button alternative exists.</p></section>
+        <section class="case" data-case="2.5.8"><h3>2.5.8</h3><button class="target-small">?</button></section>
+      </div>
+
+      <h2 id="forms">Understandable and Robust</h2>
+      <div class="grid">
+        <section class="case" data-case="3.1.1"><h3>3.1.1</h3><p>The page has no lang attribute.</p></section>
+        <section class="case" data-case="3.1.2"><h3>3.1.2</h3><p>Payez maintenant to finish checkout.</p></section>
+        <section class="case" data-case="3.2.1"><h3>3.2.1</h3><input onfocus="location.hash='focus-changed'" placeholder="Focus changes context"></section>
+        <section class="case" data-case="3.2.2"><h3>3.2.2</h3><select><option>Stay here</option><option>Navigate now</option></select></section>
+        <section class="case" data-case="3.2.3"><h3>3.2.3</h3><nav><a href="#forms">Forms</a><a href="#media">Media</a></nav><p>Navigation order changes from the header.</p></section>
+        <section class="case" data-case="3.2.4"><h3>3.2.4</h3><button>Buy now</button><button>Complete purchase</button></section>
+        <section class="case" data-case="3.2.6"><h3>3.2.6</h3><p>Help appears at the end here, unlike earlier form sections.</p></section>
+        <section class="case" data-case="3.3.1"><h3>3.3.1</h3><input aria-invalid="true"><p class="error">Wrong.</p></section>
+        <section class="case" data-case="3.3.2"><h3>3.3.2</h3><input placeholder="MM/YY"><input placeholder="CVV"></section>
+        <section class="case" data-case="3.3.3"><h3>3.3.3</h3><input aria-invalid="true" value="13/99"><p class="error">Invalid value.</p></section>
+        <section class="case" data-case="3.3.4"><h3>3.3.4</h3><form><input value="$1000"><button>Transfer now</button></form><p>No review or reversal step.</p></section>
+        <section class="case" data-case="3.3.7"><h3>3.3.7</h3><p>Type the same shipping address again, even though it was already collected.</p><textarea></textarea></section>
+        <section class="case" data-case="3.3.8"><h3>3.3.8</h3><label>Solve 19 x 7 to sign in <input></label></section>
+        <section class="case" data-case="4.1.2"><h3>4.1.2</h3><div role="checkbox" aria-checked="mixed">Custom checkbox without keyboard behavior</div></section>
+        <section class="case" data-case="4.1.3"><h3>4.1.3</h3><button onclick="document.querySelector('#silent-status').textContent='Saved'">Save</button><p id="silent-status">Idle</p></section>
+      </div>
+    </main>
+
+    <footer>
+      <p>This benchmark is intentionally broken. Do not copy its patterns into production.</p>
+    </footer>
+    <script src="app.js"></script>
+  </body>
+</html>

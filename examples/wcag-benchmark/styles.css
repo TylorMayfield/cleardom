@@ -1,0 +1,191 @@
+:root {
+  color-scheme: light;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #f7f7f4;
+  color: #242424;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  line-height: 1.45;
+}
+
+header,
+main,
+footer {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+header {
+  border-bottom: 1px solid #b8b8b8;
+}
+
+.skip-link {
+  position: absolute;
+  left: -999px;
+  top: 8px;
+  padding: 8px 12px;
+  background: #111;
+  color: #fff;
+}
+
+.skip-link:focus {
+  left: -999px;
+}
+
+.skip-link-ok {
+  position: absolute;
+  left: -999px;
+  top: 8px;
+  padding: 8px 12px;
+  background: #111;
+  color: #fff;
+}
+
+.skip-link-ok:focus {
+  left: 8px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.case {
+  min-height: 140px;
+  padding: 16px;
+  border: 1px solid #c8c8c8;
+  background: #fff;
+  border-radius: 6px;
+}
+
+.case h3 {
+  margin-top: 0;
+}
+
+.low-contrast {
+  color: #b8b8b8;
+  background: #fff;
+}
+
+.readable-gradient {
+  padding: 12px;
+  color: #111;
+  background: linear-gradient(#fff, #fff);
+}
+
+.color-only .status {
+  color: #c10000;
+}
+
+.tiny-text {
+  font-size: 9px;
+}
+
+.image-text {
+  width: 280px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(135deg, #1859a9, #0d2f5a);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.hover-panel .details {
+  display: none;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #666;
+}
+
+.hover-panel:hover .details {
+  display: block;
+}
+
+.focus-hidden:focus,
+button:focus,
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 0;
+}
+
+.target-small {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  line-height: 1;
+}
+
+.overlap {
+  position: relative;
+  height: 76px;
+  overflow: hidden;
+}
+
+.overlap span {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 260px;
+}
+
+.overlap span + span {
+  top: 22px;
+}
+
+.reflow-box {
+  width: 980px;
+  padding: 12px;
+  border: 1px solid #999;
+}
+
+.two-dimensional {
+  width: 900px;
+  min-width: 900px;
+}
+
+.hidden-label {
+  display: none;
+}
+
+.error {
+  color: #b00020;
+  font-weight: 700;
+}
+
+.moving {
+  animation: slide 2s linear infinite;
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(120px);
+  }
+}
+
+.flashing {
+  animation: flash 0.2s steps(2, jump-none) infinite;
+}
+
+@keyframes flash {
+  from {
+    background: #fff;
+  }
+  to {
+    background: #f00;
+  }
+}
