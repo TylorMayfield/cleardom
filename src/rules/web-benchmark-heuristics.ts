@@ -140,12 +140,19 @@ export const keyboardTrapRule = createHeuristicRule({
   level: "a",
   criterionTitle: "No Keyboard Trap",
   category: "keyboard",
-  message: "Do not trap Tab focus without a documented keyboard exit.",
+  message: "Do not trap Tab focus without a documented keyboard exit (like Escape). Ensure users can exit using keyboard.",
   attribute: (element, context) => {
-    const handler = expressionAttribute(element, context, "onKeyDown") ?? expressionAttribute(element, context, "onKeyUp");
-    return /\bTab\b/.test(handler) && /\bpreventDefault\s*\(/.test(handler);
+    const onKeyDown = expressionAttribute(element, context, "onKeyDown") ?? "";
+    const onKeyUp = expressionAttribute(element, context, "onKeyUp") ?? "";
+    const handler = onKeyDown + onKeyUp;
+    
+    // Flag if Tab is trapped but no Escape or exit handler
+    const hasTabTrap = /\bTab\b/.test(handler) && /\bpreventDefault\s*\(/.test(handler);
+    const hasEscapeHandler = /\bEscape\b|\bevent\.key\s*[=!]=\s*['"]Escape['"]/.test(onKeyDown) || /\bEscape\b/.test(element.tagName);
+    
+    return hasTabTrap && !hasEscapeHandler;
   },
-  text: /\bfocus trap\b|\btab\b.*\btrapped\b/
+  text: /\bfocus trap\b|\btab\b.*\btrapped\b|\bfocus locked\b/
 });
 
 export const characterShortcutRule = createHeuristicRule({
@@ -306,6 +313,46 @@ export const accessibleAuthenticationRule = createHeuristicRule({
   text: /\bsolve\s+\d+\s*[x*]\s*\d+\b|\bcognitive function test\b|\bmemorize\b.*\bsign in\b/
 });
 
+export const sensoryOnlyInstructionsRule = createHeuristicRule({
+  id: "CDOM056",
+  title: "Instruction may rely only on sensory characteristics",
+  wcag: "1.3.3",
+  level: "a",
+  criterionTitle: "Sensory Characteristics",
+  category: "readability",
+  message: "Instructions that depend only on shape, size, visual position, or direction cannot be used by people with visual impairments.",
+  text: /\b(click|tap|press|select|choose|find)\b.*\b(left|right|top|bottom|above|below|round|square|circular|large|small|thick|thin)\b|\b(the one on the left|the round button|the top right|the small icon|the thick border)\b/
+});
+
+export const redundantFormEntryRule = createHeuristicRule({
+  id: "CDOM057",
+  title: "Previously entered information may need to be re-entered",
+  wcag: "3.3.7",
+  level: "a",
+  criterionTitle: "Redundant Entry",
+  category: "forms",
+  message: "Do not require users to re-enter information they have previously provided.",
+  text: /\bre[- ]?enter\b|\bre[- ]?type\b|\benter again\b|\bretype\b.*\b(password|email|phone|address)\b/,
+  attribute: (element, context) => {
+    const name = staticAttributeValue(element, context, "name") ?? "";
+    const id = staticAttributeValue(element, context, "id") ?? "";
+    const value = name + id;
+    // Flag if same field appears multiple times (heuristic)
+    return /\b(confirm|verify|repeat)[- ]?(password|email|phone)\b/i.test(value);
+  }
+});
+
+export const inconsistentHelpRule = createHeuristicRule({
+  id: "CDOM058",
+  title: "Help text may be inconsistent across similar inputs",
+  wcag: "3.2.6",
+  level: "a",
+  criterionTitle: "Consistent Help",
+  category: "forms",
+  message: "Help text and instructions should be consistent for similar controls.",
+  text: /\bhelp text\b.*\b(different|changes|varies)\b|\binconsistent help\b/
+});
+
 export const benchmarkHeuristicRules = [
   liveCaptionsRule,
   meaningfulSequenceRule,
@@ -331,7 +378,10 @@ export const benchmarkHeuristicRules = [
   consistentNavigationRule,
   consistentIdentificationRule,
   errorPreventionRule,
-  accessibleAuthenticationRule
+  accessibleAuthenticationRule,
+  sensoryOnlyInstructionsRule,
+  redundantFormEntryRule,
+  inconsistentHelpRule
 ];
 
 function createHeuristicRule(options: HeuristicOptions): RuleDefinition {

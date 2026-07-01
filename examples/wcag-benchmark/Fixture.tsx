@@ -55,6 +55,10 @@ export function WcagBenchmarkFixture() {
             <p>Required fields are shown in red.</p>
             <p>Press the round button on the right.</p>
             <p>Bonjour, votre reçu est prêt.</p>
+            <p>Please re-enter your password for verification.</p>
+            <input name="password" placeholder="Password" />
+            <input name="confirm-password" placeholder="Confirm password" />
+            <p>Help text may be inconsistent across different form fields.</p>
             <input name="coupon" onFocus={() => window.location.assign("/coupon-help")} />
             <select name="country" onChange={() => submit()}>
               <option>Choose a country</option>
