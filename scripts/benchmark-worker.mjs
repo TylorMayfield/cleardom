@@ -54,7 +54,8 @@ async function runAxe({ url, chromePath, includeReviewCandidates = false }) {
 
   try {
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "networkidle0", timeout: 30000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+    await settlePage(page);
     const results = await new AxePuppeteer(page)
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
       .analyze();
@@ -102,8 +103,8 @@ async function runPa11y({ url, chromePath }) {
     standard: "WCAG2AA",
     includeWarnings: false,
     includeNotices: false,
-    timeout: 30000,
-    wait: 500,
+    timeout: 15000,
+    wait: 100,
     chromeLaunchConfig: {
       executablePath: chromePath,
       args: ["--no-sandbox", "--disable-setuid-sandbox"]
@@ -127,6 +128,12 @@ async function runPa11y({ url, chromePath }) {
       excerpt: issue.context
     }))
   };
+}
+
+async function settlePage(page) {
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  if (typeof page.waitForNetworkIdle !== "function") return;
+  await page.waitForNetworkIdle({ idleTime: 100, timeout: 1000 }).catch(() => undefined);
 }
 
 function wcagFromAxeTags(tags) {

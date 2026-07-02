@@ -23,10 +23,13 @@ const cliOptions = parseArgs(process.argv.slice(2).filter((arg) => arg !== "--")
 await fs.mkdir(reportDir, { recursive: true });
 await fs.mkdir(emptySourceDir, { recursive: true });
 
-const useLocal = cliOptions.local || process.env.USE_LOCAL_BENCHMARK === "true";
+const useLocal = cliOptions.local || !cliOptions.url;
 const server = useLocal ? await startStaticServer(siteDir) : null;
 const localUrl = server ? `http://127.0.0.1:${server.port}` : null;
-const url = cliOptions.url ?? (localUrl ?? "https://tylor.nz");
+const url = cliOptions.url ?? localUrl;
+if (!url) {
+  throw new Error("Benchmark URL could not be resolved. Use --url for live-site mode.");
+}
 const falsePositiveUrl = cliOptions.falsePositiveUrl ?? (localUrl ? `${localUrl}/false-positive.html` : `${url}/false-positive.html`);
 const localFalsePositiveUrl = localUrl ? `${localUrl}/false-positive.html` : falsePositiveUrl;
 const liveMode = !useLocal;
@@ -39,26 +42,24 @@ try {
     { id: "pa11y", label: "pa11y", input: url }
   ];
 
-  const results = [];
-  for (const tool of tools) {
-    process.stdout.write(`Running ${tool.label}...\n`);
-    results.push(await runMeasured(tool, {
+  const results = await runBatch(tools, (tool) => ({
+    label: `Running ${tool.label}...`,
+    options: {
       url,
       sourceDir: emptySourceDir,
       chromePath
-    }));
-  }
+    }
+  }));
 
-  const falsePositiveResults = [];
-  for (const tool of tools) {
-    process.stdout.write(`Running ${tool.label} false-positive benchmark...\n`);
-    falsePositiveResults.push(await runMeasured(tool, {
+  const falsePositiveResults = await runBatch(tools, (tool) => ({
+    label: `Running ${tool.label} false-positive benchmark...`,
+    options: {
       url: falsePositiveUrl,
       sourceDir: emptySourceDir,
       chromePath,
       includeReviewCandidates: false
-    }));
-  }
+    }
+  }));
 
   const report = {
     generatedAt: new Date().toISOString(),
@@ -80,13 +81,23 @@ try {
   await fs.writeFile(reportPath, renderHtml(report, manifest), "utf8");
   await fs.writeFile(markdownPath, renderMarkdown(report, manifest), "utf8");
 
-  process.stdout.write(`\nBenchmark report written to ${reportPath}\n`);
+  process.stdout.write(`\nBenchmark mode: ${report.mode} (${report.url})\n`);
+  process.stdout.write(`Benchmark report written to ${reportPath}\n`);
   process.stdout.write(`GitHub Markdown report written to ${markdownPath}\n`);
   process.stdout.write(`Raw JSON written to ${jsonPath}\n`);
 } finally {
   if (server) {
     await server.close();
   }
+}
+
+async function runBatch(tools, optionsForTool) {
+  const jobs = tools.map((tool) => {
+    const job = optionsForTool(tool);
+    process.stdout.write(`${job.label}\n`);
+    return runMeasured(tool, job.options);
+  });
+  return Promise.all(jobs);
 }
 
 async function runMeasured(tool, options) {
@@ -103,7 +114,7 @@ async function runMeasured(tool, options) {
   let peakRssKb = 0;
   const sampler = setInterval(async () => {
     peakRssKb = Math.max(peakRssKb, await processTreeRssKb(child.pid));
-  }, 50);
+  }, 250);
 
   try {
     const { stdout, stderr } = await childResult(child);
@@ -397,14 +408,14 @@ function renderHtml(report, manifest) {
               <span class="status ${summary.ok ? "ok" : "fail"}">${summary.ok ? "Completed" : "Failed"}</span>
             </header>
             <p class="metric">${summary.coverageLabel}</p>
-            <p class="muted">WCAG criteria covered across the benchmark</p>
+            <p class="muted">expected automated criteria covered</p>
             <div class="metric-row">
-              <div class="mini"><strong>${summary.coveragePercent}%</strong><span class="muted small">total coverage</span></div>
+              <div class="mini"><strong>${summary.coveragePercent}%</strong><span class="muted small">expected coverage</span></div>
               <div class="mini"><strong>${summary.findings}</strong><span class="muted small">findings</span></div>
               <div class="mini"><strong>${formatMs(summary.durationMs)}</strong><span class="muted small">runtime</span></div>
             </div>
             <div class="bar"><span style="width:${summary.coveragePercent}%"></span></div>
-            <p class="muted small">${summary.observedManifestCriteria} of ${summary.manifestCriteriaTotal} WCAG benchmark criteria credited. Peak memory: ${formatMb(summary.peakRssMb)}.</p>
+            <p class="muted small">${summary.totalCoverageLabel} total WCAG fixture coverage. Peak memory: ${formatMb(summary.peakRssMb)}.</p>
           </article>
         `).join("")}
       </section>
@@ -427,8 +438,8 @@ function renderHtml(report, manifest) {
               <tr>
                 <th>Tool</th>
                 <th>Findings</th>
-                <th>Manifest Criteria Seen</th>
-                <th>Total WCAG Coverage</th>
+                <th>Expected Coverage</th>
+                <th>Total Fixture Coverage</th>
                 <th>Time</th>
                 <th>Peak Memory</th>
               </tr>
@@ -438,8 +449,8 @@ function renderHtml(report, manifest) {
                 <tr>
                   <td>${escapeHtml(summary.label)}</td>
                   <td><div>${summary.findings}</div><div class="bar"><span style="width:${Math.round((summary.findings / maxFindings) * 100)}%"></span></div></td>
-                  <td>${summary.observedManifestCriteria}</td>
                   <td>${summary.coverageLabel}</td>
+                  <td>${summary.totalCoverageLabel}</td>
                   <td>${formatMs(summary.durationMs)}</td>
                   <td>${formatMb(summary.peakRssMb)}</td>
                 </tr>
@@ -595,13 +606,13 @@ function renderMarkdown(report, manifest) {
     "Coverage credit requires both a reported WCAG finding and a matching expected detector in `manifest.json`. Manual-only cases are included in the benchmark surface, but are not credited to automated tools.",
     "",
     markdownTable(
-      ["Tool", "Status", "Findings", "Credited Coverage", "Reported Criteria", "Time", "Peak RSS"],
+      ["Tool", "Status", "Findings", "Expected Coverage", "Total Fixture Coverage", "Time", "Peak RSS"],
       toolSummaries.map((summary) => [
         summary.label,
         summary.ok ? "Completed" : "Failed",
         summary.findings,
         summary.coverageLabel,
-        summary.reportedCriteria.length,
+        summary.totalCoverageLabel,
         formatMs(summary.durationMs),
         formatMb(summary.peakRssMb)
       ])
@@ -672,14 +683,21 @@ function buildToolSummaries(results, manifest) {
   const manifestCriteriaTotal = manifestIds.size;
   return results.map((result) => {
     const observedManifest = result.criteria.filter((criterion) => manifestIds.has(criterion));
-    const coveragePercent = manifestCriteriaTotal === 0 ? 0 : Math.round((observedManifest.length / manifestCriteriaTotal) * 100);
+    const expectedCriteria = (manifest.criteria ?? [])
+      .filter((criterion) => (criterion.detection ?? []).includes(result.id))
+      .map((criterion) => criterion.id);
+    const observedExpected = observedManifest.filter((criterion) => expectedCriteria.includes(criterion));
+    const coveragePercent = expectedCriteria.length === 0 ? 0 : Math.round((observedExpected.length / expectedCriteria.length) * 100);
 
     return {
       ...result,
       findings: result.findings.length,
       observedManifestCriteria: observedManifest.length,
+      observedExpectedCriteria: observedExpected.length,
+      expectedCriteriaTotal: expectedCriteria.length,
       manifestCriteriaTotal,
-      coverageLabel: `${observedManifest.length}/${manifestCriteriaTotal}`,
+      coverageLabel: `${observedExpected.length}/${expectedCriteria.length}`,
+      totalCoverageLabel: `${observedManifest.length}/${manifestCriteriaTotal}`,
       coveragePercent
     };
   });

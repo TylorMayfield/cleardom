@@ -33,7 +33,7 @@ The repo includes an intentionally broken benchmark site for comparing ClearDOM,
 pnpm benchmark
 ```
 
-The benchmark starts the fixture site, runs all three tools through Chromium, measures runtime and peak RSS, and writes `examples/wcag-benchmark/reports/benchmark-report.html`. The report compares observed WCAG criterion coverage, finding volume, and violation-only false-positive candidates. Set `CHROME_PATH=/path/to/chrome` if Chrome is not installed in a standard location.
+The benchmark starts the local fixture site, runs all three tools through Chromium, measures runtime and peak RSS, and writes HTML, Markdown, and JSON reports in `examples/wcag-benchmark/reports/`. The report compares expected automated coverage, total fixture coverage, finding volume, and violation-only false-positive candidates. Set `CHROME_PATH=/path/to/chrome` if Chrome is not installed in a standard location.
 
 To compare the tools against a live site, pass a URL:
 
@@ -41,7 +41,7 @@ To compare the tools against a live site, pass a URL:
 pnpm benchmark -- --url https://example.com/
 ```
 
-Live-site mode runs Axe and pa11y against the URL and runs ClearDOM's runtime checks against the same page. ClearDOM source-only rules are not included in benchmark timing because source files are not available from a URL and would make the runtime comparison uneven.
+Live-site mode is a remote smoke test, not the canonical benchmark. It runs Axe and pa11y against the URL and runs ClearDOM's runtime checks against the same page. ClearDOM source-only rules are not included in benchmark timing because source files are not available from a URL and would make the runtime comparison uneven.
 
 See `examples/wcag-benchmark/manifest.json` for the WCAG 2.2 A/AA coverage map and expected detection type for each scenario.
 

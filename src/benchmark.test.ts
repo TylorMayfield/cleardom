@@ -131,6 +131,8 @@ test("WCAG benchmark fixture renders every manifest case", async () => {
 test("benchmark runner writes a GitHub Markdown report", async () => {
   const script = await fs.readFile(path.resolve("scripts/benchmark.mjs"), "utf8");
 
+  assert.doesNotMatch(script, /tylor\.nz/);
+  assert.match(script, /const useLocal = cliOptions\.local \|\| !cliOptions\.url/);
   assert.match(script, /benchmark-report\.md/);
   assert.match(script, /renderMarkdown/);
   assert.match(script, /Missed Expected Cases/);

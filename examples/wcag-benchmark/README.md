@@ -10,13 +10,13 @@ It targets WCAG 2.2 A/AA success criteria. Some scenarios are deliberately manua
 pnpm benchmark
 ```
 
-To run the same comparison against a live page:
+To run a remote smoke test against a live page:
 
 ```sh
 pnpm benchmark -- --url https://example.com/
 ```
 
-Both local and live-site modes run Axe, pa11y, and ClearDOM runtime checks through Chromium. ClearDOM source-only rules are intentionally excluded from benchmark timing so the report does not compare static parsing against browser automation.
+The benchmark command runs against this local fixture by default. Remote URL mode is useful for ad hoc testing, but it is not the canonical benchmark because the WCAG fixture manifest describes the cases in this directory. Both modes run Axe, pa11y, and ClearDOM runtime checks through Chromium. ClearDOM source-only rules are intentionally excluded from benchmark timing so the report does not compare static parsing against browser automation.
 
 The benchmark starts this fixture site, runs ClearDOM, Axe, and pa11y, then writes:
 
@@ -35,4 +35,4 @@ Use `manifest.json` as the benchmark index. It lists every WCAG 2.2 A/AA criteri
 - `app.js`: keyboard traps, timeout simulation, and unexpected context changes.
 - `Fixture.tsx`: JSX mirror for testing ClearDOM's source-static rules outside the runtime benchmark.
 - `manifest.json`: expected benchmark coverage map.
-- `reports/`: generated HTML and JSON benchmark reports.
+- `reports/`: generated HTML, Markdown, and JSON benchmark reports.
