@@ -15,6 +15,7 @@ const reportDir = resolve(siteDir, "reports");
 const emptySourceDir = resolve(reportDir, "empty-source");
 const reportPath = resolve(reportDir, "benchmark-report.html");
 const jsonPath = resolve(reportDir, "benchmark-report.json");
+const markdownPath = resolve(reportDir, "benchmark-report.md");
 const workerPath = resolve(root, "scripts/benchmark-worker.mjs");
 const chromePath = findChromePath();
 const cliOptions = parseArgs(process.argv.slice(2).filter((arg) => arg !== "--"));
@@ -77,8 +78,10 @@ try {
 
   await fs.writeFile(jsonPath, JSON.stringify(report, null, 2), "utf8");
   await fs.writeFile(reportPath, renderHtml(report, manifest), "utf8");
+  await fs.writeFile(markdownPath, renderMarkdown(report, manifest), "utf8");
 
   process.stdout.write(`\nBenchmark report written to ${reportPath}\n`);
+  process.stdout.write(`GitHub Markdown report written to ${markdownPath}\n`);
   process.stdout.write(`Raw JSON written to ${jsonPath}\n`);
 } finally {
   if (server) {
@@ -561,6 +564,109 @@ function renderHtml(report, manifest) {
 </html>`;
 }
 
+function renderMarkdown(report, manifest) {
+  const totals = report.results.map((result) => ({
+    ...result,
+    reportedCriteria: criteriaCovered(result.findings),
+    criteria: creditedCriteriaCovered(result, manifest)
+  }));
+  const falsePositiveTotals = (report.falsePositiveResults ?? []).map((result) => ({
+    ...result,
+    criteria: criteriaCovered(result.findings)
+  }));
+  const toolSummaries = buildToolSummaries(totals, manifest);
+  const detectionSummary = summarizeDetection(manifest);
+  const coverageRows = buildCoverageRows(totals, manifest);
+  const uniqueRows = buildUniqueCoverage(totals);
+  const missedRows = buildMissedExpectedRows(totals, manifest);
+  const generatedAt = new Date(report.generatedAt).toISOString();
+
+  return [
+    "# Accessibility Benchmark Report",
+    "",
+    `Generated: ${generatedAt}`,
+    `Mode: ${report.mode}`,
+    `Target: ${report.url}`,
+    `Standard: ${manifest.standard}`,
+    `Criteria covered by fixture: ${manifest.criteria.length}`,
+    "",
+    "## Summary",
+    "",
+    "Coverage credit requires both a reported WCAG finding and a matching expected detector in `manifest.json`. Manual-only cases are included in the benchmark surface, but are not credited to automated tools.",
+    "",
+    markdownTable(
+      ["Tool", "Status", "Findings", "Credited Coverage", "Reported Criteria", "Time", "Peak RSS"],
+      toolSummaries.map((summary) => [
+        summary.label,
+        summary.ok ? "Completed" : "Failed",
+        summary.findings,
+        summary.coverageLabel,
+        summary.reportedCriteria.length,
+        formatMs(summary.durationMs),
+        formatMb(summary.peakRssMb)
+      ])
+    ),
+    "",
+    "## Detection Buckets",
+    "",
+    markdownTable(
+      ["Bucket", "Criteria"],
+      [
+        ["ClearDOM automated", detectionSummary.cleardom],
+        ["Browser runtime", detectionSummary.runtime],
+        ["Manual review", detectionSummary.manual]
+      ]
+    ),
+    "",
+    "## False Positive Benchmark",
+    "",
+    `Clean fixture: ${report.falsePositiveUrl ?? "n/a"}`,
+    "",
+    markdownTable(
+      ["Tool", "False Positive Candidates", "Clean Criteria Reported", "Status"],
+      falsePositiveTotals.map((result) => [
+        result.label,
+        result.findings.length,
+        result.criteria.length === 0 ? "None" : result.criteria.join(", "),
+        result.findings.length === 0 ? "Clean" : "Review"
+      ])
+    ),
+    "",
+    "## WCAG Coverage Matrix",
+    "",
+    markdownTable(
+      ["Criterion", "Title", "Expected", ...totals.map((result) => result.label)],
+      coverageRows.map((row) => [
+        row.id,
+        row.title,
+        row.expected.join(", "),
+        ...totals.map((result) => row.observed[result.id] ? "Seen" : "-")
+      ])
+    ),
+    "",
+    "## Missed Expected Cases",
+    "",
+    missedRows.length === 0
+      ? "Every automated tool reported every criterion it was expected to detect."
+      : markdownTable(
+        ["Criterion", "Title", "Tool", "Expected Detectors"],
+        missedRows.map((row) => [row.id, row.title, row.toolLabel, row.expected.join(", ")])
+      ),
+    "",
+    "## Unique Criteria Seen",
+    "",
+    markdownTable(
+      ["Tool", "Criteria only this tool reported"],
+      uniqueRows.map((row) => [row.label, row.criteria.length === 0 ? "None" : row.criteria.join(", ")])
+    ),
+    "",
+    "## Finding Details",
+    "",
+    ...totals.flatMap((result) => renderMarkdownFindingSection(result)),
+    ""
+  ].join("\n");
+}
+
 function buildToolSummaries(results, manifest) {
   const manifestIds = new Set((manifest.criteria ?? []).map((criterion) => criterion.id));
   const manifestCriteriaTotal = manifestIds.size;
@@ -671,6 +777,22 @@ function buildUniqueCoverage(results) {
   });
 }
 
+function buildMissedExpectedRows(results, manifest) {
+  const automatedTools = new Map(results.map((result) => [result.id, result.label]));
+  return (manifest.criteria ?? []).flatMap((criterion) =>
+    (criterion.detection ?? [])
+      .filter((toolId) => automatedTools.has(toolId))
+      .filter((toolId) => !results.find((result) => result.id === toolId)?.criteria.includes(criterion.id))
+      .map((toolId) => ({
+        id: criterion.id,
+        title: criterion.title,
+        expected: criterion.detection ?? [],
+        toolId,
+        toolLabel: automatedTools.get(toolId)
+      }))
+  );
+}
+
 function criteriaCovered(findings) {
   return [...new Set(findings.flatMap((finding) => finding.wcag ?? []))].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
 }
@@ -701,4 +823,66 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function renderMarkdownFindingSection(result) {
+  const lines = [
+    `### ${result.label}`,
+    "",
+    `Findings: ${result.findings.length}`,
+    ""
+  ];
+
+  if (result.stderr) {
+    lines.push(`Runner stderr: \`${markdownInline(result.stderr)}\``, "");
+  }
+
+  if (result.findings.length === 0) {
+    lines.push(result.ok ? "No findings reported." : "No findings available because the runner failed.", "");
+    return lines;
+  }
+
+  const groups = new Map();
+  for (const finding of result.findings) {
+    const key = finding.wcag?.length ? finding.wcag.join(", ") : "Unmapped";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(finding);
+  }
+
+  for (const [wcag, group] of groups) {
+    lines.push(`#### WCAG ${wcag} (${group.length})`, "");
+    lines.push(markdownTable(
+      ["Rule", "Title", "Target"],
+      group.slice(0, 12).map((finding) => [
+        finding.id ?? "unknown",
+        finding.title ?? finding.severity ?? "Finding",
+        finding.target ?? ""
+      ])
+    ));
+    if (group.length > 12) lines.push("", `${group.length - 12} more findings in this group.`);
+    lines.push("");
+  }
+
+  return lines;
+}
+
+function markdownTable(headers, rows) {
+  const escapedHeaders = headers.map(markdownCell);
+  const escapedRows = rows.map((row) => row.map(markdownCell));
+  return [
+    `| ${escapedHeaders.join(" | ")} |`,
+    `| ${headers.map(() => "---").join(" | ")} |`,
+    ...escapedRows.map((row) => `| ${row.join(" | ")} |`)
+  ].join("\n");
+}
+
+function markdownCell(value) {
+  return markdownInline(value).replaceAll("\n", "<br>");
+}
+
+function markdownInline(value) {
+  return String(value)
+    .replaceAll("\\", "\\\\")
+    .replaceAll("|", "\\|")
+    .replaceAll("`", "\\`");
 }

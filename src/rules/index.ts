@@ -20,7 +20,7 @@ import { nativeRoleRule } from "./native-role.js";
 import { placeholderLabelRule } from "./web-placeholder-label.js";
 import { pointerCancellationRule } from "./web-pointer-cancellation.js";
 import { positiveTabIndexRule } from "./web-positive-tabindex.js";
-import { contrastRuntimeRule, focusVisibleRuntimeRule, reflowRuntimeRule, skipLinkRuntimeRule, targetSizeRuntimeRule } from "./runtime-rules.js";
+import { contrastRuntimeRule, focusObscuredRuntimeRule, focusVisibleRuntimeRule, hoverFocusContentRuntimeRule, keyboardTrapRuntimeRule, reflowRuntimeRule, skipLinkRuntimeRule, targetSizeRuntimeRule, textSpacingRuntimeRule } from "./runtime-rules.js";
 import { sensoryInstructionsRule } from "./web-sensory-instructions.js";
 import { statusLiveRegionRule } from "./web-status-live-region.js";
 import { unnamedControlRule } from "./web-unnamed-control.js";
@@ -56,7 +56,11 @@ export const rules: RuleDefinition[] = [
   focusVisibleRuntimeRule,
   targetSizeRuntimeRule,
   reflowRuntimeRule,
-  skipLinkRuntimeRule
+  skipLinkRuntimeRule,
+  textSpacingRuntimeRule,
+  hoverFocusContentRuntimeRule,
+  keyboardTrapRuntimeRule,
+  focusObscuredRuntimeRule
 ];
 
 export function findRule(ruleId: string): RuleDefinition | undefined {

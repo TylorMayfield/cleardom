@@ -243,6 +243,10 @@ cleardom scan src --standard wcag30-draft
 - `CDOM028`: instructions may rely on sensory characteristics
 - `CDOM029`: foreign-language text is not marked with lang
 - `CDOM030`: focus or input handler may change context unexpectedly
+- `CDOM031`: text spacing causes content loss or overlap
+- `CDOM032`: hover or focus content is not dismissible or hoverable
+- `CDOM033`: keyboard focus appears trapped
+- `CDOM034`: focused control is fully obscured by author content
 
 The score is automated guidance for developer workflow quality. It is not a legal compliance claim and does not replace manual accessibility testing.
 
@@ -250,4 +254,4 @@ The score is automated guidance for developer workflow quality. It is not a lega
 
 Current focus: high-confidence static checks, honest benchmark coverage, and low-friction developer feedback.
 
-Next likely engine work: deeper runtime interaction checks for hover/focus content, text spacing, keyboard traps, focus obscuring, and CSS-dependent accessibility issues.
+Next likely engine work: broaden high-confidence runtime coverage for additional CSS-dependent accessibility issues while keeping noisy detections out of the default rules.

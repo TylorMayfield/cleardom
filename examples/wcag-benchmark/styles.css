@@ -127,21 +127,33 @@ textarea:focus {
   line-height: 1;
 }
 
-.overlap {
-  position: relative;
-  height: 76px;
+.spacing-clip p {
+  width: 210px;
+  height: 22px;
   overflow: hidden;
 }
 
-.overlap span {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 260px;
+.focus-covered {
+  position: relative;
 }
 
-.overlap span + span {
-  top: 22px;
+.focus-covered button {
+  position: absolute;
+  left: 16px;
+  top: 56px;
+  width: 150px;
+  height: 36px;
+}
+
+.focus-covered div {
+  position: absolute;
+  left: 16px;
+  top: 56px;
+  z-index: 2;
+  width: 150px;
+  height: 36px;
+  background: #fff;
+  border: 1px solid #888;
 }
 
 .reflow-box {

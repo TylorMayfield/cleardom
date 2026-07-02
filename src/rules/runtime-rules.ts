@@ -103,3 +103,83 @@ export const skipLinkRuntimeRule: RuleDefinition = {
   examples: [],
   check: noopCheck
 };
+
+export const textSpacingRuntimeRule: RuleDefinition = {
+  id: "CDOM031",
+  title: "Text spacing causes content loss or overlap",
+  severity: "warning",
+  confidence: "medium",
+  category: "readability",
+  wcag: ["1.4.12"],
+  standards: [
+    { version: "wcag21", criterion: "1.4.12", level: "aa", title: "Text Spacing" },
+    { version: "wcag22", criterion: "1.4.12", level: "aa", title: "Text Spacing" },
+    { version: "wcag30", criterion: "adaptable-text", title: "Text can be adapted without losing content" }
+  ],
+  platforms: ["web"],
+  fixable: false,
+  summary: "Content should remain readable when users increase text spacing.",
+  guidance: "Allow text containers to grow or wrap when line, paragraph, letter, and word spacing are increased.",
+  examples: [],
+  check: noopCheck
+};
+
+export const hoverFocusContentRuntimeRule: RuleDefinition = {
+  id: "CDOM032",
+  title: "Hover or focus content is not dismissible or hoverable",
+  severity: "warning",
+  confidence: "medium",
+  category: "keyboard",
+  wcag: ["1.4.13"],
+  standards: [
+    { version: "wcag21", criterion: "1.4.13", level: "aa", title: "Content on Hover or Focus" },
+    { version: "wcag22", criterion: "1.4.13", level: "aa", title: "Content on Hover or Focus" },
+    { version: "wcag30", criterion: "predictable-help", title: "Transient content is predictable and controllable" }
+  ],
+  platforms: ["web"],
+  fixable: false,
+  summary: "Additional content triggered by hover or focus should be dismissible, hoverable, and persistent.",
+  guidance: "Make hover or focus content dismissible with Escape and keep it available while the pointer moves over it.",
+  examples: [],
+  check: noopCheck
+};
+
+export const keyboardTrapRuntimeRule: RuleDefinition = {
+  id: "CDOM033",
+  title: "Keyboard focus appears trapped",
+  severity: "critical",
+  confidence: "medium",
+  category: "keyboard",
+  wcag: ["2.1.2"],
+  standards: [
+    { version: "wcag20", criterion: "2.1.2", level: "a", title: "No Keyboard Trap" },
+    { version: "wcag21", criterion: "2.1.2", level: "a", title: "No Keyboard Trap" },
+    { version: "wcag22", criterion: "2.1.2", level: "a", title: "No Keyboard Trap" },
+    { version: "wcag30", criterion: "keyboard-trap", title: "Keyboard focus can leave components" }
+  ],
+  platforms: ["web"],
+  fixable: false,
+  summary: "Keyboard users must be able to move focus away from every component.",
+  guidance: "Let Tab and Shift+Tab move focus out of custom widgets, or clearly document and implement a standard escape method.",
+  examples: [],
+  check: noopCheck
+};
+
+export const focusObscuredRuntimeRule: RuleDefinition = {
+  id: "CDOM034",
+  title: "Focused control is fully obscured by author content",
+  severity: "critical",
+  confidence: "medium",
+  category: "keyboard",
+  wcag: ["2.4.11"],
+  standards: [
+    { version: "wcag22", criterion: "2.4.11", level: "aa", title: "Focus Not Obscured (Minimum)" },
+    { version: "wcag30", criterion: "focus-visible", title: "Focused content remains visible" }
+  ],
+  platforms: ["web"],
+  fixable: false,
+  summary: "The focused component should remain at least partially visible.",
+  guidance: "Move sticky or overlay content so it does not fully cover the focused control.",
+  examples: [],
+  check: noopCheck
+};

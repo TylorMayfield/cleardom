@@ -46,7 +46,7 @@ test("WCAG false-positive fixture has no ClearDOM findings", async () => {
 });
 
 test("WCAG benchmark manifest covers every WCAG 2.2 A/AA criterion", async () => {
-  const manifest = JSON.parse(await fs.readFile(path.resolve("examples/wcag-benchmark/manifest.json"), "utf8")) as { criteria: Array<{ id: string }> };
+  const manifest = JSON.parse(await fs.readFile(path.resolve("examples/wcag-benchmark/manifest.json"), "utf8")) as { criteria: Array<{ id: string; detection: string[] }> };
   const ids = manifest.criteria.map((criterion) => criterion.id);
 
   assert.deepEqual(ids, [
@@ -106,4 +106,33 @@ test("WCAG benchmark manifest covers every WCAG 2.2 A/AA criterion", async () =>
     "4.1.2",
     "4.1.3"
   ]);
+
+  for (const id of ["1.4.12", "1.4.13", "2.1.2", "2.4.11"]) {
+    assert.equal(manifest.criteria.find((criterion) => criterion.id === id)?.detection.includes("cleardom"), true);
+  }
+});
+
+test("WCAG benchmark fixture renders every manifest case", async () => {
+  const manifest = JSON.parse(await fs.readFile(path.resolve("examples/wcag-benchmark/manifest.json"), "utf8")) as { criteria: Array<{ id: string; detection: string[] }> };
+  const html = await fs.readFile(path.resolve("examples/wcag-benchmark/index.html"), "utf8");
+  const renderedCaseIds = [...html.matchAll(/data-case="([^"]+)"/g)].map((match) => match[1]);
+
+  assert.deepEqual(renderedCaseIds.sort((left, right) => left.localeCompare(right, undefined, { numeric: true })), manifest.criteria.map((criterion) => criterion.id));
+
+  for (const criterion of manifest.criteria) {
+    assert.ok(criterion.detection.length > 0, `${criterion.id} should list at least one detection bucket`);
+    assert.ok(
+      criterion.detection.every((bucket) => ["cleardom", "axe", "pa11y", "manual"].includes(bucket)),
+      `${criterion.id} has an unknown detection bucket`
+    );
+  }
+});
+
+test("benchmark runner writes a GitHub Markdown report", async () => {
+  const script = await fs.readFile(path.resolve("scripts/benchmark.mjs"), "utf8");
+
+  assert.match(script, /benchmark-report\.md/);
+  assert.match(script, /renderMarkdown/);
+  assert.match(script, /Missed Expected Cases/);
+  assert.match(script, /WCAG Coverage Matrix/);
 });
