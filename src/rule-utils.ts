@@ -17,6 +17,16 @@ export function isNativeInteractive(tagName: string): boolean {
   return ["button", "a", "input", "select", "textarea"].includes(tagName.toLowerCase());
 }
 
+export function hasClickHandler(element: JsxElement, context: RuleContext): boolean {
+  return [
+    "onClick",
+    "@click",
+    "v-on:click",
+    "(click)",
+    "on:click"
+  ].some((name) => context.hasAttribute(element, name));
+}
+
 export function isWebInteractive(element: JsxElement, context: RuleContext): boolean {
   const tag = element.tagName.toLowerCase();
   const role = elementRole(element, context);
@@ -82,12 +92,19 @@ export function visibleLabel(element: JsxElement, context: RuleContext): string 
 
 export function elementRole(element: JsxElement, context: RuleContext): string | undefined {
   const configured = context.options.components[element.tagName]?.role;
+  const polymorphic = staticAttributeValue(element, context, "as")?.toLowerCase();
+  if (polymorphic === "button") return "button";
+  if (polymorphic === "a") return "link";
+  if (polymorphic === "input" || polymorphic === "textarea") return "textbox";
   return configured ?? staticAttributeValue(element, context, "role")?.toLowerCase();
 }
 
 export function staticAttributeValue(element: JsxElement, context: RuleContext, name: string): string | undefined {
-  const attribute = context.getAttribute(element, name);
-  return attribute?.kind === "static" && typeof attribute.value === "string" ? attribute.value : undefined;
+  const attribute = attributeWithAliases(element, context, name);
+  if (!attribute || typeof attribute.value !== "string") return undefined;
+  if (attribute.kind === "static") return attribute.value;
+  if (attribute.kind === "expression") return expressionStaticValue(attribute.value);
+  return undefined;
 }
 
 export function hasFormLabel(element: JsxElement, context: RuleContext): boolean {
@@ -116,11 +133,15 @@ export function hasFormLabel(element: JsxElement, context: RuleContext): boolean
 export function hasKeyboardSupport(element: JsxElement, context: RuleContext): boolean {
   return context.hasAttribute(element, "onKeyDown")
     || context.hasAttribute(element, "onKeyUp")
-    || context.hasAttribute(element, "onKeyPress");
+    || context.hasAttribute(element, "onKeyPress")
+    || context.hasAttribute(element, "@keydown")
+    || context.hasAttribute(element, "v-on:keydown")
+    || context.hasAttribute(element, "(keydown)")
+    || context.hasAttribute(element, "on:keydown");
 }
 
 export function hasTabStop(element: JsxElement, context: RuleContext): boolean {
-  return context.hasAttribute(element, "tabIndex") || context.hasAttribute(element, "tabindex");
+  return context.hasAttribute(element, "tabIndex") || context.hasAttribute(element, "tabindex") || context.hasAttribute(element, "[tabindex]");
 }
 
 export function isAriaHidden(element: JsxElement, context: RuleContext): boolean {
@@ -138,4 +159,20 @@ function componentNameProps(element: JsxElement, context: RuleContext): string[]
 
 function componentVisibleLabelProps(element: JsxElement, context: RuleContext): string[] {
   return context.options.components[element.tagName]?.labelProps ?? [];
+}
+
+function attributeWithAliases(element: JsxElement, context: RuleContext, name: string) {
+  return context.getAttribute(element, name)
+    ?? context.getAttribute(element, `attr.${name}`)
+    ?? context.getAttribute(element, `:${name}`)
+    ?? context.getAttribute(element, `v-bind:${name}`)
+    ?? context.getAttribute(element, `[${name}]`)
+    ?? context.getAttribute(element, `[attr.${name}]`);
+}
+
+function expressionStaticValue(value: string): string | undefined {
+  const trimmed = value.trim();
+  const literal = trimmed.match(/^["'`]([^"'`{}]+)["'`]$/);
+  if (literal) return literal[1];
+  return undefined;
 }

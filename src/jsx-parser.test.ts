@@ -30,6 +30,18 @@ test("parses fragments, expression attributes, and comments", () => {
   assert.equal(elements.some((element) => element.tagName === "ignored"), false);
 });
 
+test("keeps string literal expression text", () => {
+  const elements = parseJsx('<button>{"Save"}</button>');
+
+  assert.equal(elements[0].ownText, "Save");
+});
+
+test("parses framework-style event and bound attribute names", () => {
+  const elements = parseJsx('<div @click="open" on:keydown={handle} [attr.aria-label]="\'Open\'" />');
+
+  assert.deepEqual(elements[0].attributes.map((attribute) => attribute.name), ["@click", "on:keydown", "[attr.aria-label]"]);
+});
+
 test("tracks multiline line and column", () => {
   const elements = parseJsx("const view = (\n  <div>\n    <button />\n  </div>\n);");
 

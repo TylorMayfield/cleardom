@@ -11,8 +11,40 @@ test("flags web controls without accessible names", () => {
 test("accepts visible text and aria labels as accessible names", () => {
   assert.equal(scanSource("<button><span>Close</span></button>", "Button.tsx").some((finding) => finding.ruleId === "CDOM001"), false);
   assert.equal(scanSource('<button aria-label="Close"><XIcon /></button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM001"), false);
+  assert.equal(scanSource('<button aria-label={"Close"}><XIcon /></button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM001"), false);
+  assert.equal(scanSource('<button>{"Close"}</button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM001"), false);
   assert.equal(scanSource('<button aria-labelledby="close-label"><XIcon /></button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM001"), false);
   assert.equal(scanSource('<button title="Close"><XIcon /></button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM001"), false);
+});
+
+test("TypeScript semantic analysis resolves constants and object spreads", () => {
+  const source = `
+    const label = "Close cart";
+    const props = { "aria-label": label };
+    export function Checkout() {
+      return <button {...props}><XIcon /></button>;
+    }
+  `;
+
+  assert.equal(scanSource(source, "Checkout.tsx").some((finding) => finding.ruleId === "CDOM001"), false);
+  assert.equal(scanSource(source, "Checkout.tsx", { semantic: "off" }).some((finding) => finding.ruleId === "CDOM001"), true);
+});
+
+test("TypeScript semantic analysis resolves simple intrinsic tag aliases", () => {
+  const source = `
+    const Control = "button";
+    export function Checkout() {
+      return <Control aria-label="Close cart"><XIcon /></Control>;
+    }
+  `;
+
+  assert.equal(scanSource(source, "Checkout.tsx").some((finding) => finding.ruleId === "CDOM001"), false);
+});
+
+test("semantic off keeps unresolved dynamic expressions unknown", () => {
+  const source = "export function Checkout({ label }) { return <button aria-label={label}><XIcon /></button>; }";
+
+  assert.equal(scanSource(source, "Checkout.tsx").some((finding) => finding.ruleId === "CDOM001"), true);
 });
 
 test("resolves aria-labelledby text by id", () => {
@@ -103,6 +135,18 @@ test("flags image alt, anchor href, keyboard, and heading order issues", () => {
   assert.equal(findings.some((finding) => finding.ruleId === "CDOM006"), true);
   assert.equal(findings.some((finding) => finding.ruleId === "CDOM007"), true);
   assert.equal(findings.some((finding) => finding.ruleId === "CDOM008"), true);
+});
+
+test("flags framework template click handlers without keyboard support", () => {
+  assert.equal(scanSource('<template><div @click="open">Open</div></template>', "Component.vue").some((finding) => finding.ruleId === "CDOM007"), true);
+  assert.equal(scanSource('<div on:click={open}>Open</div>', "Component.svelte").some((finding) => finding.ruleId === "CDOM007"), true);
+  assert.equal(scanSource('<div (click)="open()">Open</div>', "component.component.html").some((finding) => finding.ruleId === "CDOM007"), true);
+  assert.equal(scanSource('<div @click="open" @keydown="open" tabindex="0">Open</div>', "Component.vue").some((finding) => finding.ruleId === "CDOM007"), false);
+});
+
+test("scans Astro and MDX markup through source adapters", () => {
+  assert.equal(scanSource("---\nconst label = 'x';\n---\n<button />", "Button.astro").some((finding) => finding.ruleId === "CDOM001"), true);
+  assert.equal(scanSource("# Docs\n\n<button />", "Button.mdx").some((finding) => finding.ruleId === "CDOM001"), true);
 });
 
 test("supports disabling and overriding rules", () => {

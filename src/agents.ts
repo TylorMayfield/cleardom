@@ -157,7 +157,8 @@ Use ClearDOM as the accessibility and assistive-technology guardrail for this co
 
 ## Commands
 
-- Local check: \`npx cleardom@latest scan . --fail-on none\`
+- Local check: \`npx cleardom@latest --fail-on none\`
+- Changed-files check: \`npx cleardom@latest --diff --fail-on none\`
 - Explain a finding: \`npx cleardom@latest explain CDOM001\`
 - Regression gate: \`npx cleardom@latest ci .\`
 - Baseline existing issues once: \`npx cleardom@latest scan . --write-baseline cleardom-baseline.json\`

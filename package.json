@@ -1,6 +1,6 @@
 {
   "name": "cleardom",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Developer-first accessibility and readability scanner for React and React Native.",
   "type": "module",
   "license": "MIT",
@@ -40,13 +40,13 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "puppeteer-core": "^25.2.1"
+    "puppeteer-core": "^25.2.1",
+    "typescript": "^5.5.4"
   },
   "devDependencies": {
     "@axe-core/puppeteer": "^4.12.1",
     "@types/node": "^26.0.1",
-    "pa11y": "^9.1.1",
-    "typescript": "^5.5.4"
+    "pa11y": "^9.1.1"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [

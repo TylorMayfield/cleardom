@@ -3,24 +3,25 @@ import * as path from "node:path";
 import * as puppeteer from "puppeteer-core";
 import { fingerprintFinding, markBaselineFindings, readBaseline } from "./baseline.js";
 import { isRuleEnabled, matchesAnyPattern, resolveComponentMappings, resolveScanOptions, severityOverride } from "./config.js";
-import { parseJsx } from "./jsx-parser.js";
 import { auditRuntimeUrl } from "./runtime.js";
 import { rules, summarizeRule } from "./rules/index.js";
+import { createSemanticProject, isSemanticSourceFile, parseSemanticSource } from "./semantic.js";
+import { parseSource, supportedExtensions } from "./source-adapters.js";
 import { findStandard, referencesForStandard, resolveStandardId, ruleAppliesToStandard } from "./standards.js";
 import type { Finding, JsxAttribute, JsxElement, ResolvedScanOptions, RuleDefinition, ScanOptions, ScanResult, ScoreBreakdown, Severity } from "./types.js";
 
-const scanExtensions = new Set([".jsx", ".tsx", ".js", ".ts", ".html"]);
 const ignoredDirectories = new Set([".git", ".cleardom", "node_modules", "dist", "build", ".next", "coverage"]);
 
 export async function scanPath(targetPath: string, options: ScanOptions = {}): Promise<ScanResult> {
   const resolvedOptions = await resolveScanOptions(options);
   const root = path.resolve(targetPath);
   const files = await collectFiles(root, resolvedOptions);
+  const semanticProject = createSemanticProject(files, resolvedOptions);
   const findings: Finding[] = [];
 
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
-    findings.push(...scanSource(source, file, resolvedOptions));
+    findings.push(...scanSourceWithElements(source, file, semanticProject.elementsByFile.get(file) ?? parseSource(source, file), resolvedOptions));
   }
 
   if (resolvedOptions.runtimeUrl) {
@@ -43,6 +44,8 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}): P
     score,
     rules: activeRules(resolvedOptions).map(({ rule, severity }) => summarizeRule(rule, severity)),
     standard: findStandard(resolvedOptions.standard),
+    semanticAnalysis: semanticProject.analysis,
+    semanticDiagnostics: semanticProject.diagnostics,
     baseline
   };
 }
@@ -91,6 +94,18 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
       score,
       rules: activeRules(resolvedOptions).map(({ rule, severity }) => summarizeRule(rule, severity)),
       standard: findStandard(resolvedOptions.standard),
+      semanticAnalysis: {
+        mode: resolvedOptions.semantic,
+        adapter: "lightweight",
+        filesAnalyzed: 0,
+        filesFallback: 1
+      },
+      semanticDiagnostics: [{
+        file: url,
+        message: "Live URL scans use rendered HTML and runtime checks; source semantic analysis is not available.",
+        severity: "info",
+        adapter: "lightweight"
+      }],
       baseline
     };
   } finally {
@@ -100,7 +115,13 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
 
 export function scanSource(source: string, file: string, options: ScanOptions | ResolvedScanOptions = {}): Finding[] {
   const resolvedOptions = isResolvedOptions(options) ? options : resolveInlineOptions(options);
-  const elements = parseJsx(source);
+  const elements = resolvedOptions.semantic !== "off" && isSemanticSourceFile(file)
+    ? parseSemanticSource(source, file)
+    : parseSource(source, file);
+  return scanSourceWithElements(source, file, elements, resolvedOptions);
+}
+
+function scanSourceWithElements(source: string, file: string, elements: JsxElement[], resolvedOptions: ResolvedScanOptions): Finding[] {
   const findings: Finding[] = [];
 
   for (const { rule, severity } of activeRules(resolvedOptions)) {
@@ -146,10 +167,15 @@ async function collectFiles(targetPath: string, options: ResolvedScanOptions): P
 }
 
 function shouldScanFile(filePath: string, options: ResolvedScanOptions): boolean {
-  if (!scanExtensions.has(path.extname(filePath))) return false;
+  if (!isSupportedSourceFile(filePath)) return false;
   const relative = path.relative(options.rootDir, filePath);
   if (options.include.length > 0 && !matchesAnyPattern(relative, options.include)) return false;
   return !isExcluded(filePath, options);
+}
+
+function isSupportedSourceFile(filePath: string): boolean {
+  const normalized = filePath.split(path.sep).join("/");
+  return [...supportedExtensions].some((extension) => normalized.endsWith(extension));
 }
 
 function isExcluded(filePath: string, options: ResolvedScanOptions): boolean {
@@ -270,6 +296,7 @@ function resolveInlineOptions(options: ScanOptions): ResolvedScanOptions {
     baseline: options.baseline,
     verbose: options.verbose ?? false,
     runtimeUrl: options.runtimeUrl,
+    semantic: options.semantic ?? "auto",
     componentPresets: options.componentPresets ?? [],
     components: resolveComponentMappings(options.componentPresets ?? [], {}, options.components),
     configPath: options.configPath,

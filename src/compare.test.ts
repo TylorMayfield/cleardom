@@ -72,6 +72,13 @@ function scanResult(findings: Finding[]): ScanResult {
     },
     score: 100,
     rules: [],
+    semanticAnalysis: {
+      mode: "auto",
+      adapter: "lightweight",
+      filesAnalyzed: 0,
+      filesFallback: 1
+    },
+    semanticDiagnostics: [],
     standard: {
       id: "wcag22-aa",
       label: "WCAG 2.2 Level AA",

@@ -1,0 +1,4 @@
+{
+  "include": ["src/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}", "src/**/*.component.html"],
+  "exclude": []
+}

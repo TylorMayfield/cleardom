@@ -5,6 +5,8 @@ export type AttributeValueKind = "static" | "expression" | "boolean";
 export type RuleCategory = "names-and-roles" | "forms" | "keyboard" | "readability" | "react-native" | "structure";
 export type FailOn = "none" | "critical" | "warning" | "findings" | "regression";
 export type OutputFormat = "text" | "json" | "sarif";
+export type SemanticMode = "auto" | "off" | "required";
+export type SemanticAdapterId = "typescript" | "lightweight";
 export type WcagVersion = "wcag10" | "wcag20" | "wcag21" | "wcag22" | "wcag30";
 export type WcagLevel = "a" | "aa" | "aaa";
 export type StandardId =
@@ -40,6 +42,59 @@ export type JsxElement = {
   line: number;
   column: number;
   excerpt: string;
+};
+
+export type StaticValue = string | boolean | StaticObject | "unknown";
+
+export type StaticObject = {
+  [key: string]: StaticValue;
+};
+
+export type SourceLocation = {
+  file: string;
+  line: number;
+  column: number;
+};
+
+export type SemanticAttribute = {
+  rawName: string;
+  name: string;
+  staticValue?: StaticValue;
+  expression?: string;
+  confidence: Confidence;
+  location: SourceLocation;
+};
+
+export type SemanticElement = {
+  id: number;
+  tagName: string;
+  resolvedRole?: string;
+  framework: "react" | "react-native" | "html" | "vue" | "svelte" | "astro" | "angular" | "mdx" | "unknown";
+  componentOrigin?: string;
+  attributes: SemanticAttribute[];
+  childIds: number[];
+  parentId?: number;
+  location: SourceLocation;
+};
+
+export type SemanticFile = {
+  file: string;
+  elements: SemanticElement[];
+  diagnostics: SemanticDiagnostic[];
+};
+
+export type SemanticProject = {
+  files: SemanticFile[];
+  diagnostics: SemanticDiagnostic[];
+  analysis: SemanticAnalysisSummary;
+};
+
+export type CompilerAdapter = {
+  createProject: (rootDir: string, options: ResolvedScanOptions) => Promise<SemanticProject> | SemanticProject;
+  parseFile: (filePath: string) => Promise<SemanticFile> | SemanticFile;
+  resolveElement: (element: SemanticElement) => SemanticElement;
+  evaluateExpression: (expression: string) => StaticValue;
+  mapGeneratedLocation: (location: SourceLocation) => SourceLocation;
 };
 
 export type RuleDefinition = {
@@ -101,11 +156,12 @@ export type ScanConfig = {
   baseline?: string;
   verbose?: boolean;
   runtimeUrl?: string;
+  semantic?: SemanticMode;
   componentPresets?: ComponentPreset[];
   components?: Record<string, ComponentMapping>;
 };
 
-export type ComponentPreset = "radix" | "mui" | "react-aria" | "react-native";
+export type ComponentPreset = "radix" | "mui" | "react-aria" | "react-native" | "chakra" | "ant-design" | "headless-ui" | "mantine" | "react-bootstrap";
 
 export type ComponentMapping = {
   role?: "button" | "link" | "textbox" | "checkbox" | "radio" | "switch" | "tab" | "menuitem" | "image";
@@ -128,6 +184,7 @@ export type ResolvedScanOptions = {
   baseline?: string;
   verbose: boolean;
   runtimeUrl?: string;
+  semantic: SemanticMode;
   componentPresets: ComponentPreset[];
   components: Record<string, ComponentMapping>;
   configPath?: string;
@@ -152,6 +209,20 @@ export type Finding = {
   baselineStatus: "active" | "baseline";
 };
 
+export type SemanticDiagnostic = {
+  file?: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+  adapter: SemanticAdapterId;
+};
+
+export type SemanticAnalysisSummary = {
+  mode: SemanticMode;
+  adapter: SemanticAdapterId;
+  filesAnalyzed: number;
+  filesFallback: number;
+};
+
 export type ScanResult = {
   checkedFiles: number;
   findings: Finding[];
@@ -163,6 +234,8 @@ export type ScanResult = {
   score: number;
   rules: RuleSummary[];
   standard: StandardDefinition;
+  semanticAnalysis: SemanticAnalysisSummary;
+  semanticDiagnostics: SemanticDiagnostic[];
   baseline?: BaselineFile;
 };
 

@@ -11,33 +11,10 @@ const categories: RuleCategory[] = ["names-and-roles", "forms", "keyboard", "str
 
 export function formatScanResult(result: ScanResult, verbose = false): string {
   const lines = [
-    `ClearDOM checked ${result.checkedFiles} ${pluralize("file", result.checkedFiles)}`,
+    `ClearDOM score: ${result.score}/100 - ${issueSummary(result)}`,
+    `Checked ${result.checkedFiles} ${pluralize("file", result.checkedFiles)} against ${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}`,
     "",
-    `Standard: ${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}`,
-    `Score: ${result.score}/100`,
-    ""
   ];
-
-  lines.push("Issue counts");
-  lines.push(`  Active: ${result.summary.activeFindings}`);
-  lines.push(`  Baseline: ${result.summary.baselineFindings}`);
-  lines.push(`  ${result.baseline ? "Regressions" : "New findings"}: ${result.summary.regressions}`);
-  lines.push(`  Critical: ${result.summary.critical}`);
-  lines.push(`  Warnings: ${result.summary.warning}`);
-  lines.push(`  Info: ${result.summary.info}`);
-  for (const category of categories) {
-    const count = result.activeFindings.filter((finding) => finding.category === category).length;
-    if (count > 0) lines.push(`  ${category}: ${count}`);
-  }
-  lines.push("");
-
-  lines.push("Score breakdown");
-  lines.push(`  Semantic clarity: ${result.scoreBreakdown.semanticClarity}/100`);
-  lines.push(`  Keyboard/focus: ${result.scoreBreakdown.keyboardFocus}/100`);
-  lines.push(`  Readability: ${result.scoreBreakdown.readability}/100`);
-  lines.push(`  Touch accessibility: ${result.scoreBreakdown.touchAccessibility}/100`);
-  lines.push(`  Standards coverage: ${result.scoreBreakdown.standardsCoverage}/100`);
-  lines.push("");
 
   for (const severity of ["critical", "warning", "info"] as const) {
     const findings = result.activeFindings.filter((finding) => finding.severity === severity);
@@ -62,6 +39,26 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
 
   if (result.activeFindings.length === 0) {
     lines.push("No high-confidence accessibility or readability issues found.", "");
+  }
+
+  if (verbose) {
+    lines.push("Scan details");
+    lines.push(`  Semantic analysis: ${semanticLabel(result)}`);
+    lines.push(`  Active: ${result.summary.activeFindings}`);
+    lines.push(`  Baseline: ${result.summary.baselineFindings}`);
+    lines.push(`  ${result.baseline ? "Regressions" : "New findings"}: ${result.summary.regressions}`);
+    for (const category of categories) {
+      const count = result.activeFindings.filter((finding) => finding.category === category).length;
+      if (count > 0) lines.push(`  ${category}: ${count}`);
+    }
+    lines.push("");
+    lines.push("Score breakdown");
+    lines.push(`  Semantic clarity: ${result.scoreBreakdown.semanticClarity}/100`);
+    lines.push(`  Keyboard/focus: ${result.scoreBreakdown.keyboardFocus}/100`);
+    lines.push(`  Readability: ${result.scoreBreakdown.readability}/100`);
+    lines.push(`  Touch accessibility: ${result.scoreBreakdown.touchAccessibility}/100`);
+    lines.push(`  Standards coverage: ${result.scoreBreakdown.standardsCoverage}/100`);
+    lines.push("");
   }
 
   lines.push("Run:");
@@ -160,6 +157,23 @@ export function formatFindingJson(findings: Finding[]): string {
 
 function pluralize(word: string, count: number): string {
   return count === 1 ? word : `${word}s`;
+}
+
+function issueSummary(result: ScanResult): string {
+  if (result.activeFindings.length === 0) return "0 findings";
+  const parts = [
+    `${result.summary.critical} critical`,
+    `${result.summary.warning} ${pluralize("warning", result.summary.warning)}`
+  ];
+  if (result.summary.info > 0) parts.push(`${result.summary.info} info`);
+  return `${parts.join(", ")} (${result.baseline ? `${result.summary.regressions} regressions` : `${result.summary.regressions} new`})`;
+}
+
+function semanticLabel(result: ScanResult): string {
+  if (result.semanticAnalysis.adapter === "typescript") {
+    return `TypeScript Program (${result.semanticAnalysis.filesAnalyzed} ${pluralize("file", result.semanticAnalysis.filesAnalyzed)})`;
+  }
+  return `lightweight fallback (${result.semanticAnalysis.filesFallback} ${pluralize("file", result.semanticAnalysis.filesFallback)})`;
 }
 
 function formatFindingLocation(finding: Finding): string {

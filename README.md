@@ -2,19 +2,19 @@
 
 ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
 
-It is a CLI-first scanner for React, Next.js, React Native, and web apps. The v0.2 scanner is dependency-light: TypeScript for development, Node built-ins at runtime, and a small in-repo JSX reader for static checks.
+It is a CLI-first scanner for React, Next.js, React Native, and web apps. The v0.2 scanner is dependency-light: TypeScript for development, Node built-ins at runtime, and small in-repo source adapters for JSX, HTML, Vue, Svelte, Astro, Angular templates, and MDX.
 
 ## Quickstart
 
 ```sh
-npx cleardom@latest scan .
+npx cleardom@latest
+npx cleardom@latest --diff
 npx cleardom@latest install
-npx cleardom@latest init
-npx cleardom@latest scan . --write-baseline cleardom-baseline.json
-npx cleardom@latest ci .
 ```
 
-Use `scan` for local feedback, `install` to add the GitHub Actions PR reviewer and coding-agent guidance, and `ci` for pull-request regression checks. Existing projects should commit a baseline first so legacy issues remain visible without blocking merges; new issues are reported as regressions.
+Run ClearDOM from a project root to print a health score and the issues it found. Use `--diff` while you work to scan changed files only. Run `install` to add the GitHub Actions PR reviewer and coding-agent guidance.
+
+Existing projects can adopt gradually: commit a baseline once with `npx cleardom@latest scan . --write-baseline cleardom-baseline.json`, then use `npx cleardom@latest ci .` to fail only on regressions.
 
 ## Local development
 
@@ -48,11 +48,12 @@ See `examples/wcag-benchmark/manifest.json` for the WCAG 2.2 A/AA coverage map a
 ## Commands
 
 ```sh
+cleardom [path|url] [--diff] [--format text|json|sarif] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom install [--yes] [--agents] [--github-actions] [--no-github-actions] [--agent codex|claude|cursor]
 cleardom init [--dry-run]
-cleardom scan [path|url] [--format text|json|sarif] [--standard wcag22-aa] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom scan [path|url] [--diff] [--format text|json|sarif] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
-cleardom github-pr [path] [--dry-run] [--max-comments 20]
+cleardom review [path] [--dry-run] [--max-comments 20]
 cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
 cleardom explain CDOM001
 cleardom rules
@@ -82,10 +83,10 @@ cleardom agents upgrade
 cleardom agents uninstall --agent cursor
 ```
 
-The installed GitHub Actions workflow runs `cleardom github-pr .` on pull requests. In Actions, that command uses `GITHUB_TOKEN` to scan the PR head and base commit, create or update one sticky PR summary comment, and add capped inline comments on changed lines for newly introduced findings. The summary shows new, fixed, and existing findings; pull requests fail only on new findings so legacy debt stays visible without blocking unrelated work. Outside Actions, use `--dry-run` to preview the same Markdown summary locally:
+The installed GitHub Actions workflow runs `cleardom review .` on pull requests. In Actions, that command uses `GITHUB_TOKEN` to scan the PR head and base commit, create or update one sticky PR summary comment, and add capped inline comments on changed lines for newly introduced findings. The summary shows new, fixed, and existing findings; pull requests fail only on new findings so legacy debt stays visible without blocking unrelated work. Outside Actions, use `--dry-run` to preview the same Markdown summary locally:
 
 ```sh
-cleardom github-pr . --dry-run
+cleardom review . --dry-run
 ```
 
 ## Config
@@ -94,10 +95,11 @@ Create `cleardom.config.json` in the project root:
 
 ```json
 {
-  "include": ["src/**/*.{js,jsx,ts,tsx}"],
+  "include": ["src/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}", "src/**/*.component.html"],
   "exclude": ["src/**/*.test.tsx"],
   "standard": "wcag22-aa",
   "failOn": "critical",
+  "semantic": "auto",
   "runtimeUrl": "",
   "componentPresets": ["radix", "mui", "react-aria"],
   "components": {
@@ -114,7 +116,13 @@ Create `cleardom.config.json` in the project root:
 
 Component mappings teach ClearDOM about your design system without adding runtime dependencies. A mapped component can declare the semantic role it represents and which props provide its accessible name.
 
-Component presets provide starter mappings for common UI libraries. Supported presets are `radix`, `mui`, `react-aria`, and `react-native`; explicit `components` entries override preset mappings.
+Component presets provide starter mappings for common UI libraries. Supported presets are `radix`, `mui`, `react-aria`, `react-native`, `chakra`, `ant-design`, `headless-ui`, `mantine`, and `react-bootstrap`; explicit `components` entries override preset mappings.
+
+## Framework coverage
+
+ClearDOM's source checks are strongest for React-family JSX and TSX: React, Next.js, Remix, Gatsby, Vite React, Preact, Solid, Qwik-style JSX, React Native, and Expo. It also includes first-pass source adapters for Vue, Svelte, Astro, Angular component templates, plain HTML, and MDX. Those template adapters extract HTML-like markup and common event/attribute aliases; pair them with `--runtime-url` for framework-agnostic rendered DOM and CSS checks.
+
+`--semantic auto` is the default. For JavaScript, TypeScript, JSX, and TSX files, ClearDOM builds a TypeScript Program and resolves safe static semantics such as string constants, simple imported constants, object-literal prop spreads, numeric literals, template literals without dynamic holes, and simple intrinsic tag aliases. Use `--semantic off` to force the lightweight adapters, or `--semantic required` when CI should fail if compiler-backed source analysis cannot initialize. JSON output includes `semanticAnalysis` and `semanticDiagnostics`.
 
 Runtime checks use Chromium through `puppeteer-core` for CSS-dependent issues that static source cannot see. Set `CHROME_PATH=/path/to/chrome` or `PUPPETEER_EXECUTABLE_PATH=/path/to/chrome`, start your app locally, then pass `--runtime-url`.
 
@@ -156,7 +164,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npx cleardom@latest github-pr .
+      - run: npx cleardom@latest review .
         if: github.event_name == 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -13,35 +13,64 @@ test("scan prints text output", async () => {
   const fixture = await createFixture('<button aria-label="Close"><X /></button>');
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
-  assert.match(result.stdout, /ClearDOM checked 1 file/);
-  assert.match(result.stdout, /Score:/);
+  assert.match(result.stdout, /ClearDOM score:/);
+  assert.match(result.stdout, /Checked 1 file/);
 });
 
-test("scan text output shows installed-command guidance and finding fixes", async () => {
+test("default command scans the current project path", async () => {
+  const fixture = await createFixture('<button aria-label="Close"><X /></button>');
+  const result = await execFileAsync(process.execPath, [cliPath, fixture]);
+
+  assert.match(result.stdout, /ClearDOM score:/);
+  assert.match(result.stdout, /Checked 1 file/);
+});
+
+test("scan text output leads with fixes and keeps details behind verbose", async () => {
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
   assert.match(result.stdout, /Fix: Add visible text, aria-label, aria-labelledby/);
   assert.match(result.stdout, /Learn: cleardom explain CDOM001 \| https:\/\/github\.com\/cleardom\/cleardom#cdom001/);
-  assert.match(result.stdout, /New findings:/);
+  assert.match(result.stdout, /ClearDOM score:/);
   assert.match(result.stdout, /cleardom explain CDOM001/);
   assert.match(result.stdout, /cleardom rules/);
   assert.match(result.stdout, /cleardom scan \. --write-baseline cleardom-baseline\.json/);
+  assert.doesNotMatch(result.stdout, /Score breakdown/);
   assert.doesNotMatch(result.stdout, /pnpm start --/);
+});
+
+test("scan --verbose includes scan details and score breakdown", async () => {
+  const fixture = await createFixture("<button />");
+  const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--verbose"]);
+
+  assert.match(result.stdout, /Scan details/);
+  assert.match(result.stdout, /Score breakdown/);
 });
 
 test("scan --json includes score, findings, and rules", async () => {
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--json"]);
-  const json = JSON.parse(result.stdout) as { score: number; checkedFiles: number; findings: unknown[]; activeFindings: unknown[]; scoreBreakdown: { semanticClarity: number }; rules: unknown[]; standard: { id: string } };
+  const json = JSON.parse(result.stdout) as { score: number; checkedFiles: number; findings: unknown[]; activeFindings: unknown[]; scoreBreakdown: { semanticClarity: number }; rules: unknown[]; standard: { id: string }; semanticAnalysis: { adapter: string }; semanticDiagnostics: unknown[] };
 
   assert.equal(json.checkedFiles, 1);
   assert.equal(json.standard.id, "wcag22-aa");
+  assert.equal(json.semanticAnalysis.adapter, "typescript");
+  assert.equal(Array.isArray(json.semanticDiagnostics), true);
   assert.equal(typeof json.score, "number");
   assert.equal(typeof json.scoreBreakdown.semanticClarity, "number");
   assert.equal(json.findings.length > 0, true);
   assert.equal(json.activeFindings.length > 0, true);
   assert.equal(json.rules.length > 0, true);
+});
+
+test("--semantic required fails when no compiler-backed files are available", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "index.html"), "<button />", "utf8");
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [cliPath, "scan", directory, "--semantic", "required"]),
+    /Semantic analysis required/
+  );
 });
 
 test("rules and explain commands print rule metadata", async () => {
@@ -94,7 +123,8 @@ test("install --agents writes idempotent project-level agent guidance", async ()
 
   assert.match(agents, /# Project Notes/);
   assert.match(agents, /<!-- cleardom:start -->/);
-  assert.match(agents, /npx cleardom@latest scan \. --fail-on none/);
+  assert.match(agents, /npx cleardom@latest --fail-on none/);
+  assert.match(agents, /npx cleardom@latest --diff --fail-on none/);
   assert.match(claude, /ClearDOM Agent Skill/);
   assert.match(cursor, /ClearDOM Agent Skill/);
 
@@ -111,18 +141,25 @@ test("install writes a GitHub Actions PR workflow by default", async () => {
   const workflow = await fs.readFile(path.join(directory, ".github", "workflows", "cleardom.yml"), "utf8");
 
   assert.match(result.stdout, /GitHub Actions PR review/);
-  assert.match(workflow, /npx cleardom@latest github-pr \./);
+  assert.match(workflow, /npx cleardom@latest review \./);
   assert.match(workflow, /pull-requests: write/);
   assert.match(workflow, /issues: write/);
 });
 
-test("github-pr --dry-run prints a pull request summary without GitHub credentials", async () => {
+test("review --dry-run prints a pull request summary without GitHub credentials", async () => {
+  const fixture = await createFixture('<button aria-label="Close"><X /></button>');
+  const result = await execFileAsync(process.execPath, [cliPath, "review", fixture, "--dry-run", "--fail-on", "none"]);
+
+  assert.match(result.stdout, /<!-- cleardom:pr-summary -->/);
+  assert.match(result.stdout, /# ClearDOM review:/);
+  assert.match(result.stdout, /Score: \*\*/);
+});
+
+test("github-pr remains a backwards-compatible review alias", async () => {
   const fixture = await createFixture('<button aria-label="Close"><X /></button>');
   const result = await execFileAsync(process.execPath, [cliPath, "github-pr", fixture, "--dry-run", "--fail-on", "none"]);
 
-  assert.match(result.stdout, /<!-- cleardom:pr-summary -->/);
-  assert.match(result.stdout, /# ClearDOM review/);
-  assert.match(result.stdout, /Score: \*\*/);
+  assert.match(result.stdout, /# ClearDOM review:/);
 });
 
 test("agents commands detect, target, and uninstall ClearDOM guidance", async () => {
@@ -248,6 +285,21 @@ test("ci uses the default baseline and fails only on new regressions", async () 
 test("ci lets explicit fail-on override the default regression gate", async () => {
   const fixture = await createFixture("<h2>Billing</h2><h4>Details</h4>");
   await execFileAsync(process.execPath, [cliPath, "ci", fixture, "--fail-on", "critical"]);
+});
+
+test("--diff scans changed files only", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await execFileAsync("git", ["init"], { cwd: directory });
+  await fs.writeFile(path.join(directory, "Clean.tsx"), '<button aria-label="Close" />', "utf8");
+  await execFileAsync("git", ["add", "Clean.tsx"], { cwd: directory });
+  await execFileAsync("git", ["-c", "user.email=cleardom@example.com", "-c", "user.name=ClearDOM", "commit", "-m", "initial"], { cwd: directory });
+  await fs.writeFile(path.join(directory, "Changed.tsx"), "<button />", "utf8");
+
+  const result = await execFileAsync(process.execPath, [cliPath, "--diff", "--json"], { cwd: directory });
+  const json = JSON.parse(result.stdout) as { checkedFiles: number; findings: Array<{ file: string }> };
+
+  assert.equal(json.checkedFiles, 1);
+  assert.equal(json.findings.every((finding) => finding.file.endsWith("Changed.tsx")), true);
 });
 
 test("config can exclude files and disable rules", async () => {

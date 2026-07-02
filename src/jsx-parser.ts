@@ -17,7 +17,9 @@ export function parseJsx(source: string): JsxElement[] {
 
     const char = source[index];
     if (char === "{") {
-      index = readBalancedExpression(source, index);
+      const expressionEnd = readBalancedExpression(source, index);
+      appendText(stack, expressionText(source.slice(index + 1, expressionEnd - 1)));
+      index = expressionEnd;
       continue;
     }
 
@@ -136,7 +138,7 @@ function parseAttributes(source: string): JsxAttribute[] {
     if (index >= source.length) break;
 
     const nameStart = index;
-    while (index < source.length && /[\w:$.-]/.test(source[index])) {
+    while (index < source.length && /[\w:$@.[\]()*#-]/.test(source[index])) {
       index += 1;
     }
 
@@ -296,6 +298,12 @@ function skipUntil(source: string, start: number, token: string): number {
 
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function expressionText(value: string): string {
+  const trimmed = value.trim();
+  const literal = trimmed.match(/^["'`]([^"'`{}]+)["'`]$/);
+  return literal ? literal[1] : "";
 }
 
 function lineAndColumn(source: string, index: number): { line: number; column: number } {

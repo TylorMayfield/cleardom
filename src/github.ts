@@ -90,17 +90,17 @@ export async function runGithubPr(options: GithubPrOptions): Promise<{ result: S
 export function formatPullRequestSummary(result: ScanResult, options: ResolvedScanOptions): string {
   const lines = [
     marker,
-    "# ClearDOM review",
+    `# ClearDOM review: ${result.activeFindings.length === 0 ? "passed" : issueSummary(result)}`,
     "",
     `Score: **${result.score}/100**`,
-    `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"}`,
-    `Standard: **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
+    `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"} against **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
+    `Semantic analysis: **${result.semanticAnalysis.adapter === "typescript" ? "TypeScript Program" : "lightweight fallback"}**`,
     "",
-    "| Type | Count |",
+    "| Result | Count |",
     "| --- | ---: |",
     `| Active findings | ${result.summary.activeFindings} |`,
-    `| Baseline findings | ${result.summary.baselineFindings} |`,
     `| ${result.baseline ? "Regressions" : "New findings"} | ${result.summary.regressions} |`,
+    `| Baseline findings | ${result.summary.baselineFindings} |`,
     `| Critical | ${result.summary.critical} |`,
     `| Warnings | ${result.summary.warning} |`,
     `| Info | ${result.summary.info} |`,
@@ -110,13 +110,7 @@ export function formatPullRequestSummary(result: ScanResult, options: ResolvedSc
   const findings = result.activeFindings.slice(0, 30);
   if (findings.length > 0) {
     lines.push("## Findings", "");
-    for (const finding of findings) {
-      const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
-      lines.push(`- **${finding.ruleId}** ${markdownLocation(finding, options)}: ${finding.title}`);
-      lines.push(`  ${finding.message}`);
-      if (rule?.guidance) lines.push(`  Fix: ${rule.guidance}`);
-      if (rule?.docsUrl) lines.push(`  Docs: ${rule.docsUrl}`);
-    }
+    pushFindingsByFile(lines, findings, result, options);
     if (result.activeFindings.length > findings.length) {
       lines.push("", `Showing ${findings.length} of ${result.activeFindings.length} active findings. See the workflow logs for the complete scan.`);
     }
@@ -132,11 +126,11 @@ export function formatPullRequestComparisonSummary(comparison: ComparisonResult,
   const result = comparison.head;
   const lines = [
     marker,
-    "# ClearDOM review",
+    `# ClearDOM review: ${comparison.newFindings.length === 0 ? "passed" : `${comparison.summary.newFindings} new ${comparison.summary.newFindings === 1 ? "finding" : "findings"}`}`,
     "",
     `Score: **${result.score}/100**`,
-    `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"}`,
-    `Standard: **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
+    `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"} against **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
+    `Semantic analysis: **${result.semanticAnalysis.adapter === "typescript" ? "TypeScript Program" : "lightweight fallback"}**`,
     "",
     "| Delta | Count |",
     "| --- | ---: |",
@@ -150,9 +144,7 @@ export function formatPullRequestComparisonSummary(comparison: ComparisonResult,
 
   if (comparison.newFindings.length > 0) {
     lines.push("## New Findings", "");
-    for (const finding of comparison.newFindings.slice(0, 30)) {
-      pushFinding(lines, finding, result, options);
-    }
+    pushFindingsByFile(lines, comparison.newFindings.slice(0, 30), result, options);
     if (comparison.newFindings.length > 30) {
       lines.push("", `Showing 30 of ${comparison.newFindings.length} new findings. See the workflow logs for the complete scan.`);
     }
@@ -200,7 +192,7 @@ jobs:
           node-version: 20
       - name: ClearDOM PR review
         if: github.event_name == 'pull_request'
-        run: npx cleardom@latest github-pr .
+        run: npx cleardom@latest review .
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
       - name: ClearDOM main scan
@@ -338,6 +330,32 @@ function pushFinding(lines: string[], finding: Finding, result: ScanResult, opti
   lines.push(`  ${finding.message}`);
   if (rule?.guidance) lines.push(`  Fix: ${rule.guidance}`);
   if (rule?.docsUrl) lines.push(`  Docs: ${rule.docsUrl}`);
+}
+
+function pushFindingsByFile(lines: string[], findings: Finding[], result: ScanResult, options: ResolvedScanOptions): void {
+  const groups = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const file = relativeFindingPath(finding, options);
+    groups.set(file, [...(groups.get(file) ?? []), finding]);
+  }
+
+  for (const [file, fileFindings] of groups) {
+    lines.push(`### ${file}`, "");
+    for (const finding of fileFindings) {
+      pushFinding(lines, finding, result, options);
+    }
+    lines.push("");
+  }
+  if (lines[lines.length - 1] === "") lines.pop();
+}
+
+function issueSummary(result: ScanResult): string {
+  const parts = [
+    `${result.summary.critical} critical`,
+    `${result.summary.warning} ${result.summary.warning === 1 ? "warning" : "warnings"}`
+  ];
+  if (result.summary.info > 0) parts.push(`${result.summary.info} info`);
+  return parts.join(", ");
 }
 
 function markdownLocation(finding: Finding, options: ResolvedScanOptions): string {

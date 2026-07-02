@@ -8,4 +8,4 @@ They complement the WCAG benchmark by modeling common project shapes:
 - `react-native-app`: React Native screen code with native accessibility props.
 - `monorepo`: Multiple package roots, ignored build output, and include/exclude behavior.
 - `runtime-demo`: Static HTML for manual/runtime scanner demonstrations.
-
+- `framework-matrix`: JSX, Vue, Svelte, Astro, Angular template, MDX, and Solid-style smoke coverage.

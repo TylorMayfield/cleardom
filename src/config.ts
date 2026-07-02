@@ -11,6 +11,7 @@ const defaultOptions: ResolvedScanOptions = {
   failOn: "none",
   format: "text",
   verbose: false,
+  semantic: "auto",
   componentPresets: [],
   components: {},
   rootDir: process.cwd()
@@ -51,6 +52,43 @@ const componentPresetMappings: Record<ComponentPreset, Record<string, ComponentM
     TouchableWithoutFeedback: { role: "button", nameProps: ["accessibilityLabel", "aria-label", "label"] },
     TextInput: { role: "textbox", nameProps: ["accessibilityLabel", "aria-label", "label"] },
     Image: { role: "image", nameProps: ["accessibilityLabel", "alt"] }
+  },
+  chakra: {
+    Button: { role: "button", nameProps: ["aria-label"], labelProps: ["children"] },
+    IconButton: { role: "button", nameProps: ["aria-label", "label"] },
+    Input: { role: "textbox", nameProps: ["aria-label", "label"] },
+    Textarea: { role: "textbox", nameProps: ["aria-label", "label"] },
+    Link: { role: "link", nameProps: ["aria-label"], labelProps: ["children"] },
+    Switch: { role: "switch", nameProps: ["aria-label", "label"] },
+    Checkbox: { role: "checkbox", nameProps: ["aria-label", "label"], labelProps: ["children"] }
+  },
+  "ant-design": {
+    Button: { role: "button", nameProps: ["aria-label"], labelProps: ["children"] },
+    Input: { role: "textbox", nameProps: ["aria-label", "placeholder", "label"] },
+    TextArea: { role: "textbox", nameProps: ["aria-label", "placeholder", "label"] },
+    Checkbox: { role: "checkbox", nameProps: ["aria-label", "label"], labelProps: ["children"] },
+    Radio: { role: "radio", nameProps: ["aria-label", "label"], labelProps: ["children"] },
+    Switch: { role: "switch", nameProps: ["aria-label", "label"] }
+  },
+  "headless-ui": {
+    Button: { role: "button", nameProps: ["aria-label"], labelProps: ["children"] },
+    Switch: { role: "switch", nameProps: ["aria-label", "label"], labelProps: ["children"] },
+    Tab: { role: "tab", nameProps: ["aria-label", "label"], labelProps: ["children"] },
+    MenuButton: { role: "button", nameProps: ["aria-label"], labelProps: ["children"] }
+  },
+  mantine: {
+    Button: { role: "button", nameProps: ["aria-label"], labelProps: ["children"] },
+    ActionIcon: { role: "button", nameProps: ["aria-label", "label", "title"] },
+    TextInput: { role: "textbox", nameProps: ["label", "aria-label"] },
+    Textarea: { role: "textbox", nameProps: ["label", "aria-label"] },
+    Checkbox: { role: "checkbox", nameProps: ["label", "aria-label"] },
+    Switch: { role: "switch", nameProps: ["label", "aria-label"] }
+  },
+  "react-bootstrap": {
+    Button: { role: "button", nameProps: ["aria-label"], labelProps: ["children"] },
+    FormControl: { role: "textbox", nameProps: ["aria-label", "label"] },
+    FormCheck: { role: "checkbox", nameProps: ["aria-label", "label"] },
+    NavLink: { role: "link", nameProps: ["aria-label"], labelProps: ["children"] }
   }
 };
 
@@ -67,6 +105,7 @@ export async function resolveScanOptions(options: ScanOptions = {}, cwd = proces
     baseline: options.baseline ?? config.baseline,
     verbose: options.verbose ?? config.verbose ?? defaultOptions.verbose,
     runtimeUrl: options.runtimeUrl ?? config.runtimeUrl,
+    semantic: options.semantic ?? config.semantic ?? defaultOptions.semantic,
     componentPresets: options.componentPresets ?? config.componentPresets ?? defaultOptions.componentPresets,
     components: resolveComponentMappings(options.componentPresets ?? config.componentPresets ?? [], config.components, options.components),
     configPath: options.configPath,

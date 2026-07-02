@@ -11,6 +11,9 @@ importers:
       puppeteer-core:
         specifier: ^25.2.1
         version: 25.2.1
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
     devDependencies:
       '@axe-core/puppeteer':
         specifier: ^4.12.1
@@ -21,9 +24,6 @@ importers:
       pa11y:
         specifier: ^9.1.1
         version: 9.1.1(typescript@5.9.3)
-      typescript:
-        specifier: ^5.5.4
-        version: 5.9.3
 
 packages:
 

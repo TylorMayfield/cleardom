@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { promises as fs } from "node:fs";
+import { execFile } from "node:child_process";
 import * as path from "node:path";
+import { promisify } from "node:util";
 import { detectAgents, installAgents, parseAgentId } from "./agents.js";
 import { createBaseline, writeBaseline } from "./baseline.js";
 import { resolveScanOptions } from "./config.js";
@@ -9,19 +11,22 @@ import { installGithubActions, runGithubPr } from "./github.js";
 import { findRule, rules, summarizeRule } from "./rules/index.js";
 import { scanPath, scanUrl, shouldFail } from "./scanner.js";
 import { standards } from "./standards.js";
-import type { ComponentPreset, FailOn, OutputFormat, RuleOption, ScanOptions } from "./types.js";
+import type { ComponentPreset, FailOn, OutputFormat, RuleOption, ScanOptions, SemanticMode } from "./types.js";
 
 const args = process.argv.slice(2).filter((arg, index) => index !== 0 || arg !== "--");
-const command = args[0] ?? "help";
+const command = args[0] ?? "scan";
+const execFileAsync = promisify(execFile);
 
 try {
   if (command === "scan" || command === "ci") {
     await runScan(command, args.slice(1));
+  } else if (command.startsWith("-") || isPathLikeCommand(command) || await pathExists(command)) {
+    await runScan("scan", args);
   } else if (command === "install") {
     await installCommand(args.slice(1));
   } else if (command === "agents") {
     await agentsCommand(args.slice(1));
-  } else if (command === "github-pr") {
+  } else if (command === "github-pr" || command === "review") {
     await githubPrCommand(args.slice(1));
   } else if (command === "init") {
     await initConfig(args.slice(1));
@@ -73,11 +78,12 @@ function explain(ruleId: string): void {
   }
 }
 
-function parseScanArgs(values: string[]): { target: string; format?: OutputFormat; writeBaseline?: string; options: ScanOptions } {
+function parseScanArgs(values: string[]): { target: string; format?: OutputFormat; writeBaseline?: string; diff: boolean; options: ScanOptions } {
   const options: ScanOptions = {};
   let target = ".";
   let format: OutputFormat | undefined;
   let writeBaselinePath: string | undefined;
+  let diff = false;
 
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
@@ -89,6 +95,11 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
 
     if (value === "--verbose") {
       options.verbose = true;
+      continue;
+    }
+
+    if (value === "--diff") {
+      diff = true;
       continue;
     }
 
@@ -135,6 +146,12 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
       continue;
     }
 
+    if (value === "--semantic") {
+      options.semantic = parseSemanticMode(requireValue(values, index, "--semantic"));
+      index += 1;
+      continue;
+    }
+
     if (value === "--component-preset") {
       options.componentPresets = [...(options.componentPresets ?? []), parseComponentPreset(requireValue(values, index, "--component-preset"))];
       index += 1;
@@ -153,7 +170,7 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
     }
   }
 
-  return { target, format, writeBaseline: writeBaselinePath, options };
+  return { target, format, writeBaseline: writeBaselinePath, diff, options };
 }
 
 async function installCommand(values: string[]): Promise<void> {
@@ -292,6 +309,9 @@ function formatAgentDetectionResults(results: Awaited<ReturnType<typeof detectAg
 async function runScan(command: "scan" | "ci", values: string[]): Promise<void> {
   const parsed = parseScanArgs(values);
   const options = command === "ci" ? await ciOptions(parsed.target, parsed.options) : parsed.options;
+  if (parsed.diff) {
+    options.include = await diffIncludes(parsed.target, options);
+  }
   const resolvedOptions = await resolveScanOptions(options);
   const result = isUrlTarget(parsed.target)
     ? await scanUrl(parsed.target, resolvedOptions)
@@ -327,6 +347,9 @@ async function githubPrCommand(values: string[]): Promise<void> {
   }
 
   const parsed = parseScanArgs(scanArgs);
+  if (parsed.diff) {
+    parsed.options.include = await diffIncludes(parsed.target, parsed.options);
+  }
   const result = await runGithubPr({
     target: parsed.target,
     options: await ciOptions(parsed.target, parsed.options),
@@ -387,9 +410,14 @@ function parseFormat(value: string): OutputFormat {
   throw new Error("--format must be one of: text, json, sarif");
 }
 
+function parseSemanticMode(value: string): SemanticMode {
+  if (value === "auto" || value === "off" || value === "required") return value;
+  throw new Error("--semantic must be one of: auto, off, required");
+}
+
 function parseComponentPreset(value: string): ComponentPreset {
-  if (value === "radix" || value === "mui" || value === "react-aria" || value === "react-native") return value;
-  throw new Error("--component-preset must be one of: radix, mui, react-aria, react-native");
+  if (value === "radix" || value === "mui" || value === "react-aria" || value === "react-native" || value === "chakra" || value === "ant-design" || value === "headless-ui" || value === "mantine" || value === "react-bootstrap") return value;
+  throw new Error("--component-preset must be one of: radix, mui, react-aria, react-native, chakra, ant-design, headless-ui, mantine, react-bootstrap");
 }
 
 function parseRuleOption(value: string): { id: string; option: RuleOption } {
@@ -415,17 +443,81 @@ function help(): void {
   console.log(`ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
 
 Usage:
+  cleardom [path|url] [--diff] [--format text|json|sarif]
   cleardom install [--yes] [--agents] [--github-actions] [--agent codex|claude|cursor]
   cleardom init [--dry-run]
-  cleardom scan [path|url] [--format text|json|sarif] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
+  cleardom scan [path|url] [--diff] [--format text|json|sarif] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
   cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json]
-  cleardom github-pr [path] [--dry-run] [--max-comments 20]
+  cleardom review [path] [--dry-run] [--max-comments 20]
   cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
   cleardom explain CDOM001
   cleardom rules
   cleardom standards
   cleardom fix
 `);
+}
+
+async function diffIncludes(target: string, options: ScanOptions): Promise<string[]> {
+  if (isUrlTarget(target)) {
+    throw new Error("--diff can only scan local files.");
+  }
+
+  const resolvedOptions = await resolveScanOptions(options);
+  const targetRoot = path.resolve(target);
+  const rootDir = resolvedOptions.rootDir;
+  const changed = await changedFiles(rootDir);
+  const insideTarget = changed.filter((file) => {
+    const absolute = path.resolve(rootDir, file);
+    return absolute === targetRoot || absolute.startsWith(`${targetRoot}${path.sep}`) || targetRoot === rootDir;
+  });
+
+  if (insideTarget.length === 0) {
+    return ["__cleardom_no_changed_files__"];
+  }
+
+  return insideTarget.map((file) => normalizePath(file));
+}
+
+async function changedFiles(rootDir: string): Promise<string[]> {
+  const base = await git(["merge-base", "HEAD", "origin/main"], rootDir)
+    .catch(() => git(["merge-base", "HEAD", "main"], rootDir))
+    .catch(() => git(["rev-parse", "HEAD"], rootDir))
+    .catch(() => "");
+  const tracked = await git(["diff", "--name-only", "--diff-filter=ACMRTUXB", base.trim() || "HEAD", "--"], rootDir)
+    .catch(() => "");
+  const unstaged = await git(["diff", "--name-only", "--diff-filter=ACMRTUXB", "--"], rootDir)
+    .catch(() => "");
+  const staged = await git(["diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB", "--"], rootDir)
+    .catch(() => "");
+  const untracked = await git(["ls-files", "--others", "--exclude-standard"], rootDir)
+    .catch(() => "");
+  return uniqueLines([tracked, unstaged, staged, untracked].join("\n"));
+}
+
+async function git(args: string[], cwd: string): Promise<string> {
+  const result = await execFileAsync("git", args, { cwd });
+  return result.stdout;
+}
+
+function uniqueLines(value: string): string[] {
+  return [...new Set(value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))];
+}
+
+function isPathLikeCommand(value: string): boolean {
+  return value === "." || value === ".." || value.startsWith("/") || value.startsWith("./") || value.startsWith("../") || /^https?:\/\//i.test(value);
+}
+
+function normalizePath(value: string): string {
+  return value.replace(/\\/g, "/");
+}
+
+async function pathExists(value: string): Promise<boolean> {
+  try {
+    await fs.access(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function formatScan(result: Awaited<ReturnType<typeof scanPath>>, format: OutputFormat, verbose: boolean): string {
@@ -437,14 +529,15 @@ function formatScan(result: Awaited<ReturnType<typeof scanPath>>, format: Output
 async function initConfig(values: string[]): Promise<void> {
   const dryRun = values.includes("--dry-run");
   const config = {
-    include: ["src/**/*.{js,jsx,ts,tsx}", "app/**/*.{js,jsx,ts,tsx}", "components/**/*.{js,jsx,ts,tsx}"],
-    exclude: ["src/**/*.test.{js,jsx,ts,tsx}", "src/**/*.spec.{js,jsx,ts,tsx}", "**/*.stories.{js,jsx,ts,tsx}"],
+    include: ["src/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}", "app/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}", "components/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}", "src/**/*.component.html"],
+    exclude: ["src/**/*.test.{js,jsx,ts,tsx}", "src/**/*.spec.{js,jsx,ts,tsx}", "**/*.stories.{js,jsx,ts,tsx,mdx}"],
     standard: "wcag22-aa",
     failOn: "critical",
     format: "text",
     baseline: "cleardom-baseline.json",
     verbose: false,
     runtimeUrl: "",
+    semantic: "auto",
     componentPresets: ["radix", "mui", "react-aria"],
     components: {
       IconButton: { role: "button", nameProps: ["aria-label", "label"] },

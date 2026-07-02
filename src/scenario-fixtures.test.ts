@@ -67,3 +67,21 @@ test("monorepo fixture scans package sources while ignoring specs and build outp
   assert.equal(files.has("IgnoredNextBuild.js"), false);
 });
 
+test("framework matrix scans common JavaScript and TypeScript framework files", async () => {
+  const result = await scanPath(path.join(fixturesRoot, "framework-matrix"), {
+    configPath: path.join(fixturesRoot, "framework-matrix", "cleardom.config.json")
+  });
+  const ruleIds = new Set(result.findings.map((finding) => finding.ruleId));
+  const files = new Set(result.findings.map((finding) => path.basename(finding.file)));
+
+  assert.equal(result.checkedFiles, 7);
+  assert.equal(ruleIds.has("CDOM001"), true);
+  assert.equal(ruleIds.has("CDOM005"), true);
+  assert.equal(ruleIds.has("CDOM007"), true);
+  assert.equal(ruleIds.has("CDOM012"), true);
+  assert.equal(files.has("Checkout.vue"), true);
+  assert.equal(files.has("Checkout.svelte"), true);
+  assert.equal(files.has("Checkout.astro"), true);
+  assert.equal(files.has("checkout.component.html"), true);
+  assert.equal(files.has("Checkout.mdx"), true);
+});
