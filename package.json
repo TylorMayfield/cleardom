@@ -45,7 +45,7 @@
   },
   "devDependencies": {
     "@axe-core/puppeteer": "^4.12.1",
-    "@types/node": "^26.0.1",
+    "@types/node": "^26.1.0",
     "pa11y": "^9.1.1"
   },
   "pnpm": {
