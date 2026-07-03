@@ -154,7 +154,8 @@ test("review --dry-run prints a pull request summary without GitHub credentials"
   const result = await execFileAsync(process.execPath, [cliPath, "review", fixture, "--dry-run", "--fail-on", "none"]);
 
   assert.match(result.stdout, /<!-- cleardom:pr-summary -->/);
-  assert.match(result.stdout, /# ClearDOM review:/);
+  assert.match(result.stdout, /# ClearDOM PR review:/);
+  assert.match(result.stdout, /Status check: \*\*/);
   assert.match(result.stdout, /Score: \*\*/);
 });
 
@@ -162,7 +163,7 @@ test("github-pr remains a backwards-compatible review alias", async () => {
   const fixture = await createFixture('<button aria-label="Close"><X /></button>');
   const result = await execFileAsync(process.execPath, [cliPath, "github-pr", fixture, "--dry-run", "--fail-on", "none"]);
 
-  assert.match(result.stdout, /# ClearDOM review:/);
+  assert.match(result.stdout, /# ClearDOM PR review:/);
 });
 
 test("agents commands detect, target, and uninstall ClearDOM guidance", async () => {

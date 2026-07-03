@@ -16,6 +16,22 @@ Run ClearDOM from a project root to print a health score and the issues it found
 
 Existing projects can adopt gradually: commit a baseline once with `npx cleardom@latest scan . --write-baseline cleardom-baseline.json`, then use `npx cleardom@latest ci .` to fail only on regressions.
 
+## PR reviewer in 60 seconds
+
+```sh
+npx cleardom@latest install
+git add .github/workflows/cleardom.yml AGENTS.md CLAUDE.md .cursor/rules/cleardom.mdc
+git commit -m "Add ClearDOM PR review"
+```
+
+The installed workflow runs `cleardom review .` on every pull request. It posts one sticky summary, adds capped inline comments on changed lines, and fails the status check only for newly introduced findings. Legacy accessibility debt can stay visible without blocking unrelated changes.
+
+Preview the same comment locally before opening a PR:
+
+```sh
+npx cleardom@latest review . --dry-run
+```
+
 ## Local development
 
 ```sh

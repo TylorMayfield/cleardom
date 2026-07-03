@@ -23,7 +23,7 @@ type GithubPrOptions = {
   maxComments?: number;
 };
 
-type GithubContext = {
+export type GithubContext = {
   token: string;
   repository: string;
   apiUrl: string;
@@ -90,9 +90,10 @@ export async function runGithubPr(options: GithubPrOptions): Promise<{ result: S
 export function formatPullRequestSummary(result: ScanResult, options: ResolvedScanOptions): string {
   const lines = [
     marker,
-    `# ClearDOM review: ${result.activeFindings.length === 0 ? "passed" : issueSummary(result)}`,
+    `# ClearDOM PR review: ${result.activeFindings.length === 0 ? "passed" : issueSummary(result)}`,
     "",
     `Score: **${result.score}/100**`,
+    `Status check: **${shouldFail(result, options.failOn) ? "failing" : "passing"}**`,
     `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"} against **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
     `Semantic analysis: **${result.semanticAnalysis.adapter === "typescript" ? "TypeScript Program" : "lightweight fallback"}**`,
     "",
@@ -118,7 +119,7 @@ export function formatPullRequestSummary(result: ScanResult, options: ResolvedSc
     lines.push("No active ClearDOM findings on this run.");
   }
 
-  lines.push("", "<sub>ClearDOM updates this comment on each run.</sub>");
+  lines.push("", "<sub>ClearDOM updates this comment on each run. Use `cleardom explain <rule-id>` for rule docs and fix examples.</sub>");
   return lines.join("\n");
 }
 
@@ -126,9 +127,10 @@ export function formatPullRequestComparisonSummary(comparison: ComparisonResult,
   const result = comparison.head;
   const lines = [
     marker,
-    `# ClearDOM review: ${comparison.newFindings.length === 0 ? "passed" : `${comparison.summary.newFindings} new ${comparison.summary.newFindings === 1 ? "finding" : "findings"}`}`,
+    `# ClearDOM PR review: ${comparison.newFindings.length === 0 ? "passed" : `${comparison.summary.newFindings} new ${comparison.summary.newFindings === 1 ? "finding" : "findings"}`}`,
     "",
     `Score: **${result.score}/100**`,
+    `Status check: **${comparison.newFindings.length > 0 ? "failing" : "passing"}** - pull requests fail only on new findings.`,
     `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"} against **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
     `Semantic analysis: **${result.semanticAnalysis.adapter === "typescript" ? "TypeScript Program" : "lightweight fallback"}**`,
     "",
@@ -162,7 +164,7 @@ export function formatPullRequestComparisonSummary(comparison: ComparisonResult,
     }
   }
 
-  lines.push("", "<sub>ClearDOM updates this comment on each run. Pull requests fail only on new findings.</sub>");
+  lines.push("", "<sub>ClearDOM updates this comment on each run. Use `cleardom explain <rule-id>` for rule docs and fix examples.</sub>");
   return lines.join("\n");
 }
 
@@ -266,7 +268,7 @@ async function compareWithBaseTree(context: GithubContext, target: string, optio
 }
 
 async function postStickySummary(context: GithubContext, summary: string): Promise<void> {
-  const comments = await githubRequest<GithubComment[]>(context, `/repos/${context.repository}/issues/${context.pullRequest.number}/comments?per_page=100`);
+  const comments = await githubRequestAll<GithubComment>(context, `/repos/${context.repository}/issues/${context.pullRequest.number}/comments?per_page=100`);
   const existing = comments.find((comment) => comment.body?.includes(marker));
   if (existing) {
     await githubRequest(context, `/repos/${context.repository}/issues/comments/${existing.id}`, {
@@ -283,9 +285,9 @@ async function postStickySummary(context: GithubContext, summary: string): Promi
 }
 
 async function postInlineComments(context: GithubContext, result: ScanResult, options: ResolvedScanOptions, maxComments: number, findings = result.activeFindings): Promise<void> {
-  const files = await githubRequest<GithubChangedFile[]>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/files?per_page=100`);
+  const files = await githubRequestAll<GithubChangedFile>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/files?per_page=100`);
   const addedLines = new Map(files.map((file) => [file.filename, parseAddedLines(file.patch ?? "")]));
-  const existing = await githubRequest<GithubComment[]>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/comments?per_page=100`);
+  const existing = await githubRequestAll<GithubComment>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/comments?per_page=100`);
   const existingKeys = new Set(existing.filter((comment) => comment.body?.includes(inlineMarker)).map((comment) => `${comment.path}:${comment.line}:${extractRuleId(comment.body ?? "")}`));
 
   let posted = 0;
@@ -422,12 +424,30 @@ function parseAddedLines(patch: string): Set<number> {
   return added;
 }
 
-function extractRuleId(body: string): string {
-  return body.match(/\*\*(CDOM\d+):/)?.[1] ?? "";
+export function extractRuleId(body: string): string {
+  return body.match(/\*\*(CDOM[A-Z0-9_]*):/)?.[1] ?? "";
 }
 
 async function githubRequest<T = unknown>(context: GithubContext, route: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${context.apiUrl}${route}`, {
+  const { data } = await githubRequestPage<T>(context, route, init);
+  return data;
+}
+
+export async function githubRequestAll<T = unknown>(context: GithubContext, route: string): Promise<T[]> {
+  const items: T[] = [];
+  let next: string | undefined = route;
+
+  while (next) {
+    const { data, link } = await githubRequestPage<T[]>(context, next);
+    items.push(...data);
+    next = parseNextLink(link);
+  }
+
+  return items;
+}
+
+async function githubRequestPage<T = unknown>(context: GithubContext, route: string, init: RequestInit = {}): Promise<{ data: T; link?: string }> {
+  const response = await fetch(githubUrl(context, route), {
     ...init,
     headers: {
       Accept: "application/vnd.github+json",
@@ -443,8 +463,21 @@ async function githubRequest<T = unknown>(context: GithubContext, route: string,
     throw new Error(`GitHub API ${init.method ?? "GET"} ${route} failed: ${response.status} ${text}`);
   }
 
-  if (response.status === 204) return undefined as T;
-  return await response.json() as T;
+  const data = response.status === 204 ? undefined as T : await response.json() as T;
+  return { data, link: response.headers.get("link") ?? undefined };
+}
+
+function githubUrl(context: GithubContext, route: string): string {
+  return /^https?:\/\//i.test(route) ? route : `${context.apiUrl}${route}`;
+}
+
+export function parseNextLink(link: string | undefined): string | undefined {
+  if (!link) return undefined;
+  for (const part of link.split(",")) {
+    const match = part.trim().match(/^<([^>]+)>;\s*rel="([^"]+)"$/);
+    if (match?.[2] === "next") return match[1];
+  }
+  return undefined;
 }
 
 async function readOptional(resolved: string): Promise<string | undefined> {

@@ -61,7 +61,14 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
     lines.push("");
   }
 
-  lines.push("Run:");
+  if (result.activeFindings.length > 0) {
+    lines.push("PR reviewer:");
+    lines.push("  cleardom review . --dry-run");
+    lines.push("  cleardom install");
+    lines.push("");
+  }
+
+  lines.push("Next:");
   const topFinding = topPriorityFinding(result.activeFindings);
   if (topFinding) {
     lines.push(`  cleardom explain ${topFinding.ruleId}`);
