@@ -2,7 +2,7 @@ import { normalize, staticAttributeValue } from "../rule-utils.js";
 import type { JsxElement, RuleContext, RuleDefinition } from "../types.js";
 
 export const languageOfPartsRule: RuleDefinition = {
-  id: "CDOM029",
+  id: "CDOM_3_1_2_LANGUAGE_OF_PARTS",
   title: "Foreign-language text is not marked with lang",
   severity: "warning",
   confidence: "medium",

@@ -125,6 +125,13 @@ export type StandardReference = {
   title?: string;
 };
 
+export type WcagCriterion = {
+  version: Exclude<WcagVersion, "wcag10" | "wcag30">;
+  criterion: string;
+  level: WcagLevel;
+  title: string;
+};
+
 export type RuleCheck = (context: RuleContext) => Finding[];
 
 export type RuleContext = {

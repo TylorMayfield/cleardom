@@ -2,7 +2,7 @@ import { staticAttributeValue } from "../rule-utils.js";
 import type { JsxElement, RuleContext, RuleDefinition } from "../types.js";
 
 export const positiveTabIndexRule: RuleDefinition = {
-  id: "CDOM018",
+  id: "CDOM_2_4_3_POSITIVE_TABINDEX",
   title: "Positive tabIndex changes the natural focus order",
   severity: "warning",
   confidence: "high",

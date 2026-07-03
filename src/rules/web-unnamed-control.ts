@@ -2,7 +2,7 @@ import { hasAccessibleName, isWebInteractive } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const unnamedControlRule: RuleDefinition = {
-  id: "CDOM001",
+  id: "CDOM_4_1_2_UNNAMED_CONTROL",
   title: "Interactive control has no accessible name",
   severity: "critical",
   confidence: "high",

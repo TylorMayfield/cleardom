@@ -12,15 +12,15 @@ test("Next.js App Router fixture scans nested routes and honors exclusions", asy
   const ruleIds = new Set(result.findings.map((finding) => finding.ruleId));
 
   assert.equal(result.checkedFiles, 3);
-  assert.equal(ruleIds.has("CDOM001"), true);
-  assert.equal(ruleIds.has("CDOM004"), true);
-  assert.equal(ruleIds.has("CDOM005"), true);
-  assert.equal(ruleIds.has("CDOM006"), true);
-  assert.equal(ruleIds.has("CDOM007"), true);
-  assert.equal(ruleIds.has("CDOM008"), true);
-  assert.equal(ruleIds.has("CDOM010"), true);
-  assert.equal(ruleIds.has("CDOM011"), true);
-  assert.equal(ruleIds.has("CDOM019"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_UNNAMED_CONTROL"), true);
+  assert.equal(ruleIds.has("CDOM_3_3_2_PLACEHOLDER_LABEL"), true);
+  assert.equal(ruleIds.has("CDOM_1_1_1_IMAGE_ALT"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_ANCHOR_HREF"), true);
+  assert.equal(ruleIds.has("CDOM_2_1_1_KEYBOARD"), true);
+  assert.equal(ruleIds.has("CDOM_1_3_1_HEADING_ORDER"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_FORM_LABEL"), true);
+  assert.equal(ruleIds.has("CDOM_3_1_1_DOCUMENT_METADATA"), true);
+  assert.equal(ruleIds.has("CDOM_1_3_1_FIELDSET_LEGEND"), true);
   assert.equal(result.findings.some((finding) => finding.file.endsWith("page.test.tsx")), false);
 });
 
@@ -31,9 +31,9 @@ test("React design-system fixture uses component mappings and presets", async ()
   const ruleIds = new Set(result.findings.map((finding) => finding.ruleId));
 
   assert.equal(result.checkedFiles, 1);
-  assert.equal(ruleIds.has("CDOM001"), true);
-  assert.equal(ruleIds.has("CDOM004"), true);
-  assert.equal(ruleIds.has("CDOM013"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_UNNAMED_CONTROL"), true);
+  assert.equal(ruleIds.has("CDOM_3_3_2_PLACEHOLDER_LABEL"), true);
+  assert.equal(ruleIds.has("CDOM_2_5_3_LABEL_IN_NAME"), true);
   assert.equal(result.findings.some((finding) => finding.excerpt.includes("IconButton")), false);
 });
 
@@ -44,9 +44,9 @@ test("React Native fixture catches native label and role issues", async () => {
   const ruleIds = new Set(result.findings.map((finding) => finding.ruleId));
 
   assert.equal(result.checkedFiles, 1);
-  assert.equal(ruleIds.has("CDOM002"), true);
-  assert.equal(ruleIds.has("CDOM004"), true);
-  assert.equal(ruleIds.has("CDOM009"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_NATIVE_LABEL"), true);
+  assert.equal(ruleIds.has("CDOM_3_3_2_PLACEHOLDER_LABEL"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_NATIVE_ROLE"), true);
   assert.equal(result.findings.some((finding) => finding.excerpt.includes("TouchableOpacity")), false);
 });
 
@@ -58,10 +58,10 @@ test("monorepo fixture scans package sources while ignoring specs and build outp
   const ruleIds = new Set(result.findings.map((finding) => finding.ruleId));
 
   assert.equal(result.checkedFiles, 2);
-  assert.equal(ruleIds.has("CDOM001"), true);
-  assert.equal(ruleIds.has("CDOM002"), true);
-  assert.equal(ruleIds.has("CDOM006"), true);
-  assert.equal(ruleIds.has("CDOM009"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_UNNAMED_CONTROL"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_NATIVE_LABEL"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_ANCHOR_HREF"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_NATIVE_ROLE"), true);
   assert.equal(files.has("Button.spec.tsx"), false);
   assert.equal(files.has("IgnoredBuild.js"), false);
   assert.equal(files.has("IgnoredNextBuild.js"), false);
@@ -75,10 +75,10 @@ test("framework matrix scans common JavaScript and TypeScript framework files", 
   const files = new Set(result.findings.map((finding) => path.basename(finding.file)));
 
   assert.equal(result.checkedFiles, 7);
-  assert.equal(ruleIds.has("CDOM001"), true);
-  assert.equal(ruleIds.has("CDOM005"), true);
-  assert.equal(ruleIds.has("CDOM007"), true);
-  assert.equal(ruleIds.has("CDOM012"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_UNNAMED_CONTROL"), true);
+  assert.equal(ruleIds.has("CDOM_1_1_1_IMAGE_ALT"), true);
+  assert.equal(ruleIds.has("CDOM_2_1_1_KEYBOARD"), true);
+  assert.equal(ruleIds.has("CDOM_1_3_5_AUTOCOMPLETE"), true);
   assert.equal(files.has("Checkout.vue"), true);
   assert.equal(files.has("Checkout.svelte"), true);
   assert.equal(files.has("Checkout.astro"), true);

@@ -2,7 +2,7 @@ import { hasClickHandler, hasKeyboardSupport, hasTabStop, isNativeInteractive } 
 import type { RuleDefinition } from "../types.js";
 
 export const keyboardRule: RuleDefinition = {
-  id: "CDOM007",
+  id: "CDOM_2_1_1_KEYBOARD",
   title: "Clickable non-interactive element lacks keyboard support",
   severity: "critical",
   confidence: "medium",

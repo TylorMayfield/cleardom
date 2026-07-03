@@ -2,7 +2,7 @@ import { staticAttributeValue } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const documentMetadataRule: RuleDefinition = {
-  id: "CDOM011",
+  id: "CDOM_3_1_1_DOCUMENT_METADATA",
   title: "Document language or title is missing",
   severity: "warning",
   confidence: "high",

@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import { normalizeRuleId } from "./rules/index.js";
 import { resolveStandardId } from "./standards.js";
 import type { ComponentMapping, ComponentPreset, ResolvedScanOptions, RuleOption, ScanConfig, ScanOptions } from "./types.js";
 
@@ -98,7 +99,7 @@ export async function resolveScanOptions(options: ScanOptions = {}, cwd = proces
   return {
     include: options.include ?? config.include ?? defaultOptions.include,
     exclude: options.exclude ?? config.exclude ?? defaultOptions.exclude,
-    rules: { ...config.rules, ...options.rules },
+    rules: normalizeRuleOptions({ ...config.rules, ...options.rules }),
     standard: resolveStandardId(options.standard ?? config.standard ?? defaultOptions.standard),
     failOn: options.failOn ?? config.failOn ?? defaultOptions.failOn,
     format: options.format ?? config.format ?? defaultOptions.format,
@@ -111,6 +112,10 @@ export async function resolveScanOptions(options: ScanOptions = {}, cwd = proces
     configPath: options.configPath,
     rootDir: configFile.exists ? path.dirname(configFile.path) : cwd
   };
+}
+
+function normalizeRuleOptions(rules: Record<string, RuleOption> | undefined): Record<string, RuleOption> {
+  return Object.fromEntries(Object.entries(rules ?? {}).map(([ruleId, option]) => [normalizeRuleId(ruleId), option]));
 }
 
 export function isRuleEnabled(ruleId: string, option: RuleOption | undefined): boolean {

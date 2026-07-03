@@ -30,9 +30,9 @@ test("scan text output leads with fixes and keeps details behind verbose", async
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
   assert.match(result.stdout, /Fix: Add visible text, aria-label, aria-labelledby/);
-  assert.match(result.stdout, /Learn: cleardom explain CDOM001 \| https:\/\/github\.com\/cleardom\/cleardom#cdom001/);
+  assert.match(result.stdout, /Learn: cleardom explain CDOM_4_1_2_UNNAMED_CONTROL \| https:\/\/github\.com\/cleardom\/cleardom#cdom_4_1_2_unnamed_control/);
   assert.match(result.stdout, /ClearDOM score:/);
-  assert.match(result.stdout, /cleardom explain CDOM001/);
+  assert.match(result.stdout, /cleardom explain CDOM_4_1_2_UNNAMED_CONTROL/);
   assert.match(result.stdout, /cleardom rules/);
   assert.match(result.stdout, /cleardom scan \. --write-baseline cleardom-baseline\.json/);
   assert.doesNotMatch(result.stdout, /Score breakdown/);
@@ -75,27 +75,30 @@ test("--semantic required fails when no compiler-backed files are available", as
 
 test("rules and explain commands print rule metadata", async () => {
   const rules = await execFileAsync(process.execPath, [cliPath, "rules"]);
-  const explain = await execFileAsync(process.execPath, [cliPath, "explain", "CDOM001"]);
+  const explain = await execFileAsync(process.execPath, [cliPath, "explain", "CDOM_4_1_2_UNNAMED_CONTROL"]);
 
-  assert.match(rules.stdout, /CDOM001/);
-  assert.match(rules.stdout, /CDOM018/);
+  assert.match(rules.stdout, /CDOM_4_1_2_UNNAMED_CONTROL/);
+  assert.match(rules.stdout, /CDOM_2_4_3_POSITIVE_TABINDEX/);
   assert.match(rules.stdout, /Standards:/);
   assert.match(explain.stdout, /Interactive control has no accessible name/);
   assert.match(explain.stdout, /wcag22 4\.1\.2 A/);
   assert.match(explain.stdout, /Examples:/);
+
+  const legacyExplain = await execFileAsync(process.execPath, [cliPath, "explain", "CDOM001"]);
+  assert.match(legacyExplain.stdout, /CDOM_4_1_2_UNNAMED_CONTROL/);
 });
 
 test("new static rules are exposed through explain and SARIF metadata", async () => {
   const fixture = await createFixture('<div className="toast">Saved</div><video controls src="/demo.mp4" />');
-  const explain = await execFileAsync(process.execPath, [cliPath, "explain", "CDOM014"]);
+  const explain = await execFileAsync(process.execPath, [cliPath, "explain", "CDOM_4_1_3_STATUS_LIVE_REGION"]);
   const sarifResult = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--format", "sarif"]);
   const sarif = JSON.parse(sarifResult.stdout) as { runs: Array<{ tool: { driver: { rules: Array<{ id: string }> } }; results: Array<{ ruleId: string }> }> };
 
   assert.match(explain.stdout, /Status message is not exposed as a live region/);
-  assert.equal(sarif.runs[0].tool.driver.rules.some((rule) => rule.id === "CDOM014"), true);
-  assert.equal(sarif.runs[0].tool.driver.rules.some((rule) => rule.id === "CDOM015"), true);
-  assert.equal(sarif.runs[0].results.some((result) => result.ruleId === "CDOM014"), true);
-  assert.equal(sarif.runs[0].results.some((result) => result.ruleId === "CDOM015"), true);
+  assert.equal(sarif.runs[0].tool.driver.rules.some((rule) => rule.id === "CDOM_4_1_3_STATUS_LIVE_REGION"), true);
+  assert.equal(sarif.runs[0].tool.driver.rules.some((rule) => rule.id === "CDOM_1_2_1_MEDIA_ALTERNATIVE"), true);
+  assert.equal(sarif.runs[0].results.some((result) => result.ruleId === "CDOM_4_1_3_STATUS_LIVE_REGION"), true);
+  assert.equal(sarif.runs[0].results.some((result) => result.ruleId === "CDOM_1_2_1_MEDIA_ALTERNATIVE"), true);
 });
 
 test("init --dry-run prints default config", async () => {
@@ -305,12 +308,12 @@ test("--diff scans changed files only", async () => {
 test("config can exclude files and disable rules", async () => {
   const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
   await fs.writeFile(path.join(directory, "Button.tsx"), "<button />", "utf8");
-  await fs.writeFile(path.join(directory, "cleardom.config.json"), JSON.stringify({ rules: { CDOM001: "off" } }), "utf8");
+  await fs.writeFile(path.join(directory, "cleardom.config.json"), JSON.stringify({ rules: { CDOM_4_1_2_UNNAMED_CONTROL: "off" } }), "utf8");
 
   const result = await execFileAsync(process.execPath, [cliPath, "scan", directory, "--config", path.join(directory, "cleardom.config.json"), "--json"]);
   const json = JSON.parse(result.stdout) as { findings: Array<{ ruleId: string }> };
 
-  assert.equal(json.findings.some((finding) => finding.ruleId === "CDOM001"), false);
+  assert.equal(json.findings.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
 });
 
 test("config include globs match direct and nested files", async () => {

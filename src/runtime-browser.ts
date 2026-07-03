@@ -15,7 +15,7 @@ export function collectContrastIssues(): RuntimeIssue[] {
       const minimum = largeText ? 3 : 4.5;
       if (ratio >= minimum) return [];
       return [{
-        ruleId: "CDOM022",
+        ruleId: "CDOM_1_4_3_CONTRAST",
         selector: selectorFor(element),
         message: `Increase text contrast from ${ratio.toFixed(2)}:1 to at least ${minimum}:1.`
       }];
@@ -36,7 +36,7 @@ export function collectFocusVisibleIssues(): RuntimeIssue[] {
     const boxShadowMissing = style.boxShadow === "none";
     if (outlineMissing && boxShadowMissing) {
       issues.push({
-        ruleId: "CDOM023",
+        ruleId: "CDOM_2_4_7_FOCUS_VISIBLE",
         selector: selectorFor(element),
         message: "Add a visible focus indicator for this keyboard-focusable control."
       });
@@ -50,10 +50,23 @@ export function collectTargetSizeIssues(): RuntimeIssue[] {
   return interactiveElements()
     .filter((element) => isVisible(element))
     .flatMap((element) => {
-      const rect = element.getBoundingClientRect();
+      let rect = element.getBoundingClientRect();
+      if (element.tagName.toLowerCase() === "input") {
+        const type = (element.getAttribute("type") ?? "").toLowerCase();
+        if (type === "checkbox" || type === "radio") {
+          const wrappingLabel = element.closest("label");
+          if (wrappingLabel instanceof HTMLElement && isVisible(wrappingLabel)) {
+            rect = wrappingLabel.getBoundingClientRect();
+          } else if (element.id) {
+            const escapedId = element.id.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+            const explicitLabel = document.querySelector<HTMLLabelElement>(`label[for="${escapedId}"]`);
+            if (explicitLabel && isVisible(explicitLabel)) rect = explicitLabel.getBoundingClientRect();
+          }
+        }
+      }
       if (rect.width >= 24 && rect.height >= 24) return [];
       return [{
-        ruleId: "CDOM024",
+        ruleId: "CDOM_2_5_8_TARGET_SIZE",
         selector: selectorFor(element),
         message: `Increase target size from ${Math.round(rect.width)}x${Math.round(rect.height)} CSS pixels to at least 24x24.`
       }];
@@ -63,12 +76,12 @@ export function collectTargetSizeIssues(): RuntimeIssue[] {
 
 export function collectReflowIssues(): RuntimeIssue[] {
   const root = document.documentElement;
-  if (root.scrollWidth <= window.innerWidth) return [];
+  if (root.scrollWidth <= window.innerWidth + 8) return [];
   const overflowing = Array.from(document.body.querySelectorAll<HTMLElement>("body *"))
     .filter((element) => isVisible(element))
-    .find((element) => element.getBoundingClientRect().right > window.innerWidth + 1);
+    .find((element) => element.getBoundingClientRect().right > window.innerWidth + 8);
   return [{
-    ruleId: "CDOM025",
+    ruleId: "CDOM_1_4_10_REFLOW",
     selector: overflowing ? selectorFor(overflowing) : "document",
     message: `Remove horizontal overflow at 320px viewport; document width is ${root.scrollWidth}px.`
   }];
@@ -79,16 +92,21 @@ export function collectSkipLinkIssues(): RuntimeIssue[] {
   const skipLink = links.find((link) => /skip|main|content/i.test(link.textContent ?? "") || /main|content/i.test(link.hash));
   if (!skipLink) {
     return [{
-      ruleId: "CDOM026",
+      ruleId: "CDOM_2_4_1_SKIP_LINK",
       selector: "document",
       message: "Add a skip link that bypasses repeated navigation and targets the main content."
     }];
   }
 
   skipLink.focus();
-  if (!isVisible(skipLink)) {
+  const rect = skipLink.getBoundingClientRect();
+  const inViewport = rect.right > 0
+    && rect.bottom > 0
+    && rect.left < window.innerWidth
+    && rect.top < window.innerHeight;
+  if (!isVisible(skipLink) || !inViewport) {
     return [{
-      ruleId: "CDOM026",
+      ruleId: "CDOM_2_4_1_SKIP_LINK",
       selector: selectorFor(skipLink),
       message: "Make the skip link visible when it receives keyboard focus."
     }];
@@ -123,7 +141,7 @@ export function collectTextSpacingIssues(): RuntimeIssue[] {
         .filter((element) => isVisible(element))
         .find((element) => element.getBoundingClientRect().right > window.innerWidth + 1);
       issues.push({
-        ruleId: "CDOM031",
+        ruleId: "CDOM_1_4_12_TEXT_SPACING",
         selector: overflowing ? selectorFor(overflowing) : "document",
         message: "Text spacing creates horizontal overflow that may hide content."
       });
@@ -137,7 +155,7 @@ export function collectTextSpacingIssues(): RuntimeIssue[] {
       if (!/(hidden|clip)/.test(`${computed.overflow} ${computed.overflowX} ${computed.overflowY}`)) continue;
       if (element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1) {
         issues.push({
-          ruleId: "CDOM031",
+          ruleId: "CDOM_1_4_12_TEXT_SPACING",
           selector: selectorFor(element),
           message: "Text spacing causes content to be clipped inside this fixed-size container."
         });
@@ -156,7 +174,7 @@ export function collectTextSpacingIssues(): RuntimeIssue[] {
         const key = [left.selector, right.selector].sort().join("\n");
         if (beforeOverlapKeys.has(key)) continue;
         issues.push({
-          ruleId: "CDOM031",
+          ruleId: "CDOM_1_4_12_TEXT_SPACING",
           selector: left.rect.top <= right.rect.top ? left.selector : right.selector,
           message: "Text spacing causes visible text content to overlap nearby content."
         });
@@ -194,7 +212,7 @@ export function collectFocusObscuredIssues(): RuntimeIssue[] {
     if (hasVisiblePoint) continue;
 
     issues.push({
-      ruleId: "CDOM034",
+      ruleId: "CDOM_2_4_11_FOCUS_OBSCURED",
       selector: selectorFor(element),
       message: "Move overlaying content so this focused control remains at least partially visible."
     });

@@ -11,6 +11,9 @@ import { fieldsetLegendRule } from "./web-fieldset-legend.js";
 import { formLabelRule } from "./web-form-label.js";
 import { headingOrderRule } from "./heading-order.js";
 import { imageAltRule } from "./web-image-alt.js";
+import { audioControlRule, characterKeyShortcutRule, draggingMovementsRule, flashingContentRule, motionActuationRule, orientationRestrictionRule, pauseStopHideRule, pointerGesturesRule, timingAdjustableRule } from "./web-interaction-risks.js";
+import { abbreviationsRule, allErrorPreventionRule, animationFromInteractionsRule, backgroundAudioRule, changeOnRequestRule, concurrentInputRule, enhancedAuthenticationRule, enhancedContrastRule, extendedAudioDescriptionRule, focusAppearanceRule, focusObscuredEnhancedRule, helpAvailabilityRule, identifyPurposeRule, imagesOfTextNoExceptionRule, interruptionControlRule, keyboardNoExceptionRule, liveAudioTranscriptRule, locationIndicatorRule, mediaAlternativeFullRule, noTimingRule, pronunciationRule, readingLevelRule, reauthenticatingDataRule, sectionHeadingsRule, signLanguageRule, targetSizeEnhancedRule, threeFlashesRule, timeoutWarningRule, unusualWordsRule, visualPresentationRule } from "./web-aaa-review-risks.js";
+import { accessibleAuthenticationRule, consistentHelpRule, consistentIdentificationRule, consistentNavigationRule, errorPreventionRule, imagesOfTextRule, liveCaptionsRule, meaningfulSequenceRule, multipleWaysRule, nonTextContrastRule, redundantEntryRule, resizeTextRule } from "./web-content-workflow-risks.js";
 import { keyboardRule } from "./web-keyboard.js";
 import { languageOfPartsRule } from "./web-language-of-parts.js";
 import { labelInNameRule } from "./web-label-in-name.js";
@@ -52,6 +55,57 @@ export const rules: RuleDefinition[] = [
   sensoryInstructionsRule,
   languageOfPartsRule,
   contextChangeRule,
+  audioControlRule,
+  orientationRestrictionRule,
+  liveCaptionsRule,
+  signLanguageRule,
+  extendedAudioDescriptionRule,
+  mediaAlternativeFullRule,
+  liveAudioTranscriptRule,
+  meaningfulSequenceRule,
+  identifyPurposeRule,
+  resizeTextRule,
+  imagesOfTextRule,
+  enhancedContrastRule,
+  nonTextContrastRule,
+  backgroundAudioRule,
+  visualPresentationRule,
+  imagesOfTextNoExceptionRule,
+  characterKeyShortcutRule,
+  keyboardNoExceptionRule,
+  timingAdjustableRule,
+  pauseStopHideRule,
+  noTimingRule,
+  interruptionControlRule,
+  reauthenticatingDataRule,
+  timeoutWarningRule,
+  flashingContentRule,
+  threeFlashesRule,
+  animationFromInteractionsRule,
+  multipleWaysRule,
+  locationIndicatorRule,
+  sectionHeadingsRule,
+  pointerGesturesRule,
+  motionActuationRule,
+  draggingMovementsRule,
+  focusObscuredEnhancedRule,
+  focusAppearanceRule,
+  targetSizeEnhancedRule,
+  concurrentInputRule,
+  consistentNavigationRule,
+  consistentIdentificationRule,
+  consistentHelpRule,
+  unusualWordsRule,
+  abbreviationsRule,
+  readingLevelRule,
+  pronunciationRule,
+  changeOnRequestRule,
+  errorPreventionRule,
+  helpAvailabilityRule,
+  allErrorPreventionRule,
+  redundantEntryRule,
+  accessibleAuthenticationRule,
+  enhancedAuthenticationRule,
   contrastRuntimeRule,
   focusVisibleRuntimeRule,
   targetSizeRuntimeRule,
@@ -63,8 +117,51 @@ export const rules: RuleDefinition[] = [
   focusObscuredRuntimeRule
 ];
 
+export const legacyRuleAliases: Record<string, string> = {
+  CDOM001: "CDOM_4_1_2_UNNAMED_CONTROL",
+  CDOM002: "CDOM_4_1_2_NATIVE_LABEL",
+  CDOM003: "CDOM_2_4_4_AMBIGUOUS_LABEL",
+  CDOM004: "CDOM_3_3_2_PLACEHOLDER_LABEL",
+  CDOM005: "CDOM_1_1_1_IMAGE_ALT",
+  CDOM006: "CDOM_4_1_2_ANCHOR_HREF",
+  CDOM007: "CDOM_2_1_1_KEYBOARD",
+  CDOM008: "CDOM_1_3_1_HEADING_ORDER",
+  CDOM009: "CDOM_4_1_2_NATIVE_ROLE",
+  CDOM010: "CDOM_4_1_2_FORM_LABEL",
+  CDOM011: "CDOM_3_1_1_DOCUMENT_METADATA",
+  CDOM012: "CDOM_1_3_5_AUTOCOMPLETE",
+  CDOM013: "CDOM_2_5_3_LABEL_IN_NAME",
+  CDOM014: "CDOM_4_1_3_STATUS_LIVE_REGION",
+  CDOM015: "CDOM_1_2_1_MEDIA_ALTERNATIVE",
+  CDOM016: "CDOM_4_1_2_ARIA_HIDDEN_FOCUS",
+  CDOM017: "CDOM_4_1_2_DUPLICATE_ID",
+  CDOM018: "CDOM_2_4_3_POSITIVE_TABINDEX",
+  CDOM019: "CDOM_1_3_1_FIELDSET_LEGEND",
+  CDOM020: "CDOM_3_3_1_ERROR_DESCRIPTION",
+  CDOM021: "CDOM_2_5_2_POINTER_CANCELLATION",
+  CDOM022: "CDOM_1_4_3_CONTRAST",
+  CDOM023: "CDOM_2_4_7_FOCUS_VISIBLE",
+  CDOM024: "CDOM_2_5_8_TARGET_SIZE",
+  CDOM025: "CDOM_1_4_10_REFLOW",
+  CDOM026: "CDOM_2_4_1_SKIP_LINK",
+  CDOM027: "CDOM_1_4_1_USE_OF_COLOR",
+  CDOM028: "CDOM_1_3_3_SENSORY_INSTRUCTIONS",
+  CDOM029: "CDOM_3_1_2_LANGUAGE_OF_PARTS",
+  CDOM030: "CDOM_3_2_1_CONTEXT_CHANGE",
+  CDOM031: "CDOM_1_4_12_TEXT_SPACING",
+  CDOM032: "CDOM_1_4_13_HOVER_FOCUS_CONTENT",
+  CDOM033: "CDOM_2_1_2_KEYBOARD_TRAP",
+  CDOM034: "CDOM_2_4_11_FOCUS_OBSCURED"
+};
+
+export function normalizeRuleId(ruleId: string): string {
+  const alias = legacyRuleAliases[ruleId.toUpperCase()];
+  return alias ?? ruleId;
+}
+
 export function findRule(ruleId: string): RuleDefinition | undefined {
-  return rules.find((rule) => rule.id.toLowerCase() === ruleId.toLowerCase());
+  const normalized = normalizeRuleId(ruleId);
+  return rules.find((rule) => rule.id.toLowerCase() === normalized.toLowerCase());
 }
 
 export function summarizeRule(rule: RuleDefinition, severity: Severity = rule.severity): RuleSummary {

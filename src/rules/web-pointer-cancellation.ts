@@ -1,7 +1,7 @@
 import type { RuleDefinition } from "../types.js";
 
 export const pointerCancellationRule: RuleDefinition = {
-  id: "CDOM021",
+  id: "CDOM_2_5_2_POINTER_CANCELLATION",
   title: "Pointer action may fire before cancellation is possible",
   severity: "warning",
   confidence: "medium",

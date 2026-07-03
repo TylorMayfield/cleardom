@@ -2,7 +2,7 @@ import { elementRole, hasFormLabel } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const placeholderLabelRule: RuleDefinition = {
-  id: "CDOM004",
+  id: "CDOM_3_3_2_PLACEHOLDER_LABEL",
   title: "Input relies on placeholder text as its label",
   severity: "warning",
   confidence: "high",

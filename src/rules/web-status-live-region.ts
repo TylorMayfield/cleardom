@@ -15,7 +15,7 @@ const statusSignals = [
 ];
 
 export const statusLiveRegionRule: RuleDefinition = {
-  id: "CDOM014",
+  id: "CDOM_4_1_3_STATUS_LIVE_REGION",
   title: "Status message is not exposed as a live region",
   severity: "warning",
   confidence: "medium",

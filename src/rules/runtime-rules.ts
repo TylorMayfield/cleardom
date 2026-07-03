@@ -3,7 +3,7 @@ import type { RuleDefinition } from "../types.js";
 const noopCheck: RuleDefinition["check"] = () => [];
 
 export const contrastRuntimeRule: RuleDefinition = {
-  id: "CDOM022",
+  id: "CDOM_1_4_3_CONTRAST",
   title: "Text contrast is below the minimum ratio",
   severity: "critical",
   confidence: "medium",
@@ -24,7 +24,7 @@ export const contrastRuntimeRule: RuleDefinition = {
 };
 
 export const focusVisibleRuntimeRule: RuleDefinition = {
-  id: "CDOM023",
+  id: "CDOM_2_4_7_FOCUS_VISIBLE",
   title: "Focused control has no visible focus indicator",
   severity: "critical",
   confidence: "medium",
@@ -45,7 +45,7 @@ export const focusVisibleRuntimeRule: RuleDefinition = {
 };
 
 export const targetSizeRuntimeRule: RuleDefinition = {
-  id: "CDOM024",
+  id: "CDOM_2_5_8_TARGET_SIZE",
   title: "Interactive target is smaller than WCAG minimum",
   severity: "warning",
   confidence: "medium",
@@ -64,7 +64,7 @@ export const targetSizeRuntimeRule: RuleDefinition = {
 };
 
 export const reflowRuntimeRule: RuleDefinition = {
-  id: "CDOM025",
+  id: "CDOM_1_4_10_REFLOW",
   title: "Page causes horizontal overflow at narrow viewport",
   severity: "warning",
   confidence: "medium",
@@ -84,7 +84,7 @@ export const reflowRuntimeRule: RuleDefinition = {
 };
 
 export const skipLinkRuntimeRule: RuleDefinition = {
-  id: "CDOM026",
+  id: "CDOM_2_4_1_SKIP_LINK",
   title: "Skip link is missing or not visible on focus",
   severity: "warning",
   confidence: "medium",
@@ -105,7 +105,7 @@ export const skipLinkRuntimeRule: RuleDefinition = {
 };
 
 export const textSpacingRuntimeRule: RuleDefinition = {
-  id: "CDOM031",
+  id: "CDOM_1_4_12_TEXT_SPACING",
   title: "Text spacing causes content loss or overlap",
   severity: "warning",
   confidence: "medium",
@@ -125,7 +125,7 @@ export const textSpacingRuntimeRule: RuleDefinition = {
 };
 
 export const hoverFocusContentRuntimeRule: RuleDefinition = {
-  id: "CDOM032",
+  id: "CDOM_1_4_13_HOVER_FOCUS_CONTENT",
   title: "Hover or focus content is not dismissible or hoverable",
   severity: "warning",
   confidence: "medium",
@@ -145,7 +145,7 @@ export const hoverFocusContentRuntimeRule: RuleDefinition = {
 };
 
 export const keyboardTrapRuntimeRule: RuleDefinition = {
-  id: "CDOM033",
+  id: "CDOM_2_1_2_KEYBOARD_TRAP",
   title: "Keyboard focus appears trapped",
   severity: "critical",
   confidence: "medium",
@@ -166,7 +166,7 @@ export const keyboardTrapRuntimeRule: RuleDefinition = {
 };
 
 export const focusObscuredRuntimeRule: RuleDefinition = {
-  id: "CDOM034",
+  id: "CDOM_2_4_11_FOCUS_OBSCURED",
   title: "Focused control is fully obscured by author content",
   severity: "critical",
   confidence: "medium",

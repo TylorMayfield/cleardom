@@ -18,13 +18,27 @@ try {
 }
 
 async function runTool(name, options) {
-  if (name === "cleardom") return runClearDOM(options);
+  if (name === "cleardom-static") return runClearDOMStatic(options);
+  if (name === "cleardom-runtime") return runClearDOMRuntime(options);
+  if (name === "cleardom") return runClearDOMRuntime(options);
   if (name === "axe") return runAxe(options);
   if (name === "pa11y") return runPa11y(options);
   throw new Error(`Unknown benchmark tool: ${name}`);
 }
 
-async function runClearDOM({ url, sourceDir }) {
+async function runClearDOMStatic({ sourcePath }) {
+  if (!sourcePath) throw new Error("ClearDOM static benchmark requires a source file path");
+
+  const result = await scanPath(sourcePath, { standard: "wcag22-aa", format: "json" });
+
+  return {
+    ok: true,
+    rawSummary: result.summary,
+    findings: result.findings.map(clearDOMFinding)
+  };
+}
+
+async function runClearDOMRuntime({ url, sourceDir }) {
   if (!url) throw new Error("ClearDOM benchmark runs require a URL");
   if (!sourceDir) throw new Error("ClearDOM runtime benchmark requires an empty source directory");
 
@@ -33,15 +47,19 @@ async function runClearDOM({ url, sourceDir }) {
   return {
     ok: true,
     rawSummary: result.summary,
-    findings: result.findings.map((finding) => ({
-      id: finding.ruleId,
-      title: finding.title,
-      severity: finding.severity,
-      message: finding.message,
-      target: `${finding.file}:${finding.line}:${finding.column}`,
-      wcag: finding.wcag,
-      excerpt: finding.excerpt
-    }))
+    findings: result.findings.map(clearDOMFinding)
+  };
+}
+
+function clearDOMFinding(finding) {
+  return {
+    id: finding.ruleId,
+    title: finding.title,
+    severity: finding.severity,
+    message: finding.message,
+    target: `${finding.file}:${finding.line}:${finding.column}`,
+    wcag: finding.wcag,
+    excerpt: finding.excerpt
   };
 }
 

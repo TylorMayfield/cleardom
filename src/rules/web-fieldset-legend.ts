@@ -1,7 +1,7 @@
 import type { JsxElement, RuleContext, RuleDefinition } from "../types.js";
 
 export const fieldsetLegendRule: RuleDefinition = {
-  id: "CDOM019",
+  id: "CDOM_1_3_1_FIELDSET_LEGEND",
   title: "Grouped form controls are missing a legend",
   severity: "warning",
   confidence: "high",

@@ -2,7 +2,7 @@ import { normalize, staticAttributeValue } from "../rule-utils.js";
 import type { JsxElement, RuleContext, RuleDefinition } from "../types.js";
 
 export const useOfColorRule: RuleDefinition = {
-  id: "CDOM027",
+  id: "CDOM_1_4_1_USE_OF_COLOR",
   title: "Instruction or state change may rely on color alone",
   severity: "warning",
   confidence: "medium",

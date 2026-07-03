@@ -2,7 +2,7 @@ import { elementRole, hasFormLabel, staticAttributeValue } from "../rule-utils.j
 import type { JsxElement, RuleContext, RuleDefinition } from "../types.js";
 
 export const formLabelRule: RuleDefinition = {
-  id: "CDOM010",
+  id: "CDOM_4_1_2_FORM_LABEL",
   title: "Form control has no accessible label",
   severity: "critical",
   confidence: "high",

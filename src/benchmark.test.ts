@@ -9,33 +9,56 @@ test("WCAG benchmark fixture exercises every product static ClearDOM rule", asyn
   const findings = scanSource(source, "examples/wcag-benchmark/Fixture.tsx");
   const ruleIds = new Set(findings.map((finding) => finding.ruleId));
 
-  assert.deepEqual([...ruleIds].sort(), [
-    "CDOM001",
-    "CDOM002",
-    "CDOM003",
-    "CDOM004",
-    "CDOM005",
-    "CDOM006",
-    "CDOM007",
-    "CDOM008",
-    "CDOM009",
-    "CDOM010",
-    "CDOM011",
-    "CDOM012",
-    "CDOM013",
-    "CDOM014",
-    "CDOM015",
-    "CDOM016",
-    "CDOM017",
-    "CDOM018",
-    "CDOM019",
-    "CDOM020",
-    "CDOM021",
-    "CDOM027",
-    "CDOM028",
-    "CDOM029",
-    "CDOM030"
-  ]);
+  const expectedRuleIds = [
+    "CDOM_4_1_2_UNNAMED_CONTROL",
+    "CDOM_4_1_2_NATIVE_LABEL",
+    "CDOM_2_4_4_AMBIGUOUS_LABEL",
+    "CDOM_3_3_2_PLACEHOLDER_LABEL",
+    "CDOM_1_1_1_IMAGE_ALT",
+    "CDOM_4_1_2_ANCHOR_HREF",
+    "CDOM_2_1_1_KEYBOARD",
+    "CDOM_1_3_1_HEADING_ORDER",
+    "CDOM_4_1_2_NATIVE_ROLE",
+    "CDOM_4_1_2_FORM_LABEL",
+    "CDOM_3_1_1_DOCUMENT_METADATA",
+    "CDOM_1_3_5_AUTOCOMPLETE",
+    "CDOM_2_5_3_LABEL_IN_NAME",
+    "CDOM_4_1_3_STATUS_LIVE_REGION",
+    "CDOM_1_2_1_MEDIA_ALTERNATIVE",
+    "CDOM_4_1_2_ARIA_HIDDEN_FOCUS",
+    "CDOM_4_1_2_DUPLICATE_ID",
+    "CDOM_2_4_3_POSITIVE_TABINDEX",
+    "CDOM_1_3_1_FIELDSET_LEGEND",
+    "CDOM_3_3_1_ERROR_DESCRIPTION",
+    "CDOM_2_5_2_POINTER_CANCELLATION",
+    "CDOM_1_4_1_USE_OF_COLOR",
+    "CDOM_1_3_3_SENSORY_INSTRUCTIONS",
+    "CDOM_3_1_2_LANGUAGE_OF_PARTS",
+    "CDOM_3_2_1_CONTEXT_CHANGE",
+    "CDOM_1_4_2_AUDIO_CONTROL",
+    "CDOM_1_3_4_ORIENTATION",
+    "CDOM_1_2_4_LIVE_CAPTIONS",
+    "CDOM_1_3_2_MEANINGFUL_SEQUENCE",
+    "CDOM_1_4_4_RESIZE_TEXT",
+    "CDOM_1_4_5_IMAGES_OF_TEXT",
+    "CDOM_1_4_11_NON_TEXT_CONTRAST",
+    "CDOM_2_1_4_CHARACTER_KEY_SHORTCUTS",
+    "CDOM_2_2_1_TIMING_ADJUSTABLE",
+    "CDOM_2_2_2_PAUSE_STOP_HIDE",
+    "CDOM_2_3_1_FLASHING_CONTENT",
+    "CDOM_2_4_5_MULTIPLE_WAYS",
+    "CDOM_2_5_1_POINTER_GESTURES",
+    "CDOM_2_5_4_MOTION_ACTUATION",
+    "CDOM_2_5_7_DRAGGING_MOVEMENTS",
+    "CDOM_3_2_3_CONSISTENT_NAVIGATION",
+    "CDOM_3_2_4_CONSISTENT_IDENTIFICATION",
+    "CDOM_3_2_6_CONSISTENT_HELP",
+    "CDOM_3_3_4_ERROR_PREVENTION_LEGAL_FINANCIAL_DATA",
+    "CDOM_3_3_7_REDUNDANT_ENTRY",
+    "CDOM_3_3_8_ACCESSIBLE_AUTHENTICATION"
+  ];
+
+  assert.deepEqual([...ruleIds].sort(), expectedRuleIds.sort());
 });
 
 test("WCAG false-positive fixture has no ClearDOM findings", async () => {
@@ -108,7 +131,11 @@ test("WCAG benchmark manifest covers every WCAG 2.2 A/AA criterion", async () =>
   ]);
 
   for (const id of ["1.4.12", "1.4.13", "2.1.2", "2.4.11"]) {
-    assert.equal(manifest.criteria.find((criterion) => criterion.id === id)?.detection.includes("cleardom"), true);
+    assert.equal(manifest.criteria.find((criterion) => criterion.id === id)?.detection.includes("cleardom-runtime"), true);
+  }
+
+  for (const id of ["1.2.4", "1.3.2", "1.4.4", "1.4.5", "1.4.11", "2.4.5", "3.2.6", "3.3.8"]) {
+    assert.equal(manifest.criteria.find((criterion) => criterion.id === id)?.detection.includes("cleardom-static"), true);
   }
 });
 
@@ -122,9 +149,10 @@ test("WCAG benchmark fixture renders every manifest case", async () => {
   for (const criterion of manifest.criteria) {
     assert.ok(criterion.detection.length > 0, `${criterion.id} should list at least one detection bucket`);
     assert.ok(
-      criterion.detection.every((bucket) => ["cleardom", "axe", "pa11y", "manual"].includes(bucket)),
+      criterion.detection.every((bucket) => ["cleardom-static", "cleardom-runtime", "axe", "pa11y", "manual"].includes(bucket)),
       `${criterion.id} has an unknown detection bucket`
     );
+    assert.equal(criterion.detection.includes("cleardom"), false, `${criterion.id} should use split ClearDOM detector buckets`);
   }
 });
 
@@ -134,7 +162,11 @@ test("benchmark runner writes a GitHub Markdown report", async () => {
   assert.doesNotMatch(script, /tylor\.nz/);
   assert.match(script, /const useLocal = cliOptions\.local \|\| !cliOptions\.url/);
   assert.match(script, /benchmark-report\.md/);
+  assert.match(script, /wcag-coverage-tracker\.md/);
   assert.match(script, /renderMarkdown/);
-  assert.match(script, /Missed Expected Cases/);
+  assert.match(script, /buildCoverageTracker/);
+  assert.match(script, /cleardom-static/);
+  assert.match(script, /cleardom-runtime/);
+  assert.match(script, /Missed Detector Expectations/);
   assert.match(script, /WCAG Coverage Matrix/);
 });

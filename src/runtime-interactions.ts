@@ -58,7 +58,7 @@ export async function collectHoverFocusContentIssues(page: puppeteer.Page): Prom
 
       if (stillVisibleAfterEscape) {
         issues.push({
-          ruleId: "CDOM032",
+          ruleId: "CDOM_1_4_13_HOVER_FOCUS_CONTENT",
           selector,
           message: "Make hover or focus content dismissible without moving pointer hover or keyboard focus."
         });
@@ -80,7 +80,7 @@ export async function collectHoverFocusContentIssues(page: puppeteer.Page): Prom
 
       if (!remainsHoverable) {
         issues.push({
-          ruleId: "CDOM032",
+          ruleId: "CDOM_1_4_13_HOVER_FOCUS_CONTENT",
           selector,
           message: "Keep hover-triggered content visible when the pointer moves over the additional content."
         });
@@ -134,7 +134,7 @@ export async function collectKeyboardTrapIssues(page: puppeteer.Page): Promise<R
       && regionSequence.every((selector) => selector.startsWith(active.regionSelector));
     if (active.hasFocusableAfter && (stuckOnOneElement || stuckInsideRegion)) {
       return [{
-        ruleId: "CDOM033",
+        ruleId: "CDOM_2_1_2_KEYBOARD_TRAP",
         selector: active.regionSelector,
         message: "Allow keyboard focus to move out of this component with Tab or Shift+Tab."
       }];

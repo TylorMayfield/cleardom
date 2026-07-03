@@ -1,7 +1,7 @@
 import type { JsxAttribute, RuleDefinition } from "../types.js";
 
 export const contextChangeRule: RuleDefinition = {
-  id: "CDOM030",
+  id: "CDOM_3_2_1_CONTEXT_CHANGE",
   title: "Focus or input handler may change context unexpectedly",
   severity: "warning",
   confidence: "medium",

@@ -2,7 +2,7 @@ import { normalize } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const sensoryInstructionsRule: RuleDefinition = {
-  id: "CDOM028",
+  id: "CDOM_1_3_3_SENSORY_INSTRUCTIONS",
   title: "Instruction may rely on sensory characteristics",
   severity: "warning",
   confidence: "medium",

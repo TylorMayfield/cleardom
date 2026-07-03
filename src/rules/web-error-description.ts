@@ -2,7 +2,7 @@ import { staticAttributeValue } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const errorDescriptionRule: RuleDefinition = {
-  id: "CDOM020",
+  id: "CDOM_3_3_1_ERROR_DESCRIPTION",
   title: "Invalid form control is not connected to error text",
   severity: "warning",
   confidence: "medium",

@@ -1,7 +1,7 @@
 import type { RuleDefinition } from "../types.js";
 
 export const headingOrderRule: RuleDefinition = {
-  id: "CDOM008",
+  id: "CDOM_1_3_1_HEADING_ORDER",
   title: "Heading level jumps",
   severity: "warning",
   confidence: "medium",

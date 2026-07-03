@@ -33,7 +33,7 @@ The repo includes an intentionally broken benchmark site for comparing ClearDOM,
 pnpm benchmark
 ```
 
-The benchmark starts the local fixture site, runs all three tools through Chromium, measures runtime and peak RSS, and writes HTML, Markdown, and JSON reports in `examples/wcag-benchmark/reports/`. The report compares expected automated coverage, total fixture coverage, finding volume, and violation-only false-positive candidates. Set `CHROME_PATH=/path/to/chrome` if Chrome is not installed in a standard location.
+The benchmark starts the local fixture site, runs all three tools through Chromium, measures runtime and peak RSS, and writes HTML, Markdown, JSON, and a WCAG coverage tracker in `examples/wcag-benchmark/reports/`. The benchmark fixture covers the 55 WCAG 2.2 Level A/AA success criteria. The tracker covers all 86 WCAG 2.2 success criteria, including AAA, and shows which criteria ClearDOM maps to today. Set `CHROME_PATH=/path/to/chrome` if Chrome is not installed in a standard location.
 
 To compare the tools against a live site, pass a URL:
 
@@ -55,7 +55,7 @@ cleardom scan [path|url] [--diff] [--format text|json|sarif] [--standard wcag22-
 cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom review [path] [--dry-run] [--max-comments 20]
 cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
-cleardom explain CDOM001
+cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
 cleardom rules
 cleardom standards
 cleardom fix
@@ -108,8 +108,8 @@ Create `cleardom.config.json` in the project root:
     "TextInput": { "role": "textbox", "nameProps": ["aria-label", "label"] }
   },
   "rules": {
-    "CDOM003": "info",
-    "CDOM008": "off"
+    "CDOM_2_4_4_AMBIGUOUS_LABEL": "info",
+    "CDOM_1_3_1_HEADING_ORDER": "off"
   }
 }
 ```
@@ -131,7 +131,7 @@ Rule options can be `"off"`, `"critical"`, `"warning"`, `"info"`, or an object l
 ```json
 {
   "rules": {
-    "CDOM001": { "enabled": true, "severity": "critical" }
+    "CDOM_4_1_2_UNNAMED_CONTROL": { "enabled": true, "severity": "critical" }
   }
 }
 ```
@@ -213,40 +213,91 @@ cleardom scan src --standard wcag30-draft
 
 ## Rules
 
-- `CDOM001`: interactive control has no accessible name
-- `CDOM002`: React Native touch control has no accessibility label
-- `CDOM003`: interactive label is ambiguous
-- `CDOM004`: input relies on placeholder text as its label
-- `CDOM005`: image has no useful alternative text
-- `CDOM006`: anchor is missing an href
-- `CDOM007`: clickable non-interactive element lacks keyboard support
-- `CDOM008`: heading level jumps
-- `CDOM009`: React Native touch control has no accessibility role
-- `CDOM010`: form control has no accessible label
-- `CDOM011`: document language or title is missing
-- `CDOM012`: personal information input is missing autocomplete
-- `CDOM013`: accessible name does not include visible label
-- `CDOM014`: status message is not exposed as a live region
-- `CDOM015`: media is missing an obvious text alternative
-- `CDOM016`: focusable content is hidden from assistive technology
-- `CDOM017`: duplicate id values can break accessibility references
-- `CDOM018`: positive tabIndex changes the natural focus order
-- `CDOM019`: grouped form controls are missing a legend
-- `CDOM020`: invalid form control is not connected to error text
-- `CDOM021`: pointer action may fire before cancellation is possible
-- `CDOM022`: text contrast is below the minimum ratio
-- `CDOM023`: focused control has no visible focus indicator
-- `CDOM024`: interactive target is smaller than WCAG minimum
-- `CDOM025`: page causes horizontal overflow at narrow viewport
-- `CDOM026`: skip link is missing or not visible on focus
-- `CDOM027`: instructions may rely on color alone
-- `CDOM028`: instructions may rely on sensory characteristics
-- `CDOM029`: foreign-language text is not marked with lang
-- `CDOM030`: focus or input handler may change context unexpectedly
-- `CDOM031`: text spacing causes content loss or overlap
-- `CDOM032`: hover or focus content is not dismissible or hoverable
-- `CDOM033`: keyboard focus appears trapped
-- `CDOM034`: focused control is fully obscured by author content
+- `CDOM_4_1_2_UNNAMED_CONTROL`: interactive control has no accessible name
+- `CDOM_4_1_2_NATIVE_LABEL`: react Native touch control has no accessibility label
+- `CDOM_2_4_4_AMBIGUOUS_LABEL`: interactive label is ambiguous
+- `CDOM_3_3_2_PLACEHOLDER_LABEL`: input relies on placeholder text as its label
+- `CDOM_1_1_1_IMAGE_ALT`: image has no useful alternative text
+- `CDOM_4_1_2_ANCHOR_HREF`: anchor is missing an href
+- `CDOM_2_1_1_KEYBOARD`: clickable non-interactive element lacks keyboard support
+- `CDOM_1_3_1_HEADING_ORDER`: heading level jumps
+- `CDOM_4_1_2_NATIVE_ROLE`: react Native touch control has no accessibility role
+- `CDOM_4_1_2_FORM_LABEL`: form control has no accessible label
+- `CDOM_3_1_1_DOCUMENT_METADATA`: document language or title is missing
+- `CDOM_1_3_5_AUTOCOMPLETE`: personal information input is missing autocomplete
+- `CDOM_2_5_3_LABEL_IN_NAME`: accessible name does not include visible label
+- `CDOM_4_1_3_STATUS_LIVE_REGION`: status message is not exposed as a live region
+- `CDOM_1_2_1_MEDIA_ALTERNATIVE`: media is missing an obvious text alternative
+- `CDOM_4_1_2_ARIA_HIDDEN_FOCUS`: focusable content is hidden from assistive technology
+- `CDOM_4_1_2_DUPLICATE_ID`: duplicate id values can break accessibility references
+- `CDOM_2_4_3_POSITIVE_TABINDEX`: positive tabIndex changes the natural focus order
+- `CDOM_1_3_1_FIELDSET_LEGEND`: grouped form controls are missing a legend
+- `CDOM_3_3_1_ERROR_DESCRIPTION`: invalid form control is not connected to error text
+- `CDOM_2_5_2_POINTER_CANCELLATION`: pointer action may fire before cancellation is possible
+- `CDOM_1_4_1_USE_OF_COLOR`: instruction or state change may rely on color alone
+- `CDOM_1_3_3_SENSORY_INSTRUCTIONS`: instruction may rely on sensory characteristics
+- `CDOM_3_1_2_LANGUAGE_OF_PARTS`: foreign-language text is not marked with lang
+- `CDOM_3_2_1_CONTEXT_CHANGE`: focus or input handler may change context unexpectedly
+- `CDOM_1_4_2_AUDIO_CONTROL`: autoplaying audio may lack a pause or stop control
+- `CDOM_1_3_4_ORIENTATION`: content appears to require one device orientation
+- `CDOM_1_2_4_LIVE_CAPTIONS`: live video may lack captions
+- `CDOM_1_2_6_SIGN_LANGUAGE`: prerecorded media may lack sign language interpretation
+- `CDOM_1_2_7_EXTENDED_AUDIO_DESCRIPTION`: prerecorded video may lack extended audio description
+- `CDOM_1_2_8_FULL_MEDIA_ALTERNATIVE`: prerecorded media may lack a full media alternative
+- `CDOM_1_2_9_LIVE_AUDIO_TRANSCRIPT`: live audio may lack a text alternative
+- `CDOM_1_3_2_MEANINGFUL_SEQUENCE`: meaningful sequence may be incorrect
+- `CDOM_1_3_6_IDENTIFY_PURPOSE`: component purpose may not be programmatically identifiable
+- `CDOM_1_4_4_RESIZE_TEXT`: text may not resize cleanly
+- `CDOM_1_4_5_IMAGES_OF_TEXT`: image-like text may not be real text
+- `CDOM_1_4_6_ENHANCED_CONTRAST`: text may not meet enhanced contrast
+- `CDOM_1_4_11_NON_TEXT_CONTRAST`: non-text UI contrast may be too low
+- `CDOM_1_4_7_BACKGROUND_AUDIO`: background audio may interfere with speech
+- `CDOM_1_4_8_VISUAL_PRESENTATION`: text presentation may not be adaptable
+- `CDOM_1_4_9_IMAGES_OF_TEXT_NO_EXCEPTION`: image text may not have an AAA exception
+- `CDOM_2_1_4_CHARACTER_KEY_SHORTCUTS`: single-character keyboard shortcut may not be adjustable
+- `CDOM_2_1_3_KEYBOARD_NO_EXCEPTION`: functionality may not be keyboard operable without exception
+- `CDOM_2_2_1_TIMING_ADJUSTABLE`: time limit may not be adjustable
+- `CDOM_2_2_2_PAUSE_STOP_HIDE`: moving or auto-updating content may lack pause controls
+- `CDOM_2_2_3_NO_TIMING`: task may depend on timing
+- `CDOM_2_2_4_INTERRUPTION_CONTROL`: interruptions may not be postponable
+- `CDOM_2_2_5_REAUTHENTICATING_DATA`: re-authentication may lose user data
+- `CDOM_2_2_6_TIMEOUT_WARNING`: timeout may not warn about data loss
+- `CDOM_2_3_1_FLASHING_CONTENT`: flashing content may exceed seizure thresholds
+- `CDOM_2_3_2_THREE_FLASHES`: flashing content may violate AAA no-flash guidance
+- `CDOM_2_3_3_ANIMATION_FROM_INTERACTIONS`: interaction-triggered animation may lack reduction controls
+- `CDOM_2_4_5_MULTIPLE_WAYS`: content may only be reachable one way
+- `CDOM_2_4_8_LOCATION_INDICATOR`: current location may not be indicated
+- `CDOM_2_4_10_SECTION_HEADINGS`: long content may need section headings
+- `CDOM_2_5_1_POINTER_GESTURES`: path or multipoint gesture may lack a simple pointer alternative
+- `CDOM_2_5_4_MOTION_ACTUATION`: device motion may be required without an alternative
+- `CDOM_2_5_7_DRAGGING_MOVEMENTS`: dragging movement may lack a non-drag alternative
+- `CDOM_2_4_12_FOCUS_OBSCURED_ENHANCED`: focused control may be partially obscured
+- `CDOM_2_4_13_FOCUS_APPEARANCE`: focus indicator may not meet appearance requirements
+- `CDOM_2_5_5_TARGET_SIZE_ENHANCED`: interactive target may be smaller than enhanced target size
+- `CDOM_2_5_6_CONCURRENT_INPUT`: input may restrict available modalities
+- `CDOM_3_2_3_CONSISTENT_NAVIGATION`: navigation order may be inconsistent
+- `CDOM_3_2_4_CONSISTENT_IDENTIFICATION`: repeated components may not be identified consistently
+- `CDOM_3_2_6_CONSISTENT_HELP`: help location may be inconsistent
+- `CDOM_3_1_3_UNUSUAL_WORDS`: unusual words or jargon may be unexplained
+- `CDOM_3_1_4_ABBREVIATIONS`: abbreviations may be unexplained
+- `CDOM_3_1_5_READING_LEVEL`: text may exceed lower secondary reading level
+- `CDOM_3_1_6_PRONUNCIATION`: pronunciation-dependent words may be unexplained
+- `CDOM_3_2_5_CHANGE_ON_REQUEST`: context change may occur without explicit request
+- `CDOM_3_3_4_ERROR_PREVENTION_LEGAL_FINANCIAL_DATA`: high-impact submission may lack review or reversal
+- `CDOM_3_3_5_HELP_AVAILABLE`: form help may be unavailable
+- `CDOM_3_3_6_ERROR_PREVENTION_ALL`: submission may lack general error prevention
+- `CDOM_3_3_7_REDUNDANT_ENTRY`: previously entered information may be requested again
+- `CDOM_3_3_8_ACCESSIBLE_AUTHENTICATION`: authentication may require a cognitive function test
+- `CDOM_3_3_9_ACCESSIBLE_AUTHENTICATION_ENHANCED`: authentication may require object recognition or personal content
+- `CDOM_1_4_3_CONTRAST`: text contrast is below the minimum ratio
+- `CDOM_2_4_7_FOCUS_VISIBLE`: focused control has no visible focus indicator
+- `CDOM_2_5_8_TARGET_SIZE`: interactive target is smaller than WCAG minimum
+- `CDOM_1_4_10_REFLOW`: page causes horizontal overflow at narrow viewport
+- `CDOM_2_4_1_SKIP_LINK`: skip link is missing or not visible on focus
+- `CDOM_1_4_12_TEXT_SPACING`: text spacing causes content loss or overlap
+- `CDOM_1_4_13_HOVER_FOCUS_CONTENT`: hover or focus content is not dismissible or hoverable
+- `CDOM_2_1_2_KEYBOARD_TRAP`: keyboard focus appears trapped
+- `CDOM_2_4_11_FOCUS_OBSCURED`: focused control is fully obscured by author content
 
 The score is automated guidance for developer workflow quality. It is not a legal compliance claim and does not replace manual accessibility testing.
 

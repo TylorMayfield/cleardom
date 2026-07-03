@@ -5,10 +5,13 @@ import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 import { promisify } from "node:util";
+import { rules } from "../dist/rules/index.js";
+import { wcag22Criteria } from "../dist/standards.js";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const siteDir = resolve(root, "examples/wcag-benchmark");
+const fixtureSourcePath = resolve(siteDir, "Fixture.tsx");
 const falsePositiveFixturePath = resolve(siteDir, "FalsePositiveFixture.tsx");
 const manifestPath = resolve(siteDir, "manifest.json");
 const reportDir = resolve(siteDir, "reports");
@@ -16,9 +19,11 @@ const emptySourceDir = resolve(reportDir, "empty-source");
 const reportPath = resolve(reportDir, "benchmark-report.html");
 const jsonPath = resolve(reportDir, "benchmark-report.json");
 const markdownPath = resolve(reportDir, "benchmark-report.md");
+const trackerPath = resolve(reportDir, "wcag-coverage-tracker.md");
 const workerPath = resolve(root, "scripts/benchmark-worker.mjs");
 const chromePath = findChromePath();
 const cliOptions = parseArgs(process.argv.slice(2).filter((arg) => arg !== "--"));
+const workerTimeoutMs = 90_000;
 
 await fs.mkdir(reportDir, { recursive: true });
 await fs.mkdir(emptySourceDir, { recursive: true });
@@ -37,36 +42,48 @@ const liveMode = !useLocal;
 try {
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
   const tools = [
-    { id: "cleardom", label: "ClearDOM Runtime", input: url },
-    { id: "axe", label: "Axe", input: url },
-    { id: "pa11y", label: "pa11y", input: url }
+    ...(useLocal ? [{
+      id: "cleardom-static",
+      label: "ClearDOM Static",
+      input: fixtureSourcePath,
+      sourcePath: fixtureSourcePath,
+      falsePositiveSourcePath: falsePositiveFixturePath,
+      detectorIds: ["cleardom-static"]
+    }] : []),
+    { id: "cleardom-runtime", label: "ClearDOM Runtime", input: url, detectorIds: ["cleardom-runtime"] },
+    { id: "axe", label: "Axe", input: url, detectorIds: ["axe"] },
+    { id: "pa11y", label: "pa11y", input: url, detectorIds: ["pa11y"] }
   ];
 
-  const results = await runBatch(tools, (tool) => ({
-    label: `Running ${tool.label}...`,
-    options: {
+  const results = [];
+  for (const tool of tools) {
+    process.stdout.write(`Running ${tool.label}...\n`);
+    results.push(await runMeasured(tool, {
       url,
+      sourcePath: tool.sourcePath,
       sourceDir: emptySourceDir,
       chromePath
-    }
-  }));
+    }));
+  }
 
-  const falsePositiveResults = await runBatch(tools, (tool) => ({
-    label: `Running ${tool.label} false-positive benchmark...`,
-    options: {
+  const falsePositiveResults = [];
+  for (const tool of tools) {
+    process.stdout.write(`Running ${tool.label} false-positive benchmark...\n`);
+    falsePositiveResults.push(await runMeasured(tool, {
       url: falsePositiveUrl,
+      sourcePath: tool.falsePositiveSourcePath,
       sourceDir: emptySourceDir,
       chromePath,
       includeReviewCandidates: false
-    }
-  }));
+    }));
+  }
 
   const report = {
     generatedAt: new Date().toISOString(),
     url,
     mode: liveMode ? "live" : "fixture",
     falsePositiveUrl: liveMode ? localFalsePositiveUrl : falsePositiveUrl,
-    fixturePath: null,
+    fixturePath: useLocal ? fixtureSourcePath : null,
     falsePositiveFixturePath,
     chromePath,
     manifest: {
@@ -80,24 +97,17 @@ try {
   await fs.writeFile(jsonPath, JSON.stringify(report, null, 2), "utf8");
   await fs.writeFile(reportPath, renderHtml(report, manifest), "utf8");
   await fs.writeFile(markdownPath, renderMarkdown(report, manifest), "utf8");
+  await fs.writeFile(trackerPath, renderCoverageTrackerMarkdown(manifest), "utf8");
 
   process.stdout.write(`\nBenchmark mode: ${report.mode} (${report.url})\n`);
   process.stdout.write(`Benchmark report written to ${reportPath}\n`);
   process.stdout.write(`GitHub Markdown report written to ${markdownPath}\n`);
+  process.stdout.write(`WCAG coverage tracker written to ${trackerPath}\n`);
   process.stdout.write(`Raw JSON written to ${jsonPath}\n`);
 } finally {
   if (server) {
     await server.close();
   }
-}
-
-async function runBatch(tools, optionsForTool) {
-  const jobs = tools.map((tool) => {
-    const job = optionsForTool(tool);
-    process.stdout.write(`${job.label}\n`);
-    return runMeasured(tool, job.options);
-  });
-  return Promise.all(jobs);
 }
 
 async function runMeasured(tool, options) {
@@ -112,6 +122,11 @@ async function runMeasured(tool, options) {
   });
 
   let peakRssKb = 0;
+  let timedOut = false;
+  const timeout = setTimeout(async () => {
+    timedOut = true;
+    await killProcessTree(child.pid);
+  }, workerTimeoutMs);
   const sampler = setInterval(async () => {
     peakRssKb = Math.max(peakRssKb, await processTreeRssKb(child.pid));
   }, 250);
@@ -120,7 +135,9 @@ async function runMeasured(tool, options) {
     const { stdout, stderr } = await childResult(child);
     peakRssKb = Math.max(peakRssKb, await processTreeRssKb(child.pid));
     const durationMs = performance.now() - startedAt;
-    const parsed = parseWorkerJson(stdout);
+    const parsed = timedOut
+      ? { ok: false, error: `${tool.label} exceeded ${formatMs(workerTimeoutMs)} timeout`, findings: [] }
+      : parseWorkerJson(stdout);
 
     return {
       ...tool,
@@ -145,6 +162,7 @@ async function runMeasured(tool, options) {
       stderr: ""
     };
   } finally {
+    clearTimeout(timeout);
     clearInterval(sampler);
   }
 }
@@ -179,11 +197,7 @@ function parseWorkerJson(stdout) {
 async function processTreeRssKb(rootPid) {
   if (!rootPid) return 0;
   try {
-    const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,rss="]);
-    const rows = stdout.trim().split("\n").map((line) => {
-      const [pid, ppid, rss] = line.trim().split(/\s+/).map(Number);
-      return { pid, ppid, rss };
-    });
+    const rows = await processRows();
     const children = new Map();
     for (const row of rows) {
       if (!children.has(row.ppid)) children.set(row.ppid, []);
@@ -202,6 +216,46 @@ async function processTreeRssKb(rootPid) {
   } catch {
     return 0;
   }
+}
+
+async function killProcessTree(rootPid) {
+  if (!rootPid) return;
+  try {
+    const rows = await processRows();
+    const children = new Map();
+    for (const row of rows) {
+      if (!children.has(row.ppid)) children.set(row.ppid, []);
+      children.get(row.ppid).push(row);
+    }
+    const pids = [];
+    const stack = [rootPid];
+    while (stack.length > 0) {
+      const pid = stack.pop();
+      pids.push(pid);
+      for (const child of children.get(pid) ?? []) stack.push(child.pid);
+    }
+    for (const pid of pids.reverse()) {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // Process already exited.
+      }
+    }
+  } catch {
+    try {
+      process.kill(rootPid, "SIGTERM");
+    } catch {
+      // Process already exited.
+    }
+  }
+}
+
+async function processRows() {
+  const { stdout } = await execFileAsync("ps", ["-axo", "pid=,ppid=,rss="]);
+  return stdout.trim().split("\n").map((line) => {
+    const [pid, ppid, rss] = line.trim().split(/\s+/).map(Number);
+    return { pid, ppid, rss };
+  });
 }
 
 async function startStaticServer(directory) {
@@ -304,8 +358,7 @@ function renderHtml(report, manifest) {
   const totals = report.results.map((result) => ({
     ...result,
     reportedCriteria: criteriaCovered(result.findings),
-    // Coverage credit is stricter than raw WCAG tags: the manifest must expect this tool.
-    criteria: creditedCriteriaCovered(result, manifest)
+    criteria: criteriaCovered(result.findings)
   }));
   const falsePositiveTotals = (report.falsePositiveResults ?? []).map((result) => ({
     ...result,
@@ -318,6 +371,7 @@ function renderHtml(report, manifest) {
   const wcagCoverageCharts = buildWcagCoverageCharts(totals, manifest);
   const uniqueRows = buildUniqueCoverage(totals);
   const toolSummaries = buildToolSummaries(totals, manifest);
+  const tracker = buildCoverageTracker(manifest);
 
   return `<!doctype html>
 <html lang="en">
@@ -382,13 +436,13 @@ function renderHtml(report, manifest) {
   <body>
     <main>
       <h1>Accessibility Benchmark Report</h1>
-      <p class="lede muted">${report.mode === "live" ? `Live-site ${escapeHtml(manifest.standard)} scanner comparison.` : `A deliberately broken ${escapeHtml(manifest.standard)} fixture served over HTTP for a browser-runtime comparison.`}</p>
-      <p class="muted small">Generated ${escapeHtml(new Date(report.generatedAt).toLocaleString())} against <code>${escapeHtml(report.url)}</code>. ${manifest.criteria.length} WCAG benchmark criteria.</p>
+          <p class="lede muted">${report.mode === "live" ? `Live-site ${escapeHtml(manifest.standard)} scanner comparison.` : `A deliberately broken ${escapeHtml(manifest.standard)} fixture served over HTTP, with ClearDOM static checks run against the benchmark source file.`}</p>
+      <p class="muted small">Generated ${escapeHtml(new Date(report.generatedAt).toLocaleString())} against <code>${escapeHtml(report.url)}</code>. ${report.fixturePath ? `Static fixture: <code>${escapeHtml(report.fixturePath)}</code>. ` : ""}${manifest.criteria.length} WCAG benchmark criteria.</p>
 
       <section class="takeaways">
         <article class="callout">
           <h2>At A Glance</h2>
-          <p>The benchmark covers <strong>${manifest.criteria.length}</strong> WCAG A/AA criteria. The headline comparison is credited criteria: findings mapped to criteria the manifest expects that tool to detect.</p>
+          <p>The benchmark covers <strong>${manifest.criteria.length}</strong> WCAG A/AA criteria. The headline comparison is total WCAG fixture coverage: a criterion is covered when the tool reports at least one mapped finding for it.</p>
         </article>
         <article class="callout">
           <h2>How To Read It</h2>
@@ -396,7 +450,7 @@ function renderHtml(report, manifest) {
         </article>
         <article class="callout">
           <h2>Important Caveat</h2>
-          <p>More findings does not mean better coverage. Manual-only scenarios are not credited to automated tools unless the manifest labels that tool as an expected detector.</p>
+          <p>More findings does not mean better coverage. Manual-only scenarios remain in the denominator because they are part of WCAG coverage.</p>
         </article>
       </section>
 
@@ -408,14 +462,14 @@ function renderHtml(report, manifest) {
               <span class="status ${summary.ok ? "ok" : "fail"}">${summary.ok ? "Completed" : "Failed"}</span>
             </header>
             <p class="metric">${summary.coverageLabel}</p>
-            <p class="muted">expected automated criteria covered</p>
+            <p class="muted">WCAG criteria covered across the benchmark</p>
             <div class="metric-row">
-              <div class="mini"><strong>${summary.coveragePercent}%</strong><span class="muted small">expected coverage</span></div>
+              <div class="mini"><strong>${summary.coveragePercent}%</strong><span class="muted small">total coverage</span></div>
               <div class="mini"><strong>${summary.findings}</strong><span class="muted small">findings</span></div>
               <div class="mini"><strong>${formatMs(summary.durationMs)}</strong><span class="muted small">runtime</span></div>
             </div>
             <div class="bar"><span style="width:${summary.coveragePercent}%"></span></div>
-            <p class="muted small">${summary.totalCoverageLabel} total WCAG fixture coverage. Peak memory: ${formatMb(summary.peakRssMb)}.</p>
+            <p class="muted small">${summary.expectedDetectorLabel} criteria matched the detector expectations in the manifest. Peak memory: ${formatMb(summary.peakRssMb)}.</p>
           </article>
         `).join("")}
       </section>
@@ -424,9 +478,41 @@ function renderHtml(report, manifest) {
         <h2>Detection Buckets</h2>
         <p class="muted">The manifest labels each scenario by the kind of review expected to catch it.</p>
         <div class="chips">
-          <span class="chip static">ClearDOM automated: ${detectionSummary.cleardom}</span>
+          <span class="chip static">ClearDOM static: ${detectionSummary.cleardomStatic}</span>
+          <span class="chip runtime">ClearDOM runtime: ${detectionSummary.cleardomRuntime}</span>
           <span class="chip runtime">Browser runtime: ${detectionSummary.runtime}</span>
           <span class="chip manual">Manual review: ${detectionSummary.manual}</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>WCAG Tracker</h2>
+        <p class="muted">WCAG 2.2 has ${tracker.totalCriteria} success criteria across A, AA, and AAA. The benchmark fixture currently covers ${tracker.benchmarkCriteria} criteria; ClearDOM rules map to ${tracker.cleardomCriteria} criteria.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Criterion</th>
+                <th>Level</th>
+                <th>Title</th>
+                <th>Benchmark</th>
+                <th>ClearDOM Rules</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tracker.rows.map((row) => `
+                <tr>
+                  <td><strong>${escapeHtml(row.criterion)}</strong></td>
+                  <td>${row.level.toUpperCase()}</td>
+                  <td>${escapeHtml(row.title)}</td>
+                  <td>${row.benchmark ? escapeHtml(row.detectors.join(", ")) : "-"}</td>
+                  <td>${row.ruleIds.length === 0 ? "-" : row.ruleIds.map(escapeHtml).join(", ")}</td>
+                  <td class="${row.status === "missing" ? "fail" : row.status === "manual-only" ? "partial" : "ok"}">${escapeHtml(row.statusLabel)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -438,8 +524,8 @@ function renderHtml(report, manifest) {
               <tr>
                 <th>Tool</th>
                 <th>Findings</th>
-                <th>Expected Coverage</th>
-                <th>Total Fixture Coverage</th>
+                <th>WCAG Coverage</th>
+                <th>Expected Detector Hits</th>
                 <th>Time</th>
                 <th>Peak Memory</th>
               </tr>
@@ -450,7 +536,7 @@ function renderHtml(report, manifest) {
                   <td>${escapeHtml(summary.label)}</td>
                   <td><div>${summary.findings}</div><div class="bar"><span style="width:${Math.round((summary.findings / maxFindings) * 100)}%"></span></div></td>
                   <td>${summary.coverageLabel}</td>
-                  <td>${summary.totalCoverageLabel}</td>
+                  <td>${summary.expectedDetectorLabel}</td>
                   <td>${formatMs(summary.durationMs)}</td>
                   <td>${formatMb(summary.peakRssMb)}</td>
                 </tr>
@@ -462,7 +548,7 @@ function renderHtml(report, manifest) {
 
       <section class="panel">
         <h2>WCAG Standard Coverage</h2>
-        <p class="muted">Each bar uses the same denominator: total benchmark criteria in that WCAG principle. The filled portion shows how many criteria the tool reported and was expected to detect.</p>
+        <p class="muted">Each bar uses the same denominator: total benchmark criteria in that WCAG principle. The filled portion shows how many criteria the tool reported.</p>
         <div class="wcag-charts">
           ${wcagCoverageCharts.map((group) => `
             <article class="wcag-chart">
@@ -579,7 +665,7 @@ function renderMarkdown(report, manifest) {
   const totals = report.results.map((result) => ({
     ...result,
     reportedCriteria: criteriaCovered(result.findings),
-    criteria: creditedCriteriaCovered(result, manifest)
+    criteria: criteriaCovered(result.findings)
   }));
   const falsePositiveTotals = (report.falsePositiveResults ?? []).map((result) => ({
     ...result,
@@ -590,6 +676,7 @@ function renderMarkdown(report, manifest) {
   const coverageRows = buildCoverageRows(totals, manifest);
   const uniqueRows = buildUniqueCoverage(totals);
   const missedRows = buildMissedExpectedRows(totals, manifest);
+  const tracker = buildCoverageTracker(manifest);
   const generatedAt = new Date(report.generatedAt).toISOString();
 
   return [
@@ -598,21 +685,22 @@ function renderMarkdown(report, manifest) {
     `Generated: ${generatedAt}`,
     `Mode: ${report.mode}`,
     `Target: ${report.url}`,
+    report.fixturePath ? `Static fixture: ${report.fixturePath}` : null,
     `Standard: ${manifest.standard}`,
     `Criteria covered by fixture: ${manifest.criteria.length}`,
     "",
     "## Summary",
     "",
-    "Coverage credit requires both a reported WCAG finding and a matching expected detector in `manifest.json`. Manual-only cases are included in the benchmark surface, but are not credited to automated tools.",
+    "WCAG coverage uses the full fixture denominator. A criterion is covered when the tool reports at least one mapped finding for it. Manual-only cases stay in the denominator because they are part of WCAG.",
     "",
     markdownTable(
-      ["Tool", "Status", "Findings", "Expected Coverage", "Total Fixture Coverage", "Time", "Peak RSS"],
+        ["Tool", "Status", "Findings", "WCAG Coverage", "Expected Detector Hits", "Time", "Peak RSS"],
       toolSummaries.map((summary) => [
         summary.label,
         summary.ok ? "Completed" : "Failed",
         summary.findings,
         summary.coverageLabel,
-        summary.totalCoverageLabel,
+        summary.expectedDetectorLabel,
         formatMs(summary.durationMs),
         formatMb(summary.peakRssMb)
       ])
@@ -623,11 +711,28 @@ function renderMarkdown(report, manifest) {
     markdownTable(
       ["Bucket", "Criteria"],
       [
-        ["ClearDOM automated", detectionSummary.cleardom],
+        ["ClearDOM static", detectionSummary.cleardomStatic],
+        ["ClearDOM runtime", detectionSummary.cleardomRuntime],
         ["Browser runtime", detectionSummary.runtime],
         ["Manual review", detectionSummary.manual]
       ]
     ),
+    "",
+    "## WCAG Tracker Summary",
+    "",
+    `WCAG 2.2 has ${tracker.totalCriteria} success criteria across A, AA, and AAA. WCAG 2.2 A/AA has ${tracker.aAndAaCriteria}; AAA adds ${tracker.aaaCriteria}.`,
+    "",
+    markdownTable(
+      ["Tracked Surface", "Criteria"],
+      [
+        ["Benchmark fixture cases", tracker.benchmarkCriteria],
+        ["Criteria mapped by ClearDOM rules", tracker.cleardomCriteria],
+        ["Criteria with no ClearDOM rule", tracker.missingCleardomCriteria],
+        ["AAA criteria in tracker", tracker.aaaCriteria]
+      ]
+    ),
+    "",
+    "Full tracker: `examples/wcag-benchmark/reports/wcag-coverage-tracker.md`.",
     "",
     "## False Positive Benchmark",
     "",
@@ -655,7 +760,7 @@ function renderMarkdown(report, manifest) {
       ])
     ),
     "",
-    "## Missed Expected Cases",
+    "## Missed Detector Expectations",
     "",
     missedRows.length === 0
       ? "Every automated tool reported every criterion it was expected to detect."
@@ -678,16 +783,54 @@ function renderMarkdown(report, manifest) {
   ].join("\n");
 }
 
+function renderCoverageTrackerMarkdown(manifest) {
+  const tracker = buildCoverageTracker(manifest);
+
+  return [
+    "# WCAG 2.2 Coverage Tracker",
+    "",
+    "This tracker separates the full WCAG 2.2 success-criteria universe from the benchmark fixture and ClearDOM's implemented rule mappings.",
+    "",
+    markdownTable(
+      ["Metric", "Count"],
+      [
+        ["WCAG 2.2 total success criteria", tracker.totalCriteria],
+        ["WCAG 2.2 Level A + AA criteria", tracker.aAndAaCriteria],
+        ["WCAG 2.2 Level AAA criteria", tracker.aaaCriteria],
+        ["Benchmark fixture cases", tracker.benchmarkCriteria],
+        ["Criteria mapped by ClearDOM rules", tracker.cleardomCriteria],
+        ["Criteria with no ClearDOM rule", tracker.missingCleardomCriteria]
+      ]
+    ),
+    "",
+    "## Tracker",
+    "",
+    markdownTable(
+      ["Criterion", "Level", "Title", "Benchmark", "Detectors", "ClearDOM Rules", "Status"],
+      tracker.rows.map((row) => [
+        row.criterion,
+        row.level.toUpperCase(),
+        row.title,
+        row.benchmark ? "Yes" : "No",
+        row.detectors.length === 0 ? "-" : row.detectors.join(", "),
+        row.ruleIds.length === 0 ? "-" : row.ruleIds.join(", "),
+        row.statusLabel
+      ])
+    ),
+    ""
+  ].join("\n");
+}
+
 function buildToolSummaries(results, manifest) {
   const manifestIds = new Set((manifest.criteria ?? []).map((criterion) => criterion.id));
   const manifestCriteriaTotal = manifestIds.size;
   return results.map((result) => {
     const observedManifest = result.criteria.filter((criterion) => manifestIds.has(criterion));
+    const detectorIds = result.detectorIds ?? [result.id];
     const expectedCriteria = (manifest.criteria ?? [])
-      .filter((criterion) => (criterion.detection ?? []).includes(result.id))
+      .filter((criterion) => (criterion.detection ?? []).some((detector) => detectorIds.includes(detector)))
       .map((criterion) => criterion.id);
     const observedExpected = observedManifest.filter((criterion) => expectedCriteria.includes(criterion));
-    const coveragePercent = expectedCriteria.length === 0 ? 0 : Math.round((observedExpected.length / expectedCriteria.length) * 100);
 
     return {
       ...result,
@@ -696,11 +839,61 @@ function buildToolSummaries(results, manifest) {
       observedExpectedCriteria: observedExpected.length,
       expectedCriteriaTotal: expectedCriteria.length,
       manifestCriteriaTotal,
-      coverageLabel: `${observedExpected.length}/${expectedCriteria.length}`,
-      totalCoverageLabel: `${observedManifest.length}/${manifestCriteriaTotal}`,
-      coveragePercent
+      coverageLabel: `${observedManifest.length}/${manifestCriteriaTotal}`,
+      expectedDetectorLabel: `${observedExpected.length}/${expectedCriteria.length}`,
+      coveragePercent: manifestCriteriaTotal === 0 ? 0 : Math.round((observedManifest.length / manifestCriteriaTotal) * 100)
     };
   });
+}
+
+function buildCoverageTracker(manifest) {
+  const manifestByCriterion = new Map((manifest.criteria ?? []).map((criterion) => [criterion.id, criterion]));
+  const ruleIdsByCriterion = new Map();
+  for (const rule of rules) {
+    const criteria = new Set(rule.standards
+      .filter((reference) => reference.version === "wcag22")
+      .map((reference) => reference.criterion));
+    for (const criterion of criteria) {
+      if (!ruleIdsByCriterion.has(criterion)) ruleIdsByCriterion.set(criterion, []);
+      ruleIdsByCriterion.get(criterion).push(rule.id);
+    }
+  }
+
+  const rows = wcag22Criteria.map((criterion) => {
+    const manifestEntry = manifestByCriterion.get(criterion.criterion);
+    const ruleIds = [...new Set(ruleIdsByCriterion.get(criterion.criterion) ?? [])].sort();
+    const detectors = manifestEntry?.detection ?? [];
+    const status = ruleIds.length > 0
+      ? "cleardom"
+      : detectors.includes("manual")
+        ? "manual-only"
+        : "missing";
+
+    return {
+      criterion: criterion.criterion,
+      level: criterion.level,
+      title: criterion.title,
+      benchmark: Boolean(manifestEntry),
+      detectors,
+      ruleIds,
+      status,
+      statusLabel: status === "cleardom"
+        ? "ClearDOM mapped"
+        : status === "manual-only"
+          ? "Manual / benchmark only"
+          : "Missing ClearDOM rule"
+    };
+  });
+
+  return {
+    rows,
+    totalCriteria: rows.length,
+    aAndAaCriteria: rows.filter((row) => row.level === "a" || row.level === "aa").length,
+    aaaCriteria: rows.filter((row) => row.level === "aaa").length,
+    benchmarkCriteria: rows.filter((row) => row.benchmark).length,
+    cleardomCriteria: rows.filter((row) => row.ruleIds.length > 0).length,
+    missingCleardomCriteria: rows.filter((row) => row.ruleIds.length === 0).length
+  };
 }
 
 function buildWcagCoverageCharts(results, manifest) {
@@ -736,15 +929,16 @@ function buildWcagCoverageCharts(results, manifest) {
 function summarizeDetection(manifest) {
   const criteria = manifest.criteria ?? [];
   return {
-    cleardom: criteria.filter((criterion) => criterion.detection?.includes("cleardom")).length,
-    runtime: criteria.filter((criterion) => criterion.detection?.includes("axe") || criterion.detection?.includes("pa11y")).length,
+    cleardomStatic: criteria.filter((criterion) => criterion.detection?.includes("cleardom-static")).length,
+    cleardomRuntime: criteria.filter((criterion) => criterion.detection?.includes("cleardom-runtime")).length,
+    runtime: criteria.filter((criterion) => criterion.detection?.includes("cleardom-runtime") || criterion.detection?.includes("axe") || criterion.detection?.includes("pa11y")).length,
     manual: criteria.filter((criterion) => criterion.detection?.includes("manual")).length
   };
 }
 
 function bucketClass(value) {
-  if (value === "cleardom") return "static";
-  if (value === "axe" || value === "pa11y") return "runtime";
+  if (value === "cleardom-static") return "static";
+  if (value === "cleardom-runtime" || value === "axe" || value === "pa11y") return "runtime";
   if (value === "manual") return "manual";
   return "";
 }
@@ -796,34 +990,23 @@ function buildUniqueCoverage(results) {
 }
 
 function buildMissedExpectedRows(results, manifest) {
-  const automatedTools = new Map(results.map((result) => [result.id, result.label]));
+  const automatedTools = new Map(results.flatMap((result) => (result.detectorIds ?? [result.id]).map((detectorId) => [detectorId, result])));
   return (manifest.criteria ?? []).flatMap((criterion) =>
     (criterion.detection ?? [])
       .filter((toolId) => automatedTools.has(toolId))
-      .filter((toolId) => !results.find((result) => result.id === toolId)?.criteria.includes(criterion.id))
+      .filter((toolId) => !automatedTools.get(toolId)?.criteria.includes(criterion.id))
       .map((toolId) => ({
         id: criterion.id,
         title: criterion.title,
         expected: criterion.detection ?? [],
         toolId,
-        toolLabel: automatedTools.get(toolId)
+        toolLabel: automatedTools.get(toolId)?.label
       }))
   );
 }
 
 function criteriaCovered(findings) {
   return [...new Set(findings.flatMap((finding) => finding.wcag ?? []))].sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
-}
-
-function creditedCriteriaCovered(result, manifest) {
-  const reportedCriteria = criteriaCovered(result.findings);
-  return reportedCriteria.filter((criterionId) => isCreditedCriterion(result.id, criterionId, manifest));
-}
-
-function isCreditedCriterion(toolId, criterionId, manifest) {
-  const criterion = (manifest.criteria ?? []).find((candidate) => candidate.id === criterionId);
-  if (!criterion) return false;
-  return (criterion.detection ?? []).includes(toolId);
 }
 
 function formatMs(ms) {

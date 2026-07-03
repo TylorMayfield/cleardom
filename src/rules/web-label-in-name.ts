@@ -2,7 +2,7 @@ import { accessibleName, isWebInteractive, normalize, visibleLabel } from "../ru
 import type { RuleDefinition } from "../types.js";
 
 export const labelInNameRule: RuleDefinition = {
-  id: "CDOM013",
+  id: "CDOM_2_5_3_LABEL_IN_NAME",
   title: "Accessible name does not include visible label",
   severity: "warning",
   confidence: "medium",

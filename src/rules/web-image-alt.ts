@@ -2,7 +2,7 @@ import { isAriaHidden, staticAttributeValue } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const imageAltRule: RuleDefinition = {
-  id: "CDOM005",
+  id: "CDOM_1_1_1_IMAGE_ALT",
   title: "Image has no useful alternative text",
   severity: "warning",
   confidence: "high",

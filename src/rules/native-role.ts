@@ -2,7 +2,7 @@ import { isReactNativeTouchControl } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const nativeRoleRule: RuleDefinition = {
-  id: "CDOM009",
+  id: "CDOM_4_1_2_NATIVE_ROLE",
   title: "React Native touch control has no accessibility role",
   severity: "warning",
   confidence: "medium",

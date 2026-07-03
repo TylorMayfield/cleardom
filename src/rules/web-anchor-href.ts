@@ -1,7 +1,7 @@
 import type { RuleDefinition } from "../types.js";
 
 export const anchorHrefRule: RuleDefinition = {
-  id: "CDOM006",
+  id: "CDOM_4_1_2_ANCHOR_HREF",
   title: "Anchor is missing an href",
   severity: "warning",
   confidence: "high",

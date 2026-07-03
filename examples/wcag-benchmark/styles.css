@@ -52,6 +52,26 @@ header {
   left: 8px;
 }
 
+.clean-fixture a,
+.clean-fixture button,
+.clean-fixture label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 8px;
+}
+
+.clean-fixture input:not([type="checkbox"]):not([type="radio"]),
+.clean-fixture select,
+.clean-fixture textarea {
+  min-height: 32px;
+}
+
+.clean-fixture video,
+.clean-fixture img {
+  max-width: 100%;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -111,12 +131,7 @@ header {
   display: block;
 }
 
-.focus-hidden:focus,
-button:focus,
-a:focus,
-input:focus,
-select:focus,
-textarea:focus {
+.focus-hidden:focus {
   outline: 0;
 }
 

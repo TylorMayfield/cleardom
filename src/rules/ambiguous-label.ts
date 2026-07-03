@@ -2,7 +2,7 @@ import { accessibleName, ambiguousLabels, isReactNativeTouchControl, isWebIntera
 import type { RuleDefinition } from "../types.js";
 
 export const ambiguousLabelRule: RuleDefinition = {
-  id: "CDOM003",
+  id: "CDOM_2_4_4_AMBIGUOUS_LABEL",
   title: "Interactive label is ambiguous",
   severity: "warning",
   confidence: "medium",

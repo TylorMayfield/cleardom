@@ -2,7 +2,7 @@ import { staticAttributeValue } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const duplicateIdRule: RuleDefinition = {
-  id: "CDOM017",
+  id: "CDOM_4_1_2_DUPLICATE_ID",
   title: "Duplicate id values can break accessibility references",
   severity: "warning",
   confidence: "high",

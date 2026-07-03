@@ -4,7 +4,7 @@ import * as puppeteer from "puppeteer-core";
 import { fingerprintFinding, markBaselineFindings, readBaseline } from "./baseline.js";
 import { isRuleEnabled, matchesAnyPattern, resolveComponentMappings, resolveScanOptions, severityOverride } from "./config.js";
 import { auditRuntimeUrl } from "./runtime.js";
-import { rules, summarizeRule } from "./rules/index.js";
+import { normalizeRuleId, rules, summarizeRule } from "./rules/index.js";
 import { createSemanticProject, isSemanticSourceFile, parseSemanticSource } from "./semantic.js";
 import { parseSource, supportedExtensions } from "./source-adapters.js";
 import { findStandard, referencesForStandard, resolveStandardId, ruleAppliesToStandard } from "./standards.js";
@@ -289,7 +289,7 @@ function resolveInlineOptions(options: ScanOptions): ResolvedScanOptions {
   return {
     include: options.include ?? [],
     exclude: options.exclude ?? [],
-    rules: options.rules ?? {},
+    rules: normalizeInlineRuleOptions(options.rules),
     standard: resolveStandardId(options.standard ?? "wcag22-aa"),
     failOn: options.failOn ?? "none",
     format: options.format ?? "text",
@@ -302,4 +302,8 @@ function resolveInlineOptions(options: ScanOptions): ResolvedScanOptions {
     configPath: options.configPath,
     rootDir: process.cwd()
   };
+}
+
+function normalizeInlineRuleOptions(rules: ScanOptions["rules"]): ResolvedScanOptions["rules"] {
+  return Object.fromEntries(Object.entries(rules ?? {}).map(([ruleId, option]) => [normalizeRuleId(ruleId), option]));
 }

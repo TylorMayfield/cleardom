@@ -2,7 +2,7 @@ import { elementRole, hasTabStop, isNativeInteractive, staticAttributeValue } fr
 import type { JsxElement, RuleContext, RuleDefinition } from "../types.js";
 
 export const ariaHiddenFocusRule: RuleDefinition = {
-  id: "CDOM016",
+  id: "CDOM_4_1_2_ARIA_HIDDEN_FOCUS",
   title: "Focusable content is hidden from assistive technology",
   severity: "critical",
   confidence: "high",

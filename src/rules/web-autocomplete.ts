@@ -15,7 +15,7 @@ const purposeTokens: Array<{ token: string; signals: string[] }> = [
 ];
 
 export const autocompleteRule: RuleDefinition = {
-  id: "CDOM012",
+  id: "CDOM_1_3_5_AUTOCOMPLETE",
   title: "Personal information input is missing autocomplete",
   severity: "warning",
   confidence: "medium",

@@ -2,7 +2,7 @@ import { staticAttributeValue } from "../rule-utils.js";
 import type { JsxElement, RuleContext, RuleDefinition } from "../types.js";
 
 export const mediaAlternativeRule: RuleDefinition = {
-  id: "CDOM015",
+  id: "CDOM_1_2_1_MEDIA_ALTERNATIVE",
   title: "Media is missing an obvious text alternative",
   severity: "warning",
   confidence: "medium",

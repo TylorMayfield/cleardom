@@ -33,7 +33,7 @@ try {
   } else if (command === "explain") {
     const ruleId = args[1];
     if (!ruleId) {
-      throw new Error("Usage: cleardom explain CDOM001");
+      throw new Error("Usage: cleardom explain CDOM_4_1_2_UNNAMED_CONTROL");
     }
     explain(ruleId);
   } else if (command === "rules") {
@@ -41,7 +41,7 @@ try {
   } else if (command === "standards") {
     console.log(formatStandards(standards));
   } else if (command === "fix") {
-    console.log("ClearDOM fix is not automatic yet. Start with `cleardom explain CDOM001` for the smallest safe fix.");
+    console.log("ClearDOM fix is not automatic yet. Start with `cleardom explain CDOM_4_1_2_UNNAMED_CONTROL` for the smallest safe fix.");
   } else {
     help();
   }
@@ -423,7 +423,7 @@ function parseComponentPreset(value: string): ComponentPreset {
 function parseRuleOption(value: string): { id: string; option: RuleOption } {
   const [id, option] = value.split("=");
   if (!id || !option) {
-    throw new Error("--rule must look like CDOM001=off or CDOM001=warning");
+    throw new Error("--rule must look like CDOM_4_1_2_UNNAMED_CONTROL=off or CDOM_4_1_2_UNNAMED_CONTROL=warning");
   }
   if (option === "off" || option === "critical" || option === "warning" || option === "info") {
     return { id, option };
@@ -450,7 +450,7 @@ Usage:
   cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json]
   cleardom review [path] [--dry-run] [--max-comments 20]
   cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
-  cleardom explain CDOM001
+  cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
   cleardom rules
   cleardom standards
   cleardom fix
@@ -545,7 +545,7 @@ async function initConfig(values: string[]): Promise<void> {
       TextInput: { role: "textbox", nameProps: ["aria-label", "label"] }
     },
     rules: {
-      CDOM003: "warning"
+      CDOM_2_4_4_AMBIGUOUS_LABEL: "warning"
     }
   };
   const output = `${JSON.stringify(config, null, 2)}\n`;

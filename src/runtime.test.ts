@@ -15,20 +15,20 @@ test("runtime interaction checks flag high-confidence rendered failures", { skip
   try {
     const options = await resolveScanOptions({
       rules: {
-        CDOM022: "off",
-        CDOM023: "off",
-        CDOM024: "off",
-        CDOM025: "off",
-        CDOM026: "off"
+        CDOM_1_4_3_CONTRAST: "off",
+        CDOM_2_4_7_FOCUS_VISIBLE: "off",
+        CDOM_2_5_8_TARGET_SIZE: "off",
+        CDOM_1_4_10_REFLOW: "off",
+        CDOM_2_4_1_SKIP_LINK: "off"
       }
     });
     const findings = await auditRuntimeUrl(server.url, options, chromePath);
     const ruleIds = new Set(findings.map((finding) => finding.ruleId));
 
-    assert.equal(ruleIds.has("CDOM031"), true);
-    assert.equal(ruleIds.has("CDOM032"), true);
-    assert.equal(ruleIds.has("CDOM033"), true);
-    assert.equal(ruleIds.has("CDOM034"), true);
+    assert.equal(ruleIds.has("CDOM_1_4_12_TEXT_SPACING"), true);
+    assert.equal(ruleIds.has("CDOM_1_4_13_HOVER_FOCUS_CONTENT"), true);
+    assert.equal(ruleIds.has("CDOM_2_1_2_KEYBOARD_TRAP"), true);
+    assert.equal(ruleIds.has("CDOM_2_4_11_FOCUS_OBSCURED"), true);
   } finally {
     await server.close();
   }
@@ -39,10 +39,10 @@ test("runtime interaction checks avoid accessible controls and layouts", { skip:
   try {
     const ruleIds = await runtimeRuleIds(server.url);
 
-    assert.equal(ruleIds.has("CDOM031"), false);
-    assert.equal(ruleIds.has("CDOM032"), false);
-    assert.equal(ruleIds.has("CDOM033"), false);
-    assert.equal(ruleIds.has("CDOM034"), false);
+    assert.equal(ruleIds.has("CDOM_1_4_12_TEXT_SPACING"), false);
+    assert.equal(ruleIds.has("CDOM_1_4_13_HOVER_FOCUS_CONTENT"), false);
+    assert.equal(ruleIds.has("CDOM_2_1_2_KEYBOARD_TRAP"), false);
+    assert.equal(ruleIds.has("CDOM_2_4_11_FOCUS_OBSCURED"), false);
   } finally {
     await server.close();
   }
@@ -53,10 +53,10 @@ test("runtime false-positive cases ignore benign suspicious patterns", { skip: c
   try {
     const ruleIds = await runtimeRuleIds(server.url);
 
-    assert.equal(ruleIds.has("CDOM031"), false);
-    assert.equal(ruleIds.has("CDOM032"), false);
-    assert.equal(ruleIds.has("CDOM033"), false);
-    assert.equal(ruleIds.has("CDOM034"), false);
+    assert.equal(ruleIds.has("CDOM_1_4_12_TEXT_SPACING"), false);
+    assert.equal(ruleIds.has("CDOM_1_4_13_HOVER_FOCUS_CONTENT"), false);
+    assert.equal(ruleIds.has("CDOM_2_1_2_KEYBOARD_TRAP"), false);
+    assert.equal(ruleIds.has("CDOM_2_4_11_FOCUS_OBSCURED"), false);
   } finally {
     await server.close();
   }
@@ -67,7 +67,7 @@ test("runtime edge cases catch alternating keyboard traps", { skip: chromePath =
   try {
     const ruleIds = await runtimeRuleIds(server.url);
 
-    assert.equal(ruleIds.has("CDOM033"), true);
+    assert.equal(ruleIds.has("CDOM_2_1_2_KEYBOARD_TRAP"), true);
   } finally {
     await server.close();
   }
@@ -78,7 +78,7 @@ test("runtime edge cases ignore modal focus containment", { skip: chromePath ===
   try {
     const ruleIds = await runtimeRuleIds(server.url);
 
-    assert.equal(ruleIds.has("CDOM033"), false);
+    assert.equal(ruleIds.has("CDOM_2_1_2_KEYBOARD_TRAP"), false);
   } finally {
     await server.close();
   }
@@ -89,7 +89,7 @@ test("runtime edge cases ignore pre-existing overlap during text spacing checks"
   try {
     const ruleIds = await runtimeRuleIds(server.url);
 
-    assert.equal(ruleIds.has("CDOM031"), false);
+    assert.equal(ruleIds.has("CDOM_1_4_12_TEXT_SPACING"), false);
   } finally {
     await server.close();
   }
@@ -100,7 +100,7 @@ test("runtime edge cases distinguish full focus coverage from partial coverage",
   try {
     const ruleIds = await runtimeRuleIds(full.url);
 
-    assert.equal(ruleIds.has("CDOM034"), true);
+    assert.equal(ruleIds.has("CDOM_2_4_11_FOCUS_OBSCURED"), true);
   } finally {
     await full.close();
   }
@@ -109,7 +109,7 @@ test("runtime edge cases distinguish full focus coverage from partial coverage",
   try {
     const ruleIds = await runtimeRuleIds(partial.url);
 
-    assert.equal(ruleIds.has("CDOM034"), false);
+    assert.equal(ruleIds.has("CDOM_2_4_11_FOCUS_OBSCURED"), false);
   } finally {
     await partial.close();
   }
@@ -118,11 +118,11 @@ test("runtime edge cases distinguish full focus coverage from partial coverage",
 async function runtimeRuleIds(url: string): Promise<Set<string>> {
   const options = await resolveScanOptions({
     rules: {
-      CDOM022: "off",
-      CDOM023: "off",
-      CDOM024: "off",
-      CDOM025: "off",
-      CDOM026: "off"
+      CDOM_1_4_3_CONTRAST: "off",
+      CDOM_2_4_7_FOCUS_VISIBLE: "off",
+      CDOM_2_5_8_TARGET_SIZE: "off",
+      CDOM_1_4_10_REFLOW: "off",
+      CDOM_2_4_1_SKIP_LINK: "off"
     }
   });
   const findings = await auditRuntimeUrl(url, options, chromePath);

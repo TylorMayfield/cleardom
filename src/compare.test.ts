@@ -7,10 +7,10 @@ import type { Finding, ScanResult } from "./types.js";
 test("compareScanResults classifies new, fixed, and unchanged findings by relative path", () => {
   const baseRoot = path.resolve("/tmp/cleardom-base");
   const headRoot = path.resolve("/tmp/cleardom-head");
-  const baseOnly = finding(baseRoot, "src/Old.tsx", "CDOM006", "Add href.");
-  const unchangedBase = finding(baseRoot, "src/Button.tsx", "CDOM001", "Add label.");
-  const unchangedHead = finding(headRoot, "src/Button.tsx", "CDOM001", "Add label.");
-  const headOnly = finding(headRoot, "src/New.tsx", "CDOM007", "Use button.");
+  const baseOnly = finding(baseRoot, "src/Old.tsx", "CDOM_4_1_2_ANCHOR_HREF", "Add href.");
+  const unchangedBase = finding(baseRoot, "src/Button.tsx", "CDOM_4_1_2_UNNAMED_CONTROL", "Add label.");
+  const unchangedHead = finding(headRoot, "src/Button.tsx", "CDOM_4_1_2_UNNAMED_CONTROL", "Add label.");
+  const headOnly = finding(headRoot, "src/New.tsx", "CDOM_2_1_1_KEYBOARD", "Use button.");
 
   const comparison = compareScanResults(
     scanResult([baseOnly, unchangedBase]),
@@ -18,9 +18,9 @@ test("compareScanResults classifies new, fixed, and unchanged findings by relati
     { baseRoot, headRoot }
   );
 
-  assert.deepEqual(comparison.newFindings.map((item) => item.ruleId), ["CDOM007"]);
-  assert.deepEqual(comparison.fixedFindings.map((item) => item.ruleId), ["CDOM006"]);
-  assert.deepEqual(comparison.unchangedFindings.map((item) => item.ruleId), ["CDOM001"]);
+  assert.deepEqual(comparison.newFindings.map((item) => item.ruleId), ["CDOM_2_1_1_KEYBOARD"]);
+  assert.deepEqual(comparison.fixedFindings.map((item) => item.ruleId), ["CDOM_4_1_2_ANCHOR_HREF"]);
+  assert.deepEqual(comparison.unchangedFindings.map((item) => item.ruleId), ["CDOM_4_1_2_UNNAMED_CONTROL"]);
   assert.equal(comparison.summary.newFindings, 1);
   assert.equal(comparison.summary.fixedFindings, 1);
   assert.equal(comparison.summary.unchangedFindings, 1);
