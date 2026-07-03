@@ -245,7 +245,10 @@ function createRuleContext(
     labelsFor(element: JsxElement): JsxElement[] {
       const id = this.getAttribute(element, "id")?.value;
       if (typeof id !== "string") return [];
-      return elements.filter((candidate) => candidate.tagName.toLowerCase() === "label" && this.getAttribute(candidate, "htmlFor")?.value === id);
+      return elements.filter((candidate) => {
+        if (candidate.tagName.toLowerCase() !== "label") return false;
+        return this.getAttribute(candidate, "htmlFor")?.value === id || this.getAttribute(candidate, "for")?.value === id;
+      });
     }
   };
 }

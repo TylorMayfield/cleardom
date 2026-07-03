@@ -4,6 +4,25 @@ type MutableElement = JsxElement & {
   textParts: string[];
 };
 
+const htmlVoidElements = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr"
+]);
+
+const rawTextElements = new Set(["script", "style"]);
+
 export function parseJsx(source: string): JsxElement[] {
   const elements: MutableElement[] = [];
   const stack: MutableElement[] = [];
@@ -71,6 +90,11 @@ export function parseJsx(source: string): JsxElement[] {
 
     elements.push(element);
     parent?.childIds.push(element.id);
+    if (rawTextElements.has(element.tagName.toLowerCase()) && !element.selfClosing) {
+      index = skipClosingRawTextElement(source, parsed.end, element.tagName);
+      continue;
+    }
+
     if (!element.selfClosing) {
       stack.push(element);
     }
@@ -105,7 +129,7 @@ function readOpeningElement(source: string, start: number): {
   if (tagEnd === -1) return undefined;
 
   const body = source.slice(index, tagEnd);
-  const selfClosing = /\/\s*$/.test(body);
+  const selfClosing = /\/\s*$/.test(body) || htmlVoidElements.has(tagName.toLowerCase());
   return {
     tagName,
     attributes: parseAttributes(body.replace(/\/\s*$/, "")),
@@ -294,6 +318,15 @@ function skipWhitespace(source: string, index: number): number {
 function skipUntil(source: string, start: number, token: string): number {
   const index = source.indexOf(token, start);
   return index === -1 ? source.length : index + token.length;
+}
+
+function skipClosingRawTextElement(source: string, start: number, tagName: string): number {
+  const lowerSource = source.toLowerCase();
+  const token = `</${tagName.toLowerCase()}`;
+  const closeStart = lowerSource.indexOf(token, start);
+  if (closeStart === -1) return source.length;
+  const closeEnd = source.indexOf(">", closeStart + token.length);
+  return closeEnd === -1 ? source.length : closeEnd + 1;
 }
 
 function normalizeText(value: string): string {

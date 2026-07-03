@@ -2,5 +2,8 @@
   <button [attr.aria-label]="'Close cart'">
     <span aria-hidden="true">x</span>
   </button>
-  <div (click)="openPanel()">Open panel</div>
+  <div (click)="openPanel()" [tabindex]="0" (keydown)="handleKey($event)">Open panel</div>
+  <label [attr.for]="'email'">Email</label>
+  <input [attr.id]="'email'" name="email" autocomplete="email" />
+  <img *ngIf="showReceipt" [src]="receiptUrl">
 </main>

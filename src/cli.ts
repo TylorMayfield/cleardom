@@ -6,12 +6,13 @@ import { promisify } from "node:util";
 import { detectAgents, installAgents, parseAgentId } from "./agents.js";
 import { createBaseline, writeBaseline } from "./baseline.js";
 import { resolveScanOptions } from "./config.js";
+import { formatAgentFixPrompt } from "./fix.js";
 import { formatRules, formatSarif, formatScanJson, formatScanResult, formatStandards } from "./format.js";
-import { installGithubActions, runGithubPr } from "./github.js";
-import { findRule, rules, summarizeRule } from "./rules/index.js";
+import { githubWorkflow, installGithubActions, runGithubPr } from "./github.js";
+import { findRule, normalizeRuleId, rules, summarizeRule } from "./rules/index.js";
 import { scanPath, scanUrl, shouldFail } from "./scanner.js";
 import { standards } from "./standards.js";
-import type { ComponentPreset, FailOn, OutputFormat, RuleOption, ScanOptions, SemanticMode } from "./types.js";
+import type { ComponentPreset, FailOn, OutputFormat, RuleOption, ScanConfig, ScanOptions, SemanticMode } from "./types.js";
 
 const args = process.argv.slice(2).filter((arg, index) => index !== 0 || arg !== "--");
 const command = args[0] ?? "scan";
@@ -41,7 +42,7 @@ try {
   } else if (command === "standards") {
     console.log(formatStandards(standards));
   } else if (command === "fix") {
-    console.log("ClearDOM fix is not automatic yet. Start with `cleardom explain CDOM_4_1_2_UNNAMED_CONTROL` for the smallest safe fix.");
+    await fixCommand(args.slice(1));
   } else {
     help();
   }
@@ -372,6 +373,92 @@ async function githubPrCommand(values: string[]): Promise<void> {
   console.log(result.summary);
 }
 
+async function fixCommand(values: string[]): Promise<void> {
+  const parsed = parseFixArgs(values);
+  if (parsed.scan.diff) {
+    parsed.scan.options.include = await diffIncludes(parsed.scan.target, parsed.scan.options);
+  }
+
+  const resolvedOptions = await resolveScanOptions({ ...parsed.scan.options, failOn: "none" });
+  const result = isUrlTarget(parsed.scan.target)
+    ? await scanUrl(parsed.scan.target, resolvedOptions)
+    : await scanPath(parsed.scan.target, resolvedOptions);
+  const fixPrompt = await formatAgentFixPrompt(result, resolvedOptions, {
+    target: parsed.scan.target,
+    agent: parsed.agent,
+    ruleIds: parsed.ruleIds,
+    file: parsed.file,
+    limit: parsed.limit
+  });
+
+  console.log(fixPrompt.prompt);
+}
+
+function parseFixArgs(values: string[]): {
+  scan: ReturnType<typeof parseScanArgs>;
+  agent: ReturnType<typeof parseAgentId>;
+  ruleIds: string[];
+  file?: string;
+  limit: number;
+} {
+  const scanArgs: string[] = [];
+  const ruleIds: string[] = [];
+  let agent: ReturnType<typeof parseAgentId> = "codex";
+  let file: string | undefined;
+  let limit = 1;
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+
+    if (value === "--agent") {
+      agent = parseAgentId(requireValue(values, index, "--agent"));
+      index += 1;
+      continue;
+    }
+
+    if (value === "--file") {
+      file = requireValue(values, index, "--file");
+      index += 1;
+      continue;
+    }
+
+    if (value === "--limit") {
+      limit = Number(requireValue(values, index, "--limit"));
+      if (!Number.isInteger(limit) || limit < 1) {
+        throw new Error("--limit must be a positive integer");
+      }
+      index += 1;
+      continue;
+    }
+
+    if (value === "--interactive") {
+      limit = 1;
+      continue;
+    }
+
+    if (value === "--rule") {
+      const ruleValue = requireValue(values, index, "--rule");
+      if (ruleValue.includes("=")) {
+        scanArgs.push(value, ruleValue);
+      } else {
+        ruleIds.push(normalizeRuleId(ruleValue));
+      }
+      index += 1;
+      continue;
+    }
+
+    scanArgs.push(value);
+  }
+
+  return {
+    scan: parseScanArgs(scanArgs),
+    agent,
+    ruleIds,
+    file,
+    limit
+  };
+}
+
 async function ciOptions(target: string, options: ScanOptions): Promise<ScanOptions> {
   return {
     ...options,
@@ -445,7 +532,7 @@ function help(): void {
 Usage:
   cleardom [path|url] [--diff] [--format text|json|sarif]
   cleardom install [--yes] [--agents] [--github-actions] [--agent codex|claude|cursor]
-  cleardom init [--dry-run]
+  cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]
   cleardom scan [path|url] [--diff] [--format text|json|sarif] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
   cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json]
   cleardom review [path] [--dry-run] [--max-comments 20]
@@ -453,7 +540,7 @@ Usage:
   cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
   cleardom rules
   cleardom standards
-  cleardom fix
+  cleardom fix [path] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
 `);
 }
 
@@ -527,10 +614,193 @@ function formatScan(result: Awaited<ReturnType<typeof scanPath>>, format: Output
 }
 
 async function initConfig(values: string[]): Promise<void> {
-  const dryRun = values.includes("--dry-run");
-  const config = {
-    include: ["src/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}", "app/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}", "components/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}", "src/**/*.component.html"],
-    exclude: ["src/**/*.test.{js,jsx,ts,tsx}", "src/**/*.spec.{js,jsx,ts,tsx}", "**/*.stories.{js,jsx,ts,tsx,mdx}"],
+  const parsed = parseInitArgs(values);
+  const rootDir = path.resolve(parsed.target);
+  const detection = await detectProjectStack(rootDir);
+  const config = recommendedConfig(detection);
+  const output = `${JSON.stringify(config, null, 2)}\n`;
+
+  if (parsed.dryRun) {
+    console.log(output.trimEnd());
+    return;
+  }
+
+  const changed: string[] = [];
+  const next: string[] = [];
+  const target = path.join(rootDir, "cleardom.config.json");
+  try {
+    await fs.writeFile(target, output, { flag: "wx" });
+    changed.push(`created   ${relativeOrAbsolute(rootDir, target)} (${detection.summary})`);
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST") {
+      throw new Error("cleardom.config.json already exists. Use `cleardom init --dry-run` to preview the recommended config.");
+    }
+    throw error;
+  }
+
+  if (parsed.createBaseline) {
+    const resolvedOptions = await resolveScanOptions({ configPath: target }, rootDir);
+    const result = await scanPath(rootDir, { configPath: target, baseline: "" });
+    await writeBaseline(config.baseline ?? "cleardom-baseline.json", resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
+    changed.push(`created   ${config.baseline ?? "cleardom-baseline.json"} (${result.findings.length} current findings captured)`);
+  } else {
+    next.push(`Create a starting baseline: cleardom scan . --write-baseline ${config.baseline ?? "cleardom-baseline.json"}`);
+  }
+
+  if (parsed.installCi) {
+    const workflow = await installGithubActions(rootDir);
+    changed.push(`${workflow.status.padEnd(9)} ${workflow.filePath} (GitHub Actions PR review)`);
+  } else if (parsed.ciDryRun) {
+    changed.push("previewed .github/workflows/cleardom.yml (not written)");
+  } else {
+    next.push("Preview CI setup: cleardom init --ci-dry-run");
+  }
+
+  next.push("Run locally: cleardom scan .");
+  next.push("Gate only new issues in CI: cleardom ci .");
+
+  console.log(formatInitSummary(rootDir, detection, config, changed, next, parsed.ciDryRun));
+}
+
+type InitOptions = {
+  dryRun: boolean;
+  target: string;
+  createBaseline: boolean;
+  ciDryRun: boolean;
+  installCi: boolean;
+};
+
+type StackDetection = {
+  frameworks: string[];
+  uiLibraries: ComponentPreset[];
+  packageManagers: string[];
+  hasTests: boolean;
+  hasStorybook: boolean;
+  hasRuntimeApp: boolean;
+  summary: string;
+};
+
+function parseInitArgs(values: string[]): InitOptions {
+  const options: InitOptions = {
+    dryRun: false,
+    target: ".",
+    createBaseline: false,
+    ciDryRun: false,
+    installCi: false
+  };
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    if (value === "--dry-run") {
+      options.dryRun = true;
+      continue;
+    }
+    if (value === "--yes" || value === "-y") {
+      continue;
+    }
+    if (value === "--target") {
+      options.target = requireValue(values, index, "--target");
+      index += 1;
+      continue;
+    }
+    if (value === "--create-baseline" || value === "--baseline") {
+      options.createBaseline = true;
+      continue;
+    }
+    if (value === "--ci-dry-run") {
+      options.ciDryRun = true;
+      continue;
+    }
+    if (value === "--install-ci" || value === "--github-actions") {
+      options.installCi = true;
+      continue;
+    }
+    throw new Error("Usage: cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]");
+  }
+
+  return options;
+}
+
+async function detectProjectStack(rootDir: string): Promise<StackDetection> {
+  const packageJson = await readPackageJson(rootDir);
+  const dependencies = new Set(Object.keys({
+    ...(packageJson?.dependencies ?? {}),
+    ...(packageJson?.devDependencies ?? {}),
+    ...(packageJson?.peerDependencies ?? {})
+  }));
+  const files = await topLevelEntries(rootDir);
+  const frameworks = new Set<string>();
+
+  if (dependencies.has("next") || files.has("next.config.js") || files.has("next.config.mjs") || files.has("next.config.ts")) frameworks.add("Next.js");
+  if (dependencies.has("@remix-run/react")) frameworks.add("Remix");
+  if (dependencies.has("gatsby")) frameworks.add("Gatsby");
+  if (dependencies.has("vite") || files.has("vite.config.js") || files.has("vite.config.ts")) frameworks.add(dependencies.has("vue") ? "Vite Vue" : "Vite");
+  if (dependencies.has("react") || dependencies.has("preact")) frameworks.add("React");
+  if (dependencies.has("vue")) frameworks.add("Vue");
+  if (dependencies.has("svelte") || dependencies.has("@sveltejs/kit")) frameworks.add("Svelte");
+  if (dependencies.has("astro")) frameworks.add("Astro");
+  if (dependencies.has("@angular/core") || files.has("angular.json")) frameworks.add("Angular");
+  if (dependencies.has("solid-js")) frameworks.add("Solid");
+  if (dependencies.has("react-native")) frameworks.add("React Native");
+  if (dependencies.has("expo")) frameworks.add("Expo");
+  if (frameworks.size === 0 && (files.has("src") || files.has("app") || files.has("components"))) frameworks.add("JavaScript/TypeScript");
+
+  const uiLibraries: ComponentPreset[] = [];
+  if (hasAnyDependency(dependencies, ["@radix-ui/react-dialog", "@radix-ui/react-slot", "@radix-ui/themes"])) uiLibraries.push("radix");
+  if (hasAnyDependency(dependencies, ["@mui/material", "@material-ui/core"])) uiLibraries.push("mui");
+  if (hasAnyDependency(dependencies, ["react-aria", "react-aria-components", "@react-aria/button"])) uiLibraries.push("react-aria");
+  if (hasAnyDependency(dependencies, ["react-native", "expo"])) uiLibraries.push("react-native");
+  if (dependencies.has("@chakra-ui/react")) uiLibraries.push("chakra");
+  if (dependencies.has("antd")) uiLibraries.push("ant-design");
+  if (dependencies.has("@headlessui/react")) uiLibraries.push("headless-ui");
+  if (dependencies.has("@mantine/core")) uiLibraries.push("mantine");
+  if (dependencies.has("react-bootstrap")) uiLibraries.push("react-bootstrap");
+
+  const packageManagers = [
+    files.has("pnpm-lock.yaml") ? "pnpm" : "",
+    files.has("yarn.lock") ? "yarn" : "",
+    files.has("package-lock.json") ? "npm" : "",
+    files.has("bun.lockb") ? "bun" : ""
+  ].filter(Boolean);
+  const hasTests = await containsMatchingFile(rootDir, /\.(test|spec)\.(js|jsx|ts|tsx|vue|svelte)$/);
+  const hasStorybook = files.has(".storybook") || dependencies.has("@storybook/react") || dependencies.has("@storybook/vue3") || dependencies.has("@storybook/svelte");
+  const hasRuntimeApp = frameworks.size > 0 && !frameworks.has("JavaScript/TypeScript");
+
+  return {
+    frameworks: [...frameworks],
+    uiLibraries: unique(uiLibraries),
+    packageManagers,
+    hasTests,
+    hasStorybook,
+    hasRuntimeApp,
+    summary: [...frameworks].join(", ") || "generic source project"
+  };
+}
+
+function recommendedConfig(detection: StackDetection): ScanConfig {
+  const include = new Set<string>();
+  const exclude = new Set(["**/*.test.{js,jsx,ts,tsx}", "**/*.spec.{js,jsx,ts,tsx}", "**/*.stories.{js,jsx,ts,tsx,mdx}", "**/node_modules/**", "**/dist/**", "**/build/**", "**/.next/**"]);
+  const frameworks = new Set(detection.frameworks);
+
+  if (frameworks.has("Next.js")) {
+    include.add("app/**/*.{js,jsx,ts,tsx,mdx}");
+    include.add("pages/**/*.{js,jsx,ts,tsx,mdx}");
+    include.add("components/**/*.{js,jsx,ts,tsx,mdx}");
+  }
+  if (frameworks.has("React Native") || frameworks.has("Expo")) {
+    include.add("app/**/*.{js,jsx,ts,tsx}");
+    include.add("src/**/*.{js,jsx,ts,tsx}");
+  }
+  if (frameworks.has("Vue")) include.add("src/**/*.vue");
+  if (frameworks.has("Svelte")) include.add("src/**/*.svelte");
+  if (frameworks.has("Astro")) include.add("src/**/*.astro");
+  if (frameworks.has("Angular")) include.add("src/**/*.component.html");
+  include.add("src/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}");
+  include.add("components/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}");
+
+  return {
+    include: [...include],
+    exclude: [...exclude],
     standard: "wcag22-aa",
     failOn: "critical",
     format: "text",
@@ -538,30 +808,85 @@ async function initConfig(values: string[]): Promise<void> {
     verbose: false,
     runtimeUrl: "",
     semantic: "auto",
-    componentPresets: ["radix", "mui", "react-aria"],
+    componentPresets: detection.uiLibraries.length > 0 ? detection.uiLibraries : ["radix", "mui", "react-aria"],
     components: {
-      IconButton: { role: "button", nameProps: ["aria-label", "label"] },
-      Button: { role: "button", nameProps: ["aria-label", "label"] },
-      TextInput: { role: "textbox", nameProps: ["aria-label", "label"] }
+      IconButton: { role: "button", nameProps: ["aria-label", "label", "title"] },
+      Button: { role: "button", nameProps: ["aria-label", "label"], labelProps: ["children"] },
+      TextInput: { role: "textbox", nameProps: ["aria-label", "label", "placeholder"] }
     },
     rules: {
       CDOM_2_4_4_AMBIGUOUS_LABEL: "warning"
     }
   };
-  const output = `${JSON.stringify(config, null, 2)}\n`;
-  if (dryRun) {
-    console.log(output.trimEnd());
-    return;
+}
+
+function formatInitSummary(rootDir: string, detection: StackDetection, config: ScanConfig, changed: string[], next: string[], showWorkflow: boolean): string {
+  const lines = [
+    "ClearDOM setup wizard",
+    "",
+    `Project: ${rootDir}`,
+    `Detected: ${detection.summary}`,
+    `Recommended stack config: ${config.standard}, semantic ${config.semantic}, fail on ${config.failOn}`,
+    `Component presets: ${(config.componentPresets ?? []).join(", ") || "none"}`,
+    "",
+    "What changed:",
+    ...changed.map((line) => `  ${line}`)
+  ];
+
+  if (showWorkflow) {
+    lines.push("", "CI dry-run preview:", indent(githubWorkflow().trimEnd(), "  "));
   }
 
-  const target = path.resolve("cleardom.config.json");
+  lines.push("", "Next steps:", ...next.map((line) => `  ${line}`));
+  return lines.join("\n");
+}
+
+async function readPackageJson(rootDir: string): Promise<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string> } | undefined> {
   try {
-    await fs.writeFile(target, output, { flag: "wx" });
-  } catch (error) {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST") {
-      throw new Error("cleardom.config.json already exists. Use `cleardom init --dry-run` to preview the default config.");
-    }
-    throw error;
+    return JSON.parse(await fs.readFile(path.join(rootDir, "package.json"), "utf8")) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string> };
+  } catch {
+    return undefined;
   }
-  console.log(`Created ${target}`);
+}
+
+async function topLevelEntries(rootDir: string): Promise<Set<string>> {
+  try {
+    return new Set(await fs.readdir(rootDir));
+  } catch {
+    return new Set();
+  }
+}
+
+async function containsMatchingFile(rootDir: string, pattern: RegExp, depth = 0): Promise<boolean> {
+  if (depth > 3) return false;
+  let entries: Array<{ name: string; isDirectory: () => boolean; isFile: () => boolean }>;
+  try {
+    entries = await fs.readdir(rootDir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "dist" || entry.name === "build" || entry.name === ".next") continue;
+    const entryPath = path.join(rootDir, entry.name);
+    if (entry.isFile() && pattern.test(entry.name)) return true;
+    if (entry.isDirectory() && await containsMatchingFile(entryPath, pattern, depth + 1)) return true;
+  }
+  return false;
+}
+
+function hasAnyDependency(dependencies: Set<string>, names: string[]): boolean {
+  return names.some((name) => dependencies.has(name));
+}
+
+function unique<T>(values: T[]): T[] {
+  return [...new Set(values)];
+}
+
+function indent(value: string, prefix: string): string {
+  return value.split(/\r?\n/).map((line) => `${prefix}${line}`).join("\n");
+}
+
+function relativeOrAbsolute(rootDir: string, filePath: string): string {
+  const relative = path.relative(rootDir, filePath);
+  return relative && !relative.startsWith("..") ? relative : filePath;
 }

@@ -10,9 +10,12 @@ It is a CLI-first scanner for React, Next.js, React Native, and web apps. The v0
 npx cleardom@latest
 npx cleardom@latest --diff
 npx cleardom@latest install
+npx cleardom@latest fix
 ```
 
 Run ClearDOM from a project root to print a health score and the issues it found. Use `--diff` while you work to scan changed files only. Run `install` to add the GitHub Actions PR reviewer and coding-agent guidance.
+
+Use `fix` to turn the top active finding into a focused coding-agent remediation prompt. ClearDOM does not silently rewrite product code; it gives the agent the finding, rule guidance, code context, and verification command so the agent can edit and re-run the scan.
 
 Existing projects can adopt gradually: commit a baseline once with `npx cleardom@latest scan . --write-baseline cleardom-baseline.json`, then use `npx cleardom@latest ci .` to fail only on regressions.
 
@@ -66,7 +69,7 @@ See `examples/wcag-benchmark/manifest.json` for the WCAG 2.2 A/AA coverage map a
 ```sh
 cleardom [path|url] [--diff] [--format text|json|sarif] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom install [--yes] [--agents] [--github-actions] [--no-github-actions] [--agent codex|claude|cursor]
-cleardom init [--dry-run]
+cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]
 cleardom scan [path|url] [--diff] [--format text|json|sarif] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom review [path] [--dry-run] [--max-comments 20]
@@ -74,10 +77,32 @@ cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
 cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
 cleardom rules
 cleardom standards
-cleardom fix
+cleardom fix [path] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
 ```
 
-`fix` is intentionally still a stub. ClearDOM should only auto-edit when a rule has a truly safe static fix.
+`fix` is an agent-assisted remediation workflow. It scans the target, filters active findings when requested, and prints a task prompt with exact locations, rule guidance, local code context, and the command the agent should run to verify the repair.
+
+## Product onboarding
+
+Start a project with the setup wizard:
+
+```sh
+npx cleardom@latest init
+```
+
+`init` detects common app stacks and UI libraries from `package.json` and project files, then writes a recommended `cleardom.config.json`. The setup output calls out what changed after install and the next commands to run.
+
+Useful setup variants:
+
+```sh
+cleardom init --dry-run
+cleardom init --create-baseline
+cleardom init --ci-dry-run
+cleardom init --install-ci
+cleardom init --target packages/web
+```
+
+`--dry-run` prints the recommended config as JSON without writing files. `--create-baseline` scans the project once and writes `cleardom-baseline.json` so CI can fail only on new regressions. `--ci-dry-run` previews the GitHub Actions workflow, while `--install-ci` writes it.
 
 ## Developer workflow install
 

@@ -1,8 +1,16 @@
 ---
 const product = "Cart";
+const ignoredMarkup = "<button></button>";
 ---
 
 <main>
   <button />
   <img src={`/products/${product}.png`} />
+  <form>
+    <label for="email">Email</label>
+    <input id="email" name="email" />
+  </form>
+  <script>
+    const ignoredImage = "<img src='/generated.png'>";
+  </script>
 </main>

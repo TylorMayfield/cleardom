@@ -49,3 +49,20 @@ test("tracks multiline line and column", () => {
   assert.equal(button?.line, 3);
   assert.equal(button?.column, 5);
 });
+
+test("treats HTML void elements as self-closing", () => {
+  const elements = parseJsx('<label for="email">Email</label><input id="email"><button>Save</button>');
+
+  const input = elements.find((element) => element.tagName === "input");
+  const button = elements.find((element) => element.tagName === "button");
+
+  assert.equal(input?.selfClosing, true);
+  assert.equal(button?.parentId, undefined);
+});
+
+test("ignores raw script and style contents", () => {
+  const elements = parseJsx('<script>const bad = "<button></button>";</script><style>.x > button {}</style><button>Save</button>');
+
+  assert.equal(elements.filter((element) => element.tagName === "button").length, 1);
+  assert.equal(elements.some((element) => element.tagName === "style"), true);
+});

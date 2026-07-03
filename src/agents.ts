@@ -160,6 +160,7 @@ Use ClearDOM as the accessibility and assistive-technology guardrail for this co
 - Local check: \`npx cleardom@latest --fail-on none\`
 - Changed-files check: \`npx cleardom@latest --diff --fail-on none\`
 - Explain a finding: \`npx cleardom@latest explain CDOM_4_1_2_UNNAMED_CONTROL\`
+- Agent repair prompt: \`npx cleardom@latest fix --agent ${agent}\`
 - Regression gate: \`npx cleardom@latest ci .\`
 - Baseline existing issues once: \`npx cleardom@latest scan . --write-baseline cleardom-baseline.json\`
 
@@ -168,9 +169,10 @@ Use ClearDOM as the accessibility and assistive-technology guardrail for this co
 1. Run a local scan after relevant UI changes.
 2. Fix critical findings first, then warnings.
 3. Use \`cleardom explain <rule-id>\` before guessing at a fix.
-4. Prefer semantic HTML and platform-native accessibility props over suppressing rules.
-5. Do not disable or downgrade a rule unless the user explicitly accepts that tradeoff.
-6. Re-run ClearDOM after fixes and report the score, active findings, and any remaining risk.
+4. Use \`cleardom fix\` when ClearDOM findings should be converted into a focused remediation task.
+5. Prefer semantic HTML and platform-native accessibility props over suppressing rules.
+6. Do not disable or downgrade a rule unless the user explicitly accepts that tradeoff.
+7. Re-run ClearDOM after fixes and report the score, active findings, and any remaining risk.
 
 ## Common Fix Patterns
 

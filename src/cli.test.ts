@@ -47,6 +47,20 @@ test("scan --verbose includes scan details and score breakdown", async () => {
   assert.match(result.stdout, /Score breakdown/);
 });
 
+test("fix prints an agent remediation prompt with finding context", async () => {
+  const fixture = await createFixture("<button />\n<a>Receipt</a>");
+  const result = await execFileAsync(process.execPath, [cliPath, "fix", fixture, "--agent", "codex", "--rule", "CDOM_4_1_2_UNNAMED_CONTROL"]);
+
+  assert.match(result.stdout, /ClearDOM agent remediation: 1 finding/);
+  assert.match(result.stdout, /Agent: codex/);
+  assert.match(result.stdout, /You are fixing ClearDOM accessibility findings/);
+  assert.match(result.stdout, /Finding 1: CDOM_4_1_2_UNNAMED_CONTROL/);
+  assert.match(result.stdout, /Rule guidance: Add visible text, aria-label, aria-labelledby/);
+  assert.match(result.stdout, /> 1 \| <button \/>/);
+  assert.doesNotMatch(result.stdout, /CDOM_4_1_2_ANCHOR_HREF -/);
+  assert.match(result.stdout, /npx cleardom@latest scan .* --fail-on none/);
+});
+
 test("scan --json includes score, findings, and rules", async () => {
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--json"]);
@@ -108,6 +122,49 @@ test("init --dry-run prints default config", async () => {
   assert.equal(json.standard, "wcag22-aa");
   assert.equal(json.baseline, "cleardom-baseline.json");
   assert.equal(json.failOn, "critical");
+});
+
+test("init detects the project stack and prints onboarding next steps", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "package.json"), JSON.stringify({
+    dependencies: {
+      next: "15.0.0",
+      react: "19.0.0",
+      "@mui/material": "7.0.0"
+    }
+  }), "utf8");
+
+  const result = await execFileAsync(process.execPath, [cliPath, "init"], { cwd: directory });
+  const config = JSON.parse(await fs.readFile(path.join(directory, "cleardom.config.json"), "utf8")) as { include: string[]; componentPresets: string[] };
+
+  assert.match(result.stdout, /ClearDOM setup wizard/);
+  assert.match(result.stdout, /Detected: Next\.js, React/);
+  assert.match(result.stdout, /What changed:/);
+  assert.match(result.stdout, /Next steps:/);
+  assert.match(result.stdout, /cleardom scan \. --write-baseline cleardom-baseline\.json/);
+  assert.equal(config.include.includes("app/**/*.{js,jsx,ts,tsx,mdx}"), true);
+  assert.equal(config.componentPresets.includes("mui"), true);
+});
+
+test("init can create a baseline during setup", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.mkdir(path.join(directory, "src"), { recursive: true });
+  await fs.writeFile(path.join(directory, "src", "Button.tsx"), "<button />", "utf8");
+
+  const result = await execFileAsync(process.execPath, [cliPath, "init", "--create-baseline"], { cwd: directory });
+  const baseline = JSON.parse(await fs.readFile(path.join(directory, "cleardom-baseline.json"), "utf8")) as { findings: unknown[] };
+
+  assert.match(result.stdout, /created\s+cleardom-baseline\.json/);
+  assert.equal(baseline.findings.length > 0, true);
+});
+
+test("init --ci-dry-run previews the GitHub workflow without writing it", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  const result = await execFileAsync(process.execPath, [cliPath, "init", "--ci-dry-run"], { cwd: directory });
+
+  assert.match(result.stdout, /CI dry-run preview:/);
+  assert.match(result.stdout, /npx cleardom@latest review \./);
+  await assert.rejects(fs.readFile(path.join(directory, ".github", "workflows", "cleardom.yml"), "utf8"), /ENOENT/);
 });
 
 test("install --agents writes idempotent project-level agent guidance", async () => {
