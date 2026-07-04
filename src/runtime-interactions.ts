@@ -96,17 +96,18 @@ export async function collectHoverFocusContentIssues(page: puppeteer.Page): Prom
 }
 
 export async function collectKeyboardTrapIssues(page: puppeteer.Page): Promise<RuntimeIssue[]> {
-  await page.evaluate(() => {
+  const prepared = await evaluateInStableFrame(page, () => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     document.body.focus();
   });
+  if (!prepared.ok) return [];
 
   const seen = new Map<string, number>();
   const sequence: string[] = [];
   for (let step = 0; step < 80; step += 1) {
     await page.keyboard.press("Tab");
     await waitForInteraction();
-    const active = await page.evaluate(() => {
+    const activeResult = await evaluateInStableFrame(page, () => {
       const element = document.activeElement;
       if (!(element instanceof HTMLElement) || element === document.body) return undefined;
       const region = nearestNonModalRegion(element);
@@ -121,8 +122,10 @@ export async function collectKeyboardTrapIssues(page: puppeteer.Page): Promise<R
         hasFocusableAfter,
         regionFocusableCount
       };
-    }) as { selector: string; regionSelector: string; modal: boolean; hasFocusableAfter: boolean; regionFocusableCount: number } | undefined;
+    }) as EvaluateResult<{ selector: string; regionSelector: string; modal: boolean; hasFocusableAfter: boolean; regionFocusableCount: number } | undefined>;
 
+    if (!activeResult.ok) return [];
+    const active = activeResult.value;
     if (!active || active.modal) continue;
     sequence.push(active.selector);
     const count = (seen.get(active.selector) ?? 0) + 1;
@@ -142,6 +145,21 @@ export async function collectKeyboardTrapIssues(page: puppeteer.Page): Promise<R
   }
 
   return [];
+}
+
+type EvaluateResult<T> = { ok: true; value: T } | { ok: false };
+
+async function evaluateInStableFrame<T>(page: puppeteer.Page, pageFunction: () => T): Promise<EvaluateResult<T>> {
+  try {
+    return { ok: true, value: await page.evaluate(pageFunction) };
+  } catch (error) {
+    if (isDetachedFrameError(error)) return { ok: false };
+    throw error;
+  }
+}
+
+function isDetachedFrameError(error: unknown): boolean {
+  return error instanceof Error && /detached Frame/i.test(error.message);
 }
 
 function waitForInteraction(): Promise<void> {
