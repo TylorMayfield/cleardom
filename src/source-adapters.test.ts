@@ -1,6 +1,35 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseSource } from "./source-adapters.js";
+import { parseSource, sourceAdapters } from "./source-adapters.js";
+
+test("source adapters expose documented support tiers", () => {
+  assert.deepEqual(
+    sourceAdapters.map((adapter) => [adapter.id, adapter.supportTier]),
+    [
+      ["jsx", "full"],
+      ["html", "template"],
+      ["vue", "template"],
+      ["svelte", "template"],
+      ["astro", "template"],
+      ["angular", "template"],
+      ["mdx", "content"]
+    ]
+  );
+  assert.equal(sourceAdapters.every((adapter) => adapter.label && adapter.supportSummary), true);
+});
+
+test("JSX parser records component import sources for design-system mappings", () => {
+  const elements = parseSource(`
+import { IconButton as CloseButton } from "@mui/material";
+import * as Dialog from "@radix-ui/react-dialog";
+
+<CloseButton aria-label="Close" />
+<Dialog.Close aria-label="Close dialog" />
+`, "Checkout.tsx");
+
+  assert.equal(elements.find((element) => element.tagName === "CloseButton")?.importSource, "@mui/material");
+  assert.equal(elements.find((element) => element.tagName === "Dialog.Close")?.importSource, "@radix-ui/react-dialog");
+});
 
 test("Vue adapter parses template content and ignores script false positives", () => {
   const elements = parseSource(`

@@ -1,5 +1,9 @@
 {
   "include": ["packages/*/src/**/*.{js,jsx,ts,tsx}"],
-  "exclude": ["packages/*/src/**/*.spec.tsx"]
+  "exclude": ["packages/*/src/**/*.spec.tsx"],
+  "packages": [
+    { "name": "web", "label": "Web app", "path": "packages/web" },
+    { "name": "native", "label": "Native app", "path": "packages/native" },
+    { "name": "ui", "label": "Shared UI", "path": "packages/ui" }
+  ]
 }
-

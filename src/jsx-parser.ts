@@ -26,6 +26,7 @@ const rawTextElements = new Set(["script", "style"]);
 export function parseJsx(source: string): JsxElement[] {
   const elements: MutableElement[] = [];
   const stack: MutableElement[] = [];
+  const importSources = collectImportSources(source);
   let index = 0;
 
   while (index < source.length) {
@@ -75,6 +76,7 @@ export function parseJsx(source: string): JsxElement[] {
     const element: MutableElement = {
       id: elements.length,
       tagName: parsed.tagName,
+      importSource: importSources.get(componentImportName(parsed.tagName)),
       attributes: parsed.attributes,
       parentId: parent?.id,
       childIds: [],
@@ -107,6 +109,45 @@ export function parseJsx(source: string): JsxElement[] {
   }
 
   return elements;
+}
+
+function collectImportSources(source: string): Map<string, string> {
+  const imports = new Map<string, string>();
+  const importPattern = /^\s*import\s+(.+?)\s+from\s+["']([^"']+)["'];?/gm;
+  let match: RegExpExecArray | null;
+
+  while ((match = importPattern.exec(source)) !== null) {
+    const specifier = match[1].trim();
+    const sourceModule = match[2];
+    const namedStart = specifier.indexOf("{");
+    const namedEnd = specifier.lastIndexOf("}");
+    const beforeNamed = namedStart === -1 ? specifier : specifier.slice(0, namedStart).replace(/,\s*$/, "").trim();
+
+    if (beforeNamed && !beforeNamed.startsWith("*")) {
+      imports.set(beforeNamed, sourceModule);
+    }
+
+    const namespace = specifier.match(/\*\s+as\s+([A-Za-z_$][\w$]*)/);
+    if (namespace) {
+      imports.set(namespace[1], sourceModule);
+    }
+
+    if (namedStart !== -1 && namedEnd !== -1 && namedEnd > namedStart) {
+      const named = specifier.slice(namedStart + 1, namedEnd);
+      for (const part of named.split(",")) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const alias = trimmed.match(/\bas\s+([A-Za-z_$][\w$]*)$/);
+        imports.set(alias?.[1] ?? trimmed.split(/\s+/)[0], sourceModule);
+      }
+    }
+  }
+
+  return imports;
+}
+
+function componentImportName(tagName: string): string {
+  return tagName.split(".")[0];
 }
 
 function readOpeningElement(source: string, start: number): {

@@ -1,6 +1,10 @@
 import * as assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { test } from "node:test";
-import { scanSource } from "./scanner.js";
+import { fingerprintFinding } from "./baseline.js";
+import { scanPath, scanSource } from "./scanner.js";
 
 test("flags web controls without accessible names", () => {
   const findings = scanSource("<button><XIcon /></button>", "Button.tsx");
@@ -157,6 +161,51 @@ test("supports disabling and overriding rules", () => {
   assert.equal(disabled.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
   assert.equal(overridden.find((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL")?.severity, "warning");
   assert.equal(legacyDisabled.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
+});
+
+test("supports inline ignore comments with required reasons", () => {
+  const suppressed = scanSource("{/* cleardom-ignore-next-line CDOM001 -- icon-only button is labelled at runtime */}\n<button />", "Button.tsx");
+  const missingReason = scanSource("{/* cleardom-ignore-next-line CDOM001 */}\n<button />", "Button.tsx");
+
+  assert.equal(suppressed.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
+  assert.equal(missingReason.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), true);
+});
+
+test("config suppressions require scoped metadata and report suppressed findings", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cleardom-suppressions-"));
+  await fs.writeFile(path.join(directory, "Button.tsx"), "<button />", "utf8");
+  const configPath = path.join(directory, "cleardom.config.json");
+  await fs.writeFile(configPath, JSON.stringify({
+    suppressions: [{
+      rule: "CDOM_4_1_2_UNNAMED_CONTROL",
+      file: "Button.tsx",
+      reason: "Third-party component is labelled after hydration.",
+      expires: "2099-01-01"
+    }]
+  }), "utf8");
+
+  const result = await scanPath(directory, { configPath });
+
+  assert.equal(result.activeFindings.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
+  assert.equal(result.suppressedFindings.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), true);
+  assert.equal(result.summary.suppressedFindings, 1);
+});
+
+test("fingerprints semantic rule target and location instead of message text", () => {
+  const first = fingerprintFinding({
+    ruleId: "CDOM_4_1_2_UNNAMED_CONTROL",
+    file: "Button.tsx",
+    semanticLocation: "button:nth-1",
+    target: "button[type=button]"
+  });
+  const second = fingerprintFinding({
+    ruleId: "CDOM_4_1_2_UNNAMED_CONTROL",
+    file: "Button.tsx",
+    semanticLocation: "button:nth-1",
+    target: "button[type=button]"
+  });
+
+  assert.equal(first, second);
 });
 
 test("flags personal information fields missing autocomplete purpose tokens", () => {
@@ -465,3 +514,97 @@ test("uses component presets for common design-system controls", () => {
   assert.equal(findings.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), true);
   assert.equal(findings.some((finding) => finding.ruleId === "CDOM_3_3_2_PLACEHOLDER_LABEL"), true);
 });
+
+test("component mappings honor import source, polymorphic props, disabled props, value props, and wrappers", () => {
+  const options = {
+    components: {
+      Button: { importSource: "@acme/ui", role: "button" as const, asProp: "component", childLabelProps: ["children"], disabledProps: ["isDisabled"] },
+      SearchField: { importSource: "@acme/ui", role: "textbox" as const, nameProps: ["label"], valueProps: ["value"] },
+      Field: { importSource: "@acme/ui", wrapper: true, labelProps: ["label"] }
+    }
+  };
+
+  const mapped = scanSource(`
+    import { Button, SearchField, Field } from "@acme/ui";
+    import { Button as OtherButton } from "@other/ui";
+    <Button component="a">Receipt</Button>
+    <Button isDisabled><Icon /></Button>
+    <Field label="Email"><SearchField placeholder="Email" /></Field>
+    <SearchField value="query" placeholder="Search" />
+    <OtherButton><Icon /></OtherButton>
+  `, "DesignSystem.tsx", options);
+
+  assert.equal(mapped.some((finding) => finding.excerpt.includes("<Button component=\"a\"")), false);
+  assert.equal(mapped.some((finding) => finding.excerpt.includes("<Button isDisabled")), false);
+  assert.equal(mapped.some((finding) => finding.excerpt.includes("<Field label=\"Email\"")), false);
+  assert.equal(mapped.some((finding) => finding.excerpt.includes("<SearchField value=\"query\"")), false);
+  assert.equal(mapped.some((finding) => finding.excerpt.includes("OtherButton")), false);
+});
+
+const presetFixtures: Array<{ preset: import("./types.js").ComponentPreset; source: string; missingExcerpt: string; acceptedExcerpt: string }> = [
+  {
+    preset: "radix",
+    source: 'import { IconButton } from "@radix-ui/themes";\n<IconButton><X /></IconButton>\n<IconButton aria-label="Close"><X /></IconButton>',
+    missingExcerpt: "<IconButton><X",
+    acceptedExcerpt: 'aria-label="Close"'
+  },
+  {
+    preset: "mui",
+    source: 'import { IconButton, TextField } from "@mui/material";\n<IconButton><X /></IconButton>\n<TextField label="Email" placeholder="Email" />',
+    missingExcerpt: "<IconButton><X",
+    acceptedExcerpt: 'label="Email"'
+  },
+  {
+    preset: "react-aria",
+    source: 'import { Button, TextField } from "react-aria-components";\n<Button><X /></Button>\n<TextField label="Email" placeholder="Email" />',
+    missingExcerpt: "<Button><X",
+    acceptedExcerpt: 'label="Email"'
+  },
+  {
+    preset: "react-native",
+    source: 'import { Pressable } from "react-native";\n<Pressable><Icon /></Pressable>\n<Pressable accessibilityRole="button" accessibilityLabel="Close"><Icon /></Pressable>',
+    missingExcerpt: "<Pressable><Icon",
+    acceptedExcerpt: 'accessibilityLabel="Close"'
+  },
+  {
+    preset: "chakra",
+    source: 'import { IconButton, Input } from "@chakra-ui/react";\n<IconButton icon={<X />} />\n<Input aria-label="Email" placeholder="Email" autocomplete="email" />',
+    missingExcerpt: "<IconButton",
+    acceptedExcerpt: 'aria-label="Email"'
+  },
+  {
+    preset: "ant-design",
+    source: 'import { Button, Input } from "antd";\n<Button icon={<X />} />\n<Input aria-label="Email" placeholder="Email" autocomplete="email" />',
+    missingExcerpt: "<Button",
+    acceptedExcerpt: 'aria-label="Email"'
+  },
+  {
+    preset: "headless-ui",
+    source: 'import { Button, Switch } from "@headlessui/react";\n<Button><X /></Button>\n<Switch aria-label="Notifications" />',
+    missingExcerpt: "<Button><X",
+    acceptedExcerpt: 'aria-label="Notifications"'
+  },
+  {
+    preset: "mantine",
+    source: 'import { ActionIcon, TextInput } from "@mantine/core";\n<ActionIcon><X /></ActionIcon>\n<TextInput label="Email" placeholder="Email" />',
+    missingExcerpt: "<ActionIcon><X",
+    acceptedExcerpt: 'label="Email"'
+  },
+  {
+    preset: "react-bootstrap",
+    source: 'import { Button, FormControl } from "react-bootstrap";\n<Button><X /></Button>\n<FormControl aria-label="Email" placeholder="Email" />',
+    missingExcerpt: "<Button><X",
+    acceptedExcerpt: 'aria-label="Email"'
+  }
+];
+
+for (const fixture of presetFixtures) {
+  test(`component preset maps realistic ${fixture.preset} snippets`, () => {
+    const findings = scanSource(fixture.source, "Preset.tsx", {
+      componentPresets: [fixture.preset]
+    });
+
+    assert.equal(findings.some((finding) => finding.excerpt.includes(fixture.missingExcerpt)), true);
+    assert.equal(findings.some((finding) => finding.excerpt.includes(fixture.acceptedExcerpt)), false);
+  });
+}

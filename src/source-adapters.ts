@@ -3,9 +3,13 @@ import { parseJsx } from "./jsx-parser.js";
 import type { JsxElement } from "./types.js";
 
 export type SourceAdapterId = "jsx" | "html" | "vue" | "svelte" | "astro" | "angular" | "mdx";
+export type SourceAdapterSupportTier = "full" | "template" | "content";
 
 export type SourceAdapter = {
   id: SourceAdapterId;
+  label: string;
+  supportTier: SourceAdapterSupportTier;
+  supportSummary: string;
   extensions: string[];
   parse: (source: string, filePath: string) => JsxElement[];
 };
@@ -13,36 +17,57 @@ export type SourceAdapter = {
 export const sourceAdapters: SourceAdapter[] = [
   {
     id: "jsx",
+    label: "JSX/TSX",
+    supportTier: "full",
+    supportSummary: "Compiler-backed semantic analysis for JavaScript, TypeScript, JSX, TSX, React Native, and React-family JSX.",
     extensions: [".js", ".jsx", ".ts", ".tsx"],
     parse: (source) => parseJsx(source)
   },
   {
     id: "html",
+    label: "HTML",
+    supportTier: "template",
+    supportSummary: "Static HTML parsing plus runtime checks when --runtime-url is configured.",
     extensions: [".html", ".htm"],
     parse: (source) => parseJsx(prepareHtmlLikeSource(source))
   },
   {
     id: "vue",
+    label: "Vue",
+    supportTier: "template",
+    supportSummary: "Single-file component template extraction with common Vue binding and event aliases.",
     extensions: [".vue"],
     parse: (source) => parseJsx(prepareVueSource(source))
   },
   {
     id: "svelte",
+    label: "Svelte",
+    supportTier: "template",
+    supportSummary: "Markup parsing with script stripping and common Svelte binding and event aliases.",
     extensions: [".svelte"],
     parse: (source) => parseJsx(prepareSvelteSource(source))
   },
   {
     id: "astro",
+    label: "Astro",
+    supportTier: "template",
+    supportSummary: "Astro frontmatter stripping with static template parsing.",
     extensions: [".astro"],
     parse: (source) => parseJsx(prepareAstroSource(source))
   },
   {
     id: "angular",
+    label: "Angular templates",
+    supportTier: "template",
+    supportSummary: "Angular component template parsing with property and event binding aliases.",
     extensions: [".component.html", ".ng.html"],
     parse: (source) => parseJsx(prepareAngularSource(source))
   },
   {
     id: "mdx",
+    label: "MDX",
+    supportTier: "content",
+    supportSummary: "Authored markup parsing with imports and fenced code examples ignored.",
     extensions: [".mdx"],
     parse: (source) => parseJsx(prepareMdxSource(source))
   }

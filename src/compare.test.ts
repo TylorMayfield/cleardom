@@ -33,6 +33,11 @@ function finding(root: string, relativeFile: string, ruleId: string, message: st
     title: `${ruleId} title`,
     severity: "critical",
     confidence: "high",
+    impact: "serious",
+    confidenceReason: "test",
+    detectionMode: "automated",
+    source: "static",
+    fixKind: "guided-fix",
     category: "names-and-roles",
     file,
     line: 1,
@@ -42,6 +47,8 @@ function finding(root: string, relativeFile: string, ruleId: string, message: st
     wcag: [],
     standards: [],
     platforms: ["web"],
+    target: "button",
+    semanticLocation: "button:nth-1",
     fingerprint: `${ruleId}-${file}`,
     baselineStatus: "active"
   };
@@ -53,11 +60,13 @@ function scanResult(findings: Finding[]): ScanResult {
     findings,
     activeFindings: findings,
     baselineFindings: [],
+    suppressedFindings: [],
     regressions: findings,
     summary: {
       totalFindings: findings.length,
       activeFindings: findings.length,
       baselineFindings: 0,
+      suppressedFindings: 0,
       regressions: findings.length,
       critical: findings.length,
       warning: 0,
@@ -79,6 +88,8 @@ function scanResult(findings: Finding[]): ScanResult {
       filesFallback: 1
     },
     semanticDiagnostics: [],
+    runtimeDiagnostics: [],
+    runtimePages: [],
     standard: {
       id: "wcag22-aa",
       label: "WCAG 2.2 Level AA",

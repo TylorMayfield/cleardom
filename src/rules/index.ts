@@ -170,6 +170,7 @@ export function summarizeRule(rule: RuleDefinition, severity: Severity = rule.se
     title: rule.title,
     severity,
     confidence: rule.confidence,
+    detectionMode: rule.detectionMode ?? (rule.confidence === "high" ? "automated" : rule.confidence === "medium" ? "needs-review" : "manual-guidance"),
     category: rule.category,
     wcag: rule.wcag,
     standards: rule.standards,

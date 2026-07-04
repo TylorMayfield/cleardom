@@ -50,8 +50,8 @@ function comparisonKey(finding: Finding, rootDir: string | undefined): string {
   return [
     finding.ruleId,
     normalizeFindingPath(finding.file, rootDir),
-    normalizeSource(finding.excerpt),
-    normalizeSource(finding.message)
+    normalizeSource(finding.semanticLocation || finding.excerpt),
+    normalizeSource(finding.target || finding.message)
   ].join("|");
 }
 

@@ -4,15 +4,17 @@ import { execFile } from "node:child_process";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { detectAgents, installAgents, parseAgentId } from "./agents.js";
-import { createBaseline, writeBaseline } from "./baseline.js";
+import { mergeBaselineFindings, pruneBaselineFindings, readBaseline, writeBaseline, writeBaselineFile } from "./baseline.js";
 import { resolveScanOptions } from "./config.js";
+import { formatDoctor, runDoctor } from "./doctor.js";
 import { formatAgentFixPrompt } from "./fix.js";
-import { formatRules, formatSarif, formatScanJson, formatScanResult, formatStandards } from "./format.js";
+import { formatRules, formatSarif, formatScanHtml, formatScanJson, formatScanResult, formatStandards } from "./format.js";
 import { githubWorkflow, installGithubActions, runGithubPr } from "./github.js";
+import { formatReport, type ReportFormat } from "./report.js";
 import { findRule, normalizeRuleId, rules, summarizeRule } from "./rules/index.js";
 import { scanPath, scanUrl, shouldFail } from "./scanner.js";
 import { standards } from "./standards.js";
-import type { ComponentPreset, FailOn, OutputFormat, RuleOption, ScanConfig, ScanOptions, SemanticMode } from "./types.js";
+import type { ComponentPreset, FailOn, Finding, OutputFormat, PrBaselinePolicy, PrCommentMode, RuleOption, ScanConfig, ScanOptions, SemanticMode, Severity } from "./types.js";
 
 const args = process.argv.slice(2).filter((arg, index) => index !== 0 || arg !== "--");
 const command = args[0] ?? "scan";
@@ -43,6 +45,14 @@ try {
     console.log(formatStandards(standards));
   } else if (command === "fix") {
     await fixCommand(args.slice(1));
+  } else if (command === "doctor") {
+    await doctorCommand(args.slice(1));
+  } else if (command === "report") {
+    await reportCommand(args.slice(1));
+  } else if (command === "suppress") {
+    await suppressCommand(args.slice(1));
+  } else if (command === "baseline") {
+    await baselineCommand(args.slice(1));
   } else {
     help();
   }
@@ -63,6 +73,8 @@ function explain(ruleId: string): void {
   console.log("");
   console.log(`Severity: ${rule.severity}`);
   console.log(`Confidence: ${rule.confidence}`);
+  console.log(`Detection: ${rule.detectionMode ?? (rule.confidence === "high" ? "automated" : rule.confidence === "medium" ? "needs-review" : "manual-guidance")}`);
+  console.log(`Fix kind: ${rule.fixKind ?? (rule.fixable && rule.confidence === "high" ? "safe-auto-fix" : rule.confidence === "low" ? "manual-review" : "guided-fix")}`);
   console.log(`Category: ${rule.category}`);
   console.log(`WCAG: ${rule.wcag.join(", ")}`);
   console.log(`Standards: ${rule.standards.map((reference) => reference.level ? `${reference.version} ${reference.criterion} ${reference.level.toUpperCase()}` : `${reference.version} ${reference.criterion}`).join("; ")}`);
@@ -328,6 +340,7 @@ async function runScan(command: "scan" | "ci", values: string[]): Promise<void> 
 async function githubPrCommand(values: string[]): Promise<void> {
   let dryRun = false;
   let maxComments: number | undefined;
+  const pr: NonNullable<ScanOptions["pr"]> = {};
   const scanArgs: string[] = [];
 
   for (let index = 0; index < values.length; index += 1) {
@@ -344,10 +357,43 @@ async function githubPrCommand(values: string[]): Promise<void> {
       index += 1;
       continue;
     }
+    if (value === "--severity-threshold") {
+      pr.severityThreshold = parseSeverity(requireValue(values, index, "--severity-threshold"));
+      index += 1;
+      continue;
+    }
+    if (value === "--comment-mode") {
+      pr.commentMode = parseCommentMode(requireValue(values, index, "--comment-mode"));
+      index += 1;
+      continue;
+    }
+    if (value === "--changed-files-only") {
+      pr.changedFilesOnly = true;
+      continue;
+    }
+    if (value === "--no-changed-files-only") {
+      pr.changedFilesOnly = false;
+      continue;
+    }
+    if (value === "--baseline-policy") {
+      pr.baselinePolicy = parseBaselinePolicy(requireValue(values, index, "--baseline-policy"));
+      index += 1;
+      continue;
+    }
+    if (value === "--status-check-name") {
+      pr.statusCheckName = requireValue(values, index, "--status-check-name");
+      index += 1;
+      continue;
+    }
+    if (value === "--upload-sarif") {
+      pr.uploadSarif = true;
+      continue;
+    }
     scanArgs.push(value);
   }
 
   const parsed = parseScanArgs(scanArgs);
+  parsed.options.pr = { ...parsed.options.pr, ...pr };
   if (parsed.diff) {
     parsed.options.include = await diffIncludes(parsed.target, parsed.options);
   }
@@ -391,6 +437,11 @@ async function fixCommand(values: string[]): Promise<void> {
     limit: parsed.limit
   });
 
+  if (parsed.apply) {
+    console.log(formatApplyFixResult(fixPrompt.findings));
+    return;
+  }
+
   console.log(fixPrompt.prompt);
 }
 
@@ -400,12 +451,14 @@ function parseFixArgs(values: string[]): {
   ruleIds: string[];
   file?: string;
   limit: number;
+  apply: boolean;
 } {
   const scanArgs: string[] = [];
   const ruleIds: string[] = [];
   let agent: ReturnType<typeof parseAgentId> = "codex";
   let file: string | undefined;
   let limit = 1;
+  let apply = false;
 
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
@@ -436,6 +489,11 @@ function parseFixArgs(values: string[]): {
       continue;
     }
 
+    if (value === "--apply") {
+      apply = true;
+      continue;
+    }
+
     if (value === "--rule") {
       const ruleValue = requireValue(values, index, "--rule");
       if (ruleValue.includes("=")) {
@@ -455,8 +513,187 @@ function parseFixArgs(values: string[]): {
     agent,
     ruleIds,
     file,
-    limit
+    limit,
+    apply
   };
+}
+
+async function doctorCommand(values: string[]): Promise<void> {
+  const parsed = parseScanArgs(values);
+  const result = await runDoctor(parsed.options);
+  console.log(formatDoctor(result));
+  process.exitCode = result.ok ? 0 : 1;
+}
+
+async function reportCommand(values: string[]): Promise<void> {
+  const parsed = parseReportArgs(values);
+  if (parsed.scan.diff) {
+    parsed.scan.options.include = await diffIncludes(parsed.scan.target, parsed.scan.options);
+  }
+
+  const resolvedOptions = await resolveScanOptions({ ...parsed.scan.options, failOn: "none" });
+  const result = isUrlTarget(parsed.scan.target)
+    ? await scanUrl(parsed.scan.target, resolvedOptions)
+    : await scanPath(parsed.scan.target, resolvedOptions);
+  const output = formatReport(result, resolvedOptions, parsed.reportFormat);
+
+  if (parsed.output) {
+    const outputPath = path.resolve(parsed.output);
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    await fs.writeFile(outputPath, output, "utf8");
+    console.log(`Wrote ClearDOM ${parsed.reportFormat} report to ${outputPath}`);
+    return;
+  }
+
+  console.log(output);
+}
+
+function parseReportArgs(values: string[]): { scan: ReturnType<typeof parseScanArgs>; reportFormat: ReportFormat; output?: string } {
+  const scanArgs: string[] = [];
+  let reportFormat: ReportFormat = "html";
+  let output: string | undefined;
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    if (value === "--format") {
+      reportFormat = parseReportFormat(requireValue(values, index, "--format"));
+      index += 1;
+      continue;
+    }
+    if (value === "--output" || value === "-o") {
+      output = requireValue(values, index, value);
+      index += 1;
+      continue;
+    }
+    scanArgs.push(value);
+  }
+
+  return { scan: parseScanArgs(scanArgs), reportFormat, output };
+}
+
+async function suppressCommand(values: string[]): Promise<void> {
+  const parsed = parseSuppressionArgs(values);
+  const resolvedOptions = await resolveScanOptions({ ...parsed.scan.options, baseline: undefined, failOn: "none" });
+  const result = isUrlTarget(parsed.scan.target)
+    ? await scanUrl(parsed.scan.target, resolvedOptions)
+    : await scanPath(parsed.scan.target, resolvedOptions);
+  const findings = filterFindings(result.activeFindings, resolvedOptions.rootDir, parsed.ruleIds, parsed.file).slice(0, parsed.limit);
+  const baselinePath = parsed.baseline ?? parsed.scan.options.baseline ?? resolvedOptions.baseline ?? "cleardom-baseline.json";
+  const existing = await readBaseline(baselinePath, resolvedOptions.rootDir).catch(() => undefined);
+  const baseline = mergeBaselineFindings(existing, resolvedOptions.standard, findings);
+
+  if (parsed.dryRun) {
+    console.log(`Would suppress ${findings.length} ${findings.length === 1 ? "finding" : "findings"} in ${baselinePath}.`);
+    return;
+  }
+
+  await writeBaselineFile(baselinePath, resolvedOptions.rootDir, baseline);
+  console.log(`Suppressed ${findings.length} ${findings.length === 1 ? "finding" : "findings"} in ${baselinePath}.`);
+}
+
+function parseSuppressionArgs(values: string[]): {
+  scan: ReturnType<typeof parseScanArgs>;
+  ruleIds: string[];
+  file?: string;
+  limit: number;
+  baseline?: string;
+  dryRun: boolean;
+} {
+  const scanArgs: string[] = [];
+  const ruleIds: string[] = [];
+  let file: string | undefined;
+  let limit = Number.POSITIVE_INFINITY;
+  let baseline: string | undefined;
+  let dryRun = false;
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    if (value === "--rule") {
+      const ruleValue = requireValue(values, index, "--rule");
+      if (ruleValue.includes("=")) {
+        scanArgs.push(value, ruleValue);
+      } else {
+        ruleIds.push(normalizeRuleId(ruleValue));
+      }
+      index += 1;
+      continue;
+    }
+    if (value === "--file") {
+      file = requireValue(values, index, "--file");
+      index += 1;
+      continue;
+    }
+    if (value === "--limit") {
+      limit = Number(requireValue(values, index, "--limit"));
+      if (!Number.isInteger(limit) || limit < 1) throw new Error("--limit must be a positive integer");
+      index += 1;
+      continue;
+    }
+    if (value === "--baseline") {
+      baseline = requireValue(values, index, "--baseline");
+      index += 1;
+      continue;
+    }
+    if (value === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+    scanArgs.push(value);
+  }
+
+  return { scan: parseScanArgs(scanArgs), ruleIds, file, limit, baseline, dryRun };
+}
+
+async function baselineCommand(values: string[]): Promise<void> {
+  const subcommand = values[0];
+  if (subcommand !== "update" && subcommand !== "prune") {
+    throw new Error("Usage: cleardom baseline update|prune [path] [--baseline cleardom-baseline.json]");
+  }
+
+  const parsed = parseScanArgs(values.slice(1));
+  const resolvedOptions = await resolveScanOptions({ ...parsed.options, baseline: undefined, failOn: "none" });
+  const result = isUrlTarget(parsed.target)
+    ? await scanUrl(parsed.target, resolvedOptions)
+    : await scanPath(parsed.target, resolvedOptions);
+  const baselinePath = parsed.options.baseline ?? resolvedOptions.baseline ?? "cleardom-baseline.json";
+
+  if (subcommand === "update") {
+    await writeBaseline(baselinePath, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
+    console.log(`Updated ${baselinePath} with ${result.findings.length} current ${result.findings.length === 1 ? "finding" : "findings"}.`);
+    return;
+  }
+
+  const existing = await readBaseline(baselinePath, resolvedOptions.rootDir);
+  if (!existing) {
+    throw new Error(`Could not read ClearDOM baseline at ${baselinePath}`);
+  }
+  const pruned = pruneBaselineFindings(existing, result.findings);
+  await writeBaselineFile(baselinePath, resolvedOptions.rootDir, pruned);
+  const removed = existing.findings.length - pruned.findings.length;
+  console.log(`Pruned ${removed} stale ${removed === 1 ? "finding" : "findings"} from ${baselinePath}.`);
+}
+
+function filterFindings(findings: Finding[], rootDir: string, ruleIds: string[], file?: string): Finding[] {
+  const requestedRules = new Set(ruleIds.map((ruleId) => ruleId.toLowerCase()));
+  const requestedFile = file ? path.resolve(rootDir, file) : undefined;
+  return findings.filter((finding) => {
+    if (requestedRules.size > 0 && !requestedRules.has(finding.ruleId.toLowerCase())) return false;
+    if (!requestedFile) return true;
+    if (/^https?:\/\//i.test(finding.file)) return finding.file === file;
+    return path.resolve(finding.file) === requestedFile || normalizePath(path.relative(rootDir, finding.file)) === normalizePath(file ?? "");
+  });
+}
+
+function formatApplyFixResult(findings: Finding[]): string {
+  return [
+    "ClearDOM automatic fixes",
+    "",
+    `Matched findings: ${findings.length}`,
+    "Applied fixes: 0",
+    "",
+    "No safe automatic transforms are available for the matched findings.",
+    "ClearDOM did not rewrite product code. Use `cleardom fix` for an agent remediation prompt, or `cleardom suppress` to baseline accepted findings."
+  ].join("\n");
 }
 
 async function ciOptions(target: string, options: ScanOptions): Promise<ScanOptions> {
@@ -493,13 +730,33 @@ function parseFailOn(value: string): FailOn {
 }
 
 function parseFormat(value: string): OutputFormat {
-  if (value === "text" || value === "json" || value === "sarif") return value;
-  throw new Error("--format must be one of: text, json, sarif");
+  if (value === "text" || value === "json" || value === "sarif" || value === "html") return value;
+  throw new Error("--format must be one of: text, json, sarif, html");
+}
+
+function parseReportFormat(value: string): ReportFormat {
+  if (value === "html" || value === "markdown" || value === "json") return value;
+  throw new Error("--format must be one of: html, markdown, json");
 }
 
 function parseSemanticMode(value: string): SemanticMode {
   if (value === "auto" || value === "off" || value === "required") return value;
   throw new Error("--semantic must be one of: auto, off, required");
+}
+
+function parseSeverity(value: string): Severity {
+  if (value === "critical" || value === "warning" || value === "info") return value;
+  throw new Error("--severity-threshold must be one of: critical, warning, info");
+}
+
+function parseCommentMode(value: string): PrCommentMode {
+  if (value === "off" || value === "summary" || value === "inline" || value === "both") return value;
+  throw new Error("--comment-mode must be one of: off, summary, inline, both");
+}
+
+function parseBaselinePolicy(value: string): PrBaselinePolicy {
+  if (value === "new" || value === "all") return value;
+  throw new Error("--baseline-policy must be one of: new, all");
 }
 
 function parseComponentPreset(value: string): ComponentPreset {
@@ -530,17 +787,21 @@ function help(): void {
   console.log(`ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
 
 Usage:
-  cleardom [path|url] [--diff] [--format text|json|sarif]
+  cleardom [path|url] [--diff] [--format text|json|sarif|html]
   cleardom install [--yes] [--agents] [--github-actions] [--agent codex|claude|cursor]
   cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]
-  cleardom scan [path|url] [--diff] [--format text|json|sarif] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
-  cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json]
-  cleardom review [path] [--dry-run] [--max-comments 20]
+  cleardom scan [path|url] [--diff] [--format text|json|sarif|html] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
+  cleardom ci [path] [--format text|json|sarif|html] [--baseline cleardom-baseline.json]
+  cleardom doctor [path] [--config cleardom.config.json] [--runtime-url http://localhost:3000]
+  cleardom report [path|url] [--format html|markdown|json] [--output cleardom-report.html]
+  cleardom review [path] [--dry-run] [--max-comments 20] [--severity-threshold critical|warning|info] [--comment-mode off|summary|inline|both] [--changed-files-only] [--baseline-policy new|all] [--status-check-name "ClearDOM PR review"] [--upload-sarif]
+  cleardom suppress [path] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1] [--baseline cleardom-baseline.json]
+  cleardom baseline update|prune [path] [--baseline cleardom-baseline.json]
   cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
   cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
   cleardom rules
   cleardom standards
-  cleardom fix [path] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
+  cleardom fix [path] [--apply] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
 `);
 }
 
@@ -807,12 +1068,25 @@ function recommendedConfig(detection: StackDetection): ScanConfig {
     baseline: "cleardom-baseline.json",
     verbose: false,
     runtimeUrl: "",
+    runtime: {
+      baseUrl: "",
+      routes: [],
+      discoverRoutes: true,
+      viewports: [{ name: "desktop", width: 1280, height: 900 }],
+      waitUntil: "networkidle0",
+      timeoutMs: 30000,
+      headers: {},
+      cookies: [],
+      localStorage: {},
+      screenshot: true
+    },
     semantic: "auto",
     componentPresets: detection.uiLibraries.length > 0 ? detection.uiLibraries : ["radix", "mui", "react-aria"],
     components: {
-      IconButton: { role: "button", nameProps: ["aria-label", "label", "title"] },
-      Button: { role: "button", nameProps: ["aria-label", "label"], labelProps: ["children"] },
-      TextInput: { role: "textbox", nameProps: ["aria-label", "label", "placeholder"] }
+      IconButton: { role: "button", nameProps: ["aria-label", "label", "title"], disabledProps: ["disabled", "isDisabled"] },
+      Button: { role: "button", asProp: "as", nameProps: ["aria-label", "label"], childLabelProps: ["children"], disabledProps: ["disabled", "isDisabled"] },
+      TextInput: { role: "textbox", nameProps: ["aria-label", "label", "placeholder"], valueProps: ["value", "defaultValue"], disabledProps: ["disabled", "isDisabled"] },
+      Field: { wrapper: true, labelProps: ["label"] }
     },
     rules: {
       CDOM_2_4_4_AMBIGUOUS_LABEL: "warning"

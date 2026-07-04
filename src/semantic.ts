@@ -121,10 +121,11 @@ function parseSemanticSourceFile(sourceFile: ts.SourceFile, checker?: ts.TypeChe
   const elements: MutableElement[] = [];
   const stack: MutableElement[] = [];
   const constants = collectConstants(sourceFile, checker);
+  const importSources = collectImportSources(sourceFile);
 
   function visit(node: ts.Node): void {
     if (ts.isJsxElement(node)) {
-      const element = createElement(node.openingElement.tagName, node.openingElement.attributes, node, node.openingElement, sourceFile, elements, stack, constants, checker);
+      const element = createElement(node.openingElement.tagName, node.openingElement.attributes, node, node.openingElement, sourceFile, elements, stack, constants, importSources, checker);
       stack.push(element);
       for (const child of node.children) visit(child);
       stack.pop();
@@ -132,7 +133,7 @@ function parseSemanticSourceFile(sourceFile: ts.SourceFile, checker?: ts.TypeChe
     }
 
     if (ts.isJsxSelfClosingElement(node)) {
-      createElement(node.tagName, node.attributes, node, node, sourceFile, elements, stack, constants, checker);
+      createElement(node.tagName, node.attributes, node, node, sourceFile, elements, stack, constants, importSources, checker);
       return;
     }
 
@@ -157,6 +158,38 @@ function parseSemanticSourceFile(sourceFile: ts.SourceFile, checker?: ts.TypeChe
   return elements;
 }
 
+function collectImportSources(sourceFile: ts.SourceFile): Map<string, string> {
+  const sources = new Map<string, string>();
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const moduleName = statement.moduleSpecifier.text;
+    const clause = statement.importClause;
+    if (!clause) continue;
+
+    if (clause.name) {
+      sources.set(clause.name.text, moduleName);
+    }
+
+    const namedBindings = clause.namedBindings;
+    if (namedBindings && ts.isNamedImports(namedBindings)) {
+      for (const element of namedBindings.elements) {
+        sources.set(element.name.text, moduleName);
+      }
+    }
+
+    if (namedBindings && ts.isNamespaceImport(namedBindings)) {
+      sources.set(namedBindings.name.text, moduleName);
+    }
+  }
+
+  return sources;
+}
+
+function componentImportName(tagName: string): string {
+  return tagName.split(".")[0] ?? tagName;
+}
+
 function createElement(
   tagNode: ts.JsxTagNameExpression,
   attrsNode: ts.JsxAttributes,
@@ -166,6 +199,7 @@ function createElement(
   elements: MutableElement[],
   stack: MutableElement[],
   constants: Map<string, StaticValue>,
+  importSources: Map<string, string>,
   checker: ts.TypeChecker | undefined
 ): MutableElement {
   const parent = stack[stack.length - 1];
@@ -173,6 +207,7 @@ function createElement(
   const element: MutableElement = {
     id: elements.length,
     tagName: resolvedTagName(tagNode, sourceFile, constants),
+    importSource: importSources.get(componentImportName(tagNode.getText(sourceFile))),
     attributes: parseSemanticAttributes(attrsNode, sourceFile, constants, checker),
     parentId: parent?.id,
     childIds: [],

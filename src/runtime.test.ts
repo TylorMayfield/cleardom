@@ -1,10 +1,14 @@
 import * as assert from "node:assert/strict";
 import * as http from "node:http";
 import { existsSync } from "node:fs";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { resolveScanOptions } from "./config.js";
-import { auditRuntimeUrl } from "./runtime.js";
+import { auditRuntimeUrl, auditRuntimeUrls } from "./runtime.js";
+import { scanPath } from "./scanner.js";
 
 const chromePath = process.env.CHROME_PATH
   ?? process.env.PUPPETEER_EXECUTABLE_PATH
@@ -115,6 +119,113 @@ test("runtime edge cases distinguish full focus coverage from partial coverage",
   }
 });
 
+test("runtime config applies routes, headers, storage, waits, viewports, and screenshot evidence", { skip: chromePath === undefined }, async () => {
+  const server = await startServer((request, response) => {
+    if (request.headers["x-cleardom-test"] !== "ok") {
+      response.writeHead(403, { "content-type": "text/plain" });
+      response.end("missing header");
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(`<!doctype html>
+      <html lang="en">
+        <head><title>Runtime config</title><style>${baseStyles}.low { color: #aaa; background: #fff; }</style></head>
+        <body>
+          <a class="skip-link" href="#ready">Skip to content</a>
+          <main id="ready"></main>
+          <script>
+            document.querySelector("#ready").innerHTML = localStorage.getItem("auth") === "yes"
+              ? '<p class="low">Low contrast runtime text</p><button>Ready</button>'
+              : '<button>Locked</button>';
+          </script>
+        </body>
+      </html>`);
+  });
+
+  try {
+    const options = await resolveScanOptions({
+      runtime: {
+        routes: ["/settings"],
+        viewports: [{ name: "small", width: 360, height: 700 }],
+        headers: { "x-cleardom-test": "ok" },
+        localStorage: { auth: "yes" },
+        waitUntil: "domcontentloaded",
+        waitForSelector: "#ready .low",
+        timeoutMs: 5000,
+        screenshot: true
+      },
+      rules: runtimeRulesExcept("CDOM_1_4_3_CONTRAST")
+    });
+    const result = await auditRuntimeUrls([{ url: `${server.url}/settings`, route: "/settings" }], options, chromePath);
+    const finding = result.findings.find((candidate) => candidate.ruleId === "CDOM_1_4_3_CONTRAST");
+
+    assert.ok(finding);
+    assert.equal(finding.runtime?.route, "/settings");
+    assert.equal(finding.runtime?.viewport.name, "small");
+    assert.equal(typeof finding.runtime?.selector, "string");
+    assert.match(finding.runtime?.screenshot ?? "", /^data:image\/png;base64,/);
+    assert.equal(result.diagnostics.length, 0);
+    assert.equal(result.pages[0]?.status, 200);
+  } finally {
+    await server.close();
+  }
+});
+
+test("runtime diagnostics expose navigation failures", { skip: chromePath === undefined }, async () => {
+  const server = await startServer((_, response) => {
+    response.writeHead(500, { "content-type": "text/html" });
+    response.end("<!doctype html><title>broken</title>");
+  });
+
+  try {
+    const options = await resolveScanOptions({ runtime: { timeoutMs: 5000 } });
+    const result = await auditRuntimeUrls([{ url: server.url, route: "/" }], options, chromePath);
+
+    assert.equal(result.findings.length, 0);
+    assert.equal(result.diagnostics.some((diagnostic) => diagnostic.stage === "navigation" && diagnostic.severity === "error"), true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("scanPath discovers safe framework runtime routes", { skip: chromePath === undefined }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cleardom-runtime-routes-"));
+  const server = await startServer((request, response) => {
+    if (request.url !== "/settings") {
+      response.writeHead(404, { "content-type": "text/html" });
+      response.end("<!doctype html><title>missing</title>");
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(`<!doctype html><html lang="en"><head><title>Settings</title><style>${baseStyles}</style></head><body><a class="skip-link" href="#main">Skip</a><main id="main"><button>Settings</button></main></body></html>`);
+  });
+
+  const previousChromePath = process.env.CHROME_PATH;
+  try {
+    await mkdir(path.join(root, "app", "settings"), { recursive: true });
+    await writeFile(path.join(root, "app", "settings", "page.tsx"), "export default function Page() { return <button>Settings</button>; }\n", "utf8");
+    if (chromePath) process.env.CHROME_PATH = chromePath;
+    const result = await scanPath(root, {
+      runtime: {
+        baseUrl: server.url,
+        viewports: [{ name: "desktop", width: 1280, height: 900 }],
+        timeoutMs: 5000
+      },
+      rules: runtimeRulesExcept("CDOM_2_4_1_SKIP_LINK")
+    });
+
+    assert.equal(result.runtimePages.some((page) => page.route === "/settings" && page.status === 200), true);
+  } finally {
+    if (previousChromePath === undefined) {
+      delete process.env.CHROME_PATH;
+    } else {
+      process.env.CHROME_PATH = previousChromePath;
+    }
+    await server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function runtimeRuleIds(url: string): Promise<Set<string>> {
   const options = await resolveScanOptions({
     rules: {
@@ -129,8 +240,26 @@ async function runtimeRuleIds(url: string): Promise<Set<string>> {
   return new Set(findings.map((finding) => finding.ruleId));
 }
 
-async function startServer(body: string): Promise<{ url: string; close: () => Promise<void> }> {
-  const server = http.createServer((_: http.IncomingMessage, response: http.ServerResponse) => {
+function runtimeRulesExcept(enabledRuleId: string): Record<string, "off"> {
+  return Object.fromEntries([
+    "CDOM_1_4_3_CONTRAST",
+    "CDOM_2_4_7_FOCUS_VISIBLE",
+    "CDOM_2_5_8_TARGET_SIZE",
+    "CDOM_1_4_10_REFLOW",
+    "CDOM_2_4_1_SKIP_LINK",
+    "CDOM_1_4_12_TEXT_SPACING",
+    "CDOM_1_4_13_HOVER_FOCUS_CONTENT",
+    "CDOM_2_1_2_KEYBOARD_TRAP",
+    "CDOM_2_4_11_FOCUS_OBSCURED"
+  ].filter((ruleId) => ruleId !== enabledRuleId).map((ruleId) => [ruleId, "off" as const]));
+}
+
+async function startServer(body: string | ((request: http.IncomingMessage, response: http.ServerResponse) => void)): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = http.createServer((request: http.IncomingMessage, response: http.ServerResponse) => {
+    if (typeof body === "function") {
+      body(request, response);
+      return;
+    }
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     response.end(body);
   });

@@ -1,4 +1,4 @@
-import type { JsxElement, RuleContext } from "./types.js";
+import type { ComponentMapping, JsxElement, RuleContext } from "./types.js";
 
 export const ambiguousLabels = new Set([
   "click here",
@@ -28,6 +28,7 @@ export function hasClickHandler(element: JsxElement, context: RuleContext): bool
 }
 
 export function isWebInteractive(element: JsxElement, context: RuleContext): boolean {
+  if (isDisabled(element, context)) return false;
   const tag = element.tagName.toLowerCase();
   const role = elementRole(element, context);
   return ["button", "a"].includes(tag)
@@ -46,6 +47,9 @@ export function accessibleName(element: JsxElement, context: RuleContext): strin
 
   const ariaLabel = staticAttributeValue(element, context, "aria-label");
   if (ariaLabel?.trim()) return normalize(ariaLabel);
+
+  const accessibilityLabel = staticAttributeValue(element, context, "accessibilityLabel");
+  if (accessibilityLabel?.trim()) return normalize(accessibilityLabel);
 
   const labelledBy = staticAttributeValue(element, context, "aria-labelledby");
   if (labelledBy?.trim()) {
@@ -91,12 +95,19 @@ export function visibleLabel(element: JsxElement, context: RuleContext): string 
 }
 
 export function elementRole(element: JsxElement, context: RuleContext): string | undefined {
-  const configured = context.options.components[element.tagName]?.role;
-  const polymorphic = staticAttributeValue(element, context, "as")?.toLowerCase();
+  const mapping = componentMapping(element, context);
+  const configured = mapping?.role;
+  for (const prop of mapping?.roleProps ?? []) {
+    const role = staticAttributeValue(element, context, prop)?.toLowerCase();
+    if (role) return role;
+  }
+  const polymorphic = staticAttributeValue(element, context, mapping?.asProp ?? "as")?.toLowerCase();
   if (polymorphic === "button") return "button";
   if (polymorphic === "a") return "link";
   if (polymorphic === "input" || polymorphic === "textarea") return "textbox";
-  return configured ?? staticAttributeValue(element, context, "role")?.toLowerCase();
+  return configured
+    ?? staticAttributeValue(element, context, "accessibilityRole")?.toLowerCase()
+    ?? staticAttributeValue(element, context, "role")?.toLowerCase();
 }
 
 export function staticAttributeValue(element: JsxElement, context: RuleContext, name: string): string | undefined {
@@ -125,9 +136,22 @@ export function hasFormLabel(element: JsxElement, context: RuleContext): boolean
 
   if (staticAttributeValue(element, context, "title")?.trim()) return true;
   if (context.labelsFor(element).some((label) => normalize(context.elementText(label)))) return true;
+  if (componentWrapperLabels(element, context).some((label) => label.length > 0)) return true;
 
   const parent = context.parentOf(element);
   return parent?.tagName.toLowerCase() === "label" && normalize(context.elementText(parent)).length > 0;
+}
+
+export function isDisabled(element: JsxElement, context: RuleContext): boolean {
+  if (context.hasAttribute(element, "disabled")) return true;
+  if (staticAttributeValue(element, context, "aria-disabled") === "true") return true;
+  if (staticAttributeValue(element, context, "accessibilityState")?.includes("disabled")) return true;
+
+  const mapping = componentMapping(element, context);
+  return (mapping?.disabledProps ?? []).some((prop) => {
+    if (context.hasAttribute(element, prop)) return true;
+    return staticAttributeValue(element, context, prop) === "true";
+  });
 }
 
 export function hasKeyboardSupport(element: JsxElement, context: RuleContext): boolean {
@@ -153,12 +177,47 @@ export function normalize(value: string): string {
 }
 
 function componentNameProps(element: JsxElement, context: RuleContext): string[] {
-  const mapping = context.options.components[element.tagName];
-  return [...(mapping?.nameProps ?? []), ...(mapping?.labelProps ?? [])];
+  const mapping = componentMapping(element, context);
+  return [
+    ...(mapping?.nameProps ?? []),
+    ...(mapping?.valueProps ?? []),
+    ...(mapping?.labelProps ?? []),
+    ...(mapping?.childLabelProps ?? [])
+  ];
 }
 
 function componentVisibleLabelProps(element: JsxElement, context: RuleContext): string[] {
-  return context.options.components[element.tagName]?.labelProps ?? [];
+  const mapping = componentMapping(element, context);
+  return [...(mapping?.labelProps ?? []), ...(mapping?.childLabelProps ?? [])];
+}
+
+function componentWrapperLabels(element: JsxElement, context: RuleContext): string[] {
+  const labels: string[] = [];
+  let current = context.parentOf(element);
+
+  while (current) {
+    const mapping = componentMapping(current, context);
+    if (mapping?.wrapper) {
+      for (const prop of [...(mapping.labelProps ?? []), ...(mapping.childLabelProps ?? []), ...(mapping.nameProps ?? [])]) {
+        const value = staticAttributeValue(current, context, prop);
+        if (value?.trim()) labels.push(normalize(value));
+      }
+      const text = normalize(context.elementText(current));
+      if (text) labels.push(text);
+    }
+    current = context.parentOf(current);
+  }
+
+  return labels;
+}
+
+function componentMapping(element: JsxElement, context: RuleContext): ComponentMapping | undefined {
+  const mapping = context.options.components[element.tagName] ?? context.options.components[element.tagName.split(".").at(-1) ?? element.tagName];
+  if (!mapping) return undefined;
+  const sources = typeof mapping.importSource === "string" ? [mapping.importSource] : mapping.importSource;
+  if (!sources || sources.length === 0) return mapping;
+  if (!element.importSource) return mapping;
+  return element.importSource && sources.includes(element.importSource) ? mapping : undefined;
 }
 
 function attributeWithAliases(element: JsxElement, context: RuleContext, name: string) {

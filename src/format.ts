@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { sourceAdapters } from "./source-adapters.js";
 import type { Finding, RuleCategory, RuleSummary, ScanResult, Severity, StandardDefinition } from "./types.js";
 
 const severityLabels: Record<Severity, string> = {
@@ -25,6 +26,7 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
       const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
       lines.push(`  ${finding.ruleId} ${formatFindingLocation(finding)} ${finding.title}`);
       lines.push(`     ${finding.message}`);
+      lines.push(`     Detection: ${finding.detectionMode}; confidence ${finding.confidence} (${finding.confidenceReason})`);
       if (rule?.guidance) {
         lines.push(`     Fix: ${rule.guidance}`);
       }
@@ -32,6 +34,10 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
       if (verbose) {
         lines.push(`     ${finding.excerpt}`);
         lines.push(`     Standards: ${formatStandardRefs(finding.standards)}`);
+        lines.push(`     Target: ${finding.target}`);
+        if (finding.runtime) {
+          lines.push(`     Runtime: ${finding.runtime.route} ${finding.runtime.viewport.name ?? `${finding.runtime.viewport.width}x${finding.runtime.viewport.height}`} selector ${finding.runtime.selector}`);
+        }
       }
     }
     lines.push("");
@@ -44,9 +50,15 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
   if (verbose) {
     lines.push("Scan details");
     lines.push(`  Semantic analysis: ${semanticLabel(result)}`);
+    lines.push(`  Framework adapters: ${sourceAdapters.map((adapter) => `${adapter.label} ${adapter.supportTier}`).join(", ")}`);
+    lines.push(`  Web runtime checks: ${result.activeFindings.some((finding) => finding.source === "runtime") ? "ran for configured URL" : "available with --runtime-url and Chromium"}`);
+    lines.push("  React Native checks: static source guidance; verify VoiceOver and TalkBack behavior manually on device or simulator");
     lines.push(`  Active: ${result.summary.activeFindings}`);
     lines.push(`  Baseline: ${result.summary.baselineFindings}`);
+    lines.push(`  Suppressed: ${result.summary.suppressedFindings}`);
     lines.push(`  ${result.baseline ? "Regressions" : "New findings"}: ${result.summary.regressions}`);
+    if (result.runtimePages.length > 0) lines.push(`  Runtime pages: ${result.runtimePages.length}`);
+    if (result.runtimeDiagnostics.length > 0) lines.push(`  Runtime diagnostics: ${result.runtimeDiagnostics.length}`);
     for (const category of categories) {
       const count = result.activeFindings.filter((finding) => finding.category === category).length;
       if (count > 0) lines.push(`  ${category}: ${count}`);
@@ -85,6 +97,62 @@ export function formatScanJson(result: ScanResult): string {
   return JSON.stringify(result, null, 2);
 }
 
+export function formatScanHtml(result: ScanResult): string {
+  const findings = result.activeFindings.map((finding) => `
+      <article class="finding">
+        <h3>${escapeHtml(finding.ruleId)}: ${escapeHtml(finding.title)}</h3>
+        <dl>
+          <div><dt>Location</dt><dd>${escapeHtml(formatFindingLocation(finding))}</dd></div>
+          <div><dt>Severity</dt><dd>${escapeHtml(finding.severity)}</dd></div>
+          <div><dt>Confidence</dt><dd>${escapeHtml(finding.confidence)}</dd></div>
+          <div><dt>Message</dt><dd>${escapeHtml(finding.message)}</dd></div>
+          ${finding.runtime ? `<div><dt>Runtime selector</dt><dd><code>${escapeHtml(finding.runtime.selector)}</code></dd></div>
+          <div><dt>Runtime route</dt><dd>${escapeHtml(finding.runtime.route)} at ${escapeHtml(finding.runtime.viewport.name ?? `${finding.runtime.viewport.width}x${finding.runtime.viewport.height}`)}</dd></div>` : ""}
+        </dl>
+        ${finding.runtime?.screenshot ? `<img alt="Screenshot evidence for ${escapeHtml(finding.ruleId)}" src="${finding.runtime.screenshot}">` : ""}
+      </article>`).join("\n");
+  const diagnostics = result.runtimeDiagnostics.map((diagnostic) => `<li>${escapeHtml(diagnostic.severity)} ${escapeHtml(diagnostic.stage)}${diagnostic.url ? ` ${escapeHtml(diagnostic.url)}` : ""}: ${escapeHtml(diagnostic.message)}</li>`).join("\n");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClearDOM Scan Report</title>
+  <style>
+    body { font-family: system-ui, sans-serif; line-height: 1.5; margin: 0; color: #172033; background: #f6f7f9; }
+    main { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
+    .summary, .finding, .diagnostics { background: #fff; border: 1px solid #d8dee8; border-radius: 8px; padding: 16px; margin: 16px 0; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .metric strong { display: block; font-size: 1.4rem; }
+    dl div { margin: 8px 0; }
+    dt { font-weight: 700; }
+    dd { margin: 2px 0 0; }
+    code { background: #eef2f7; padding: 2px 4px; border-radius: 4px; }
+    img { display: block; max-width: 100%; border: 1px solid #d8dee8; border-radius: 6px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ClearDOM Scan Report</h1>
+    <section class="summary" aria-label="Scan summary">
+      ${htmlMetric("Score", `${result.score}/100`)}
+      ${htmlMetric("Standard", result.standard.label)}
+      ${htmlMetric("Checked", String(result.checkedFiles))}
+      ${htmlMetric("Active", String(result.summary.activeFindings))}
+      ${htmlMetric("Runtime Pages", String(result.runtimePages.length))}
+      ${htmlMetric("Diagnostics", String(result.runtimeDiagnostics.length))}
+    </section>
+    <section>
+      <h2>Active Findings</h2>
+      ${findings || "<p>No active ClearDOM findings.</p>"}
+    </section>
+    ${diagnostics ? `<section class="diagnostics"><h2>Runtime Diagnostics</h2><ul>${diagnostics}</ul></section>` : ""}
+  </main>
+</body>
+</html>`;
+}
+
 export function formatSarif(result: ScanResult): string {
   return JSON.stringify({
     version: "2.1.0",
@@ -100,6 +168,10 @@ export function formatSarif(result: ScanResult): string {
               name: rule.title,
               shortDescription: { text: rule.title },
               fullDescription: { text: `${rule.category}; WCAG: ${rule.wcag.join(", ")}` },
+              properties: {
+                confidence: rule.confidence,
+                detectionMode: rule.detectionMode
+              },
               defaultConfiguration: {
                 level: sarifLevel(rule.severity)
               }
@@ -112,6 +184,16 @@ export function formatSarif(result: ScanResult): string {
           message: { text: finding.message },
           fingerprints: {
             clearDom: finding.fingerprint
+          },
+          properties: {
+            confidence: finding.confidence,
+            detectionMode: finding.detectionMode,
+            impact: finding.impact,
+            source: finding.source,
+            fixKind: finding.fixKind,
+            confidenceReason: finding.confidenceReason,
+            target: finding.target,
+            semanticLocation: finding.semanticLocation
           },
           locations: [
             {
@@ -136,6 +218,8 @@ export function formatRules(rules: RuleSummary[]): string {
   for (const rule of rules) {
     lines.push(`${rule.id} ${rule.title}`);
     lines.push(`  Severity: ${rule.severity}`);
+    lines.push(`  Detection: ${rule.detectionMode}`);
+    lines.push(`  Confidence: ${rule.confidence}`);
     lines.push(`  Category: ${rule.category}`);
     lines.push(`  Platforms: ${rule.platforms.join(", ")}`);
     lines.push(`  WCAG: ${rule.wcag.join(", ")}`);
@@ -212,4 +296,16 @@ function sarifLevel(severity: Severity): "error" | "warning" | "note" {
   if (severity === "critical") return "error";
   if (severity === "warning") return "warning";
   return "note";
+}
+
+function htmlMetric(label: string, value: string): string {
+  return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+}
+
+function escapeHtml(value: string | number): string {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

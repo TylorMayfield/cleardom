@@ -2,13 +2,14 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as puppeteer from "puppeteer-core";
 import { fingerprintFinding, markBaselineFindings, readBaseline } from "./baseline.js";
-import { isRuleEnabled, matchesAnyPattern, resolveComponentMappings, resolveScanOptions, severityOverride } from "./config.js";
-import { auditRuntimeUrl } from "./runtime.js";
+import { isRuleEnabled, matchesAnyPattern, normalizeSuppressions, resolveComponentMappings, resolveScanOptions, severityOverride } from "./config.js";
+import { auditRuntimeUrls, prepareRuntimePage, runRuntimeSetupScript } from "./runtime.js";
 import { normalizeRuleId, rules, summarizeRule } from "./rules/index.js";
 import { createSemanticProject, isSemanticSourceFile, parseSemanticSource } from "./semantic.js";
 import { parseSource, supportedExtensions } from "./source-adapters.js";
 import { findStandard, referencesForStandard, resolveStandardId, ruleAppliesToStandard } from "./standards.js";
-import type { Finding, JsxAttribute, JsxElement, ResolvedScanOptions, RuleDefinition, ScanOptions, ScanResult, ScoreBreakdown, Severity } from "./types.js";
+import { applySuppressions } from "./suppressions.js";
+import type { DetectionMode, Finding, FindingImpact, FindingSource, FixKind, JsxAttribute, JsxElement, ResolvedScanOptions, RuleDefinition, RuntimeDiagnostic, RuntimePageResult, ScanOptions, ScanResult, ScoreBreakdown, Severity } from "./types.js";
 
 const ignoredDirectories = new Set([".git", ".cleardom", "node_modules", "dist", "build", ".next", "coverage"]);
 
@@ -18,18 +19,30 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}): P
   const files = await collectFiles(root, resolvedOptions);
   const semanticProject = createSemanticProject(files, resolvedOptions);
   const findings: Finding[] = [];
+  const sources = new Map<string, string>();
+  const runtimeDiagnostics: RuntimeDiagnostic[] = [];
+  let runtimePages: RuntimePageResult[] = [];
 
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
+    sources.set(file, source);
     findings.push(...scanSourceWithElements(source, file, semanticProject.elementsByFile.get(file) ?? parseSource(source, file), resolvedOptions));
   }
 
-  if (resolvedOptions.runtimeUrl) {
-    findings.push(...await auditRuntimeUrl(resolvedOptions.runtimeUrl, resolvedOptions));
+  const runtimeBaseUrl = resolvedOptions.runtime.baseUrl ?? resolvedOptions.runtimeUrl;
+  if (runtimeBaseUrl) {
+    const discovered = await discoverRuntimeRoutes(root, resolvedOptions);
+    runtimeDiagnostics.push(...discovered.diagnostics);
+    const targets = runtimeTargets(runtimeBaseUrl, mergeRoutes(resolvedOptions.runtime.routes, discovered.routes));
+    const runtime = await auditRuntimeUrls(targets, resolvedOptions);
+    runtimeDiagnostics.push(...runtime.diagnostics);
+    runtimePages = runtime.pages;
+    findings.push(...runtime.findings);
   }
 
+  const suppressionResult = applySuppressions(findings, sources, resolvedOptions);
   const baseline = await readBaseline(resolvedOptions.baseline, resolvedOptions.rootDir);
-  const marked = markBaselineFindings(findings, baseline);
+  const marked = markBaselineFindings(suppressionResult.findings, baseline);
   const scoreBreakdown = buildScoreBreakdown(marked.activeFindings);
   const score = Math.round(Object.values(scoreBreakdown).reduce((total, value) => total + value, 0) / Object.values(scoreBreakdown).length);
 
@@ -38,14 +51,17 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}): P
     findings: marked.findings,
     activeFindings: marked.activeFindings,
     baselineFindings: marked.baselineFindings,
+    suppressedFindings: suppressionResult.suppressedFindings,
     regressions: marked.regressions,
-    summary: summarizeFindings(marked),
+    summary: summarizeFindings(marked, suppressionResult.suppressedFindings.length),
     scoreBreakdown,
     score,
     rules: activeRules(resolvedOptions).map(({ rule, severity }) => summarizeRule(rule, severity)),
     standard: findStandard(resolvedOptions.standard),
     semanticAnalysis: semanticProject.analysis,
     semanticDiagnostics: semanticProject.diagnostics,
+    runtimeDiagnostics,
+    runtimePages,
     baseline
   };
 }
@@ -65,31 +81,56 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
   });
 
   try {
-    const page = await browser.newPage();
-    const response = await page.goto(url, { waitUntil: "networkidle0", timeout: 30000 });
-    
-    if (!response || !response.ok()) {
-      throw new Error(`Failed to load ${url}: ${response?.status()}`);
+    const findings: Finding[] = [];
+    const sources = new Map<string, string>();
+    const runtimeDiagnostics: RuntimeDiagnostic[] = [];
+    const targets = runtimeTargets(
+      resolvedOptions.runtime.baseUrl ?? url,
+      resolvedOptions.runtime.routes.length > 0 ? resolvedOptions.runtime.routes : [runtimeRouteFromUrl(url)]
+    );
+
+    for (const target of targets) {
+      const page = await browser.newPage();
+      try {
+        await prepareRuntimePage(page, resolvedOptions.runtime, target.url);
+        await runRuntimeSetupScript(page, browser, resolvedOptions.runtime, target.url, target.route);
+        const response = await page.goto(target.url, { waitUntil: resolvedOptions.runtime.waitUntil, timeout: resolvedOptions.runtime.timeoutMs });
+        if (!response || !response.ok()) {
+          runtimeDiagnostics.push({
+            url: target.url,
+            route: target.route,
+            stage: "navigation",
+            severity: "error",
+            message: `Failed to load ${target.url}: ${response?.status() ?? "no response"}`
+          });
+          continue;
+        }
+        const source = await page.content();
+        sources.set(target.url, source);
+        findings.push(...scanSourceWithElements(source, target.url, parseSource(source, target.url), resolvedOptions));
+      } finally {
+        await page.close().catch(() => undefined);
+      }
     }
 
-    const source = await page.content();
-    const findings: Finding[] = [];
-    
-    findings.push(...scanSource(source, url, resolvedOptions));
-    findings.push(...await auditRuntimeUrl(url, resolvedOptions, executablePath));
+    const runtime = await auditRuntimeUrls(targets, resolvedOptions, executablePath, browser);
+    runtimeDiagnostics.push(...runtime.diagnostics);
+    findings.push(...runtime.findings);
 
+    const suppressionResult = applySuppressions(findings, sources, resolvedOptions);
     const baseline = await readBaseline(resolvedOptions.baseline, resolvedOptions.rootDir);
-    const marked = markBaselineFindings(findings, baseline);
+    const marked = markBaselineFindings(suppressionResult.findings, baseline);
     const scoreBreakdown = buildScoreBreakdown(marked.activeFindings);
     const score = Math.round(Object.values(scoreBreakdown).reduce((total, value) => total + value, 0) / Object.values(scoreBreakdown).length);
 
     return {
-      checkedFiles: 1,
+      checkedFiles: targets.length,
       findings: marked.findings,
       activeFindings: marked.activeFindings,
       baselineFindings: marked.baselineFindings,
+      suppressedFindings: suppressionResult.suppressedFindings,
       regressions: marked.regressions,
-      summary: summarizeFindings(marked),
+      summary: summarizeFindings(marked, suppressionResult.suppressedFindings.length),
       scoreBreakdown,
       score,
       rules: activeRules(resolvedOptions).map(({ rule, severity }) => summarizeRule(rule, severity)),
@@ -106,6 +147,8 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
         severity: "info",
         adapter: "lightweight"
       }],
+      runtimeDiagnostics,
+      runtimePages: runtime.pages,
       baseline
     };
   } finally {
@@ -118,7 +161,8 @@ export function scanSource(source: string, file: string, options: ScanOptions | 
   const elements = resolvedOptions.semantic !== "off" && isSemanticSourceFile(file)
     ? parseSemanticSource(source, file)
     : parseSource(source, file);
-  return scanSourceWithElements(source, file, elements, resolvedOptions);
+  const findings = scanSourceWithElements(source, file, elements, resolvedOptions);
+  return applySuppressions(findings, new Map([[file, source]]), resolvedOptions).findings;
 }
 
 function scanSourceWithElements(source: string, file: string, elements: JsxElement[], resolvedOptions: ResolvedScanOptions): Finding[] {
@@ -166,6 +210,106 @@ async function collectFiles(targetPath: string, options: ResolvedScanOptions): P
   return files.sort();
 }
 
+async function discoverRuntimeRoutes(root: string, options: ResolvedScanOptions): Promise<{ routes: string[]; diagnostics: RuntimeDiagnostic[] }> {
+  if (!options.runtime.discoverRoutes) {
+    return { routes: [], diagnostics: [] };
+  }
+
+  try {
+    const files = await collectFiles(root, { ...options, include: [], exclude: options.exclude });
+    const routes = new Set<string>();
+    for (const file of files) {
+      const frameworkRoute = routeFromFrameworkFile(path.relative(root, file));
+      if (frameworkRoute) routes.add(frameworkRoute);
+      const source = await fs.readFile(file, "utf8");
+      for (const match of source.matchAll(/\b(?:href|to|route|path)=["'](\/[^"'#?]*)["']/g)) {
+        routes.add(normalizeRoute(match[1]));
+      }
+    }
+    return { routes: [...routes], diagnostics: [] };
+  } catch (error) {
+    return {
+      routes: [],
+      diagnostics: [{
+        stage: "discover-routes",
+        severity: "warning",
+        message: `Could not discover runtime routes: ${error instanceof Error ? error.message : String(error)}`
+      }]
+    };
+  }
+}
+
+function mergeRoutes(configuredRoutes: string[], discoveredRoutes: string[]): string[] {
+  const routes = [...new Set([...configuredRoutes, ...discoveredRoutes].map(normalizeRoute))];
+  return routes.length > 0 ? routes : ["/"];
+}
+
+function runtimeTargets(baseUrl: string, routes: string[]): Array<{ url: string; route: string }> {
+  const normalizedRoutes = routes.length > 0 ? routes.map(normalizeRoute) : ["/"];
+  return normalizedRoutes.map((route) => ({
+    route,
+    url: new URL(route, ensureTrailingSlash(baseUrl)).toString()
+  }));
+}
+
+function runtimeRouteFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return normalizeRoute(`${parsed.pathname}${parsed.search}`);
+  } catch {
+    return "/";
+  }
+}
+
+function routeFromUrl(url: string): string {
+  return runtimeRouteFromUrl(url);
+}
+
+function routeFromFrameworkFile(relativeFile: string): string | undefined {
+  const normalized = relativeFile.split(path.sep).join("/");
+  if (hasDynamicRouteSegment(normalized)) return undefined;
+
+  if (/^(?:src\/)?app\/page\.(?:js|jsx|ts|tsx|mdx)$/.test(normalized)) return "/";
+  const appMatch = normalized.match(/^(?:src\/)?app\/(.+)\/page\.(?:js|jsx|ts|tsx|mdx)$/);
+  if (appMatch) return routeFromSegments(appMatch[1]);
+
+  const pagesMatch = normalized.match(/^(?:src\/)?pages\/(.+)\.(?:js|jsx|ts|tsx|vue|svelte|astro|mdx)$/);
+  if (pagesMatch) return routeFromSegments(pagesMatch[1]);
+
+  const remixMatch = normalized.match(/^app\/routes\/(.+)\.(?:js|jsx|ts|tsx|mdx)$/);
+  if (remixMatch) return routeFromSegments(remixMatch[1].replaceAll(".", "/"));
+
+  if (/^src\/routes\/\+page\.(?:js|ts|svelte)$/.test(normalized)) return "/";
+  const svelteKitMatch = normalized.match(/^src\/routes\/(.+)\/\+page\.(?:js|ts|svelte)$/);
+  if (svelteKitMatch) return routeFromSegments(svelteKitMatch[1]);
+
+  return undefined;
+}
+
+function hasDynamicRouteSegment(value: string): boolean {
+  return /(?:^|\/)(?:\[|\$|_)/.test(value);
+}
+
+function routeFromSegments(value: string): string {
+  const route = value
+    .replace(/\/?index$/, "")
+    .replace(/\/?page$/, "")
+    .split("/")
+    .filter((segment) => segment && segment !== "route")
+    .join("/");
+  return normalizeRoute(route);
+}
+
+function normalizeRoute(route: string): string {
+  const trimmed = route.trim();
+  if (!trimmed || trimmed === "*") return "/";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+function ensureTrailingSlash(url: string): string {
+  return url.endsWith("/") ? url : `${url}/`;
+}
+
 function shouldScanFile(filePath: string, options: ResolvedScanOptions): boolean {
   if (!isSupportedSourceFile(filePath)) return false;
   const relative = path.relative(options.rootDir, filePath);
@@ -203,11 +347,18 @@ function createRuleContext(
     elements,
     options,
     createFinding(rule: RuleDefinition, element: JsxElement, message: string): Finding {
+      const target = ruleTarget(element);
+      const location = semanticLocation(elements, element);
       return {
         ruleId: rule.id,
         title: rule.title,
         severity: effectiveSeverity,
         confidence: rule.confidence,
+        impact: ruleImpact(rule),
+        confidenceReason: confidenceReason(rule),
+        detectionMode: ruleDetectionMode(rule),
+        source: ruleSource(rule, options),
+        fixKind: ruleFixKind(rule),
         category: rule.category,
         file,
         line: element.line,
@@ -217,11 +368,13 @@ function createRuleContext(
         wcag: rule.wcag,
         standards: referencesForStandard(rule, options.standard),
         platforms: rule.platforms,
+        target,
+        semanticLocation: location,
         fingerprint: fingerprintFinding({
           ruleId: rule.id,
           file,
-          excerpt: element.excerpt,
-          message
+          target,
+          semanticLocation: location
         }),
         baselineStatus: "active"
       };
@@ -272,11 +425,77 @@ function buildScoreBreakdown(findings: Finding[]): ScoreBreakdown {
   };
 }
 
-function summarizeFindings(marked: ReturnType<typeof markBaselineFindings>) {
+function ruleImpact(rule: RuleDefinition): FindingImpact {
+  if (rule.impact) return rule.impact;
+  if (rule.severity === "critical") return "serious";
+  if (rule.severity === "warning") return "moderate";
+  return "minor";
+}
+
+function ruleDetectionMode(rule: RuleDefinition): DetectionMode {
+  if (rule.detectionMode) return rule.detectionMode;
+  if (rule.confidence === "high") return "automated";
+  if (rule.confidence === "medium") return "needs-review";
+  return "manual-guidance";
+}
+
+function confidenceReason(rule: RuleDefinition): string {
+  if (rule.confidenceReason) return rule.confidenceReason;
+  if (ruleDetectionMode(rule) === "automated") return "Static evidence is specific enough to report as an automated finding.";
+  if (ruleDetectionMode(rule) === "needs-review") return "Static evidence suggests a likely accessibility risk, but human review should confirm user impact and context.";
+  return "This rule maps to WCAG guidance that usually requires human judgment, user context, or runtime evidence.";
+}
+
+function ruleSource(rule: RuleDefinition, options: ResolvedScanOptions): FindingSource {
+  if (rule.source) return rule.source;
+  return options.semantic === "off" ? "static" : "semantic";
+}
+
+function ruleFixKind(rule: RuleDefinition): FixKind {
+  if (rule.fixKind) return rule.fixKind;
+  if (rule.fixable && ruleDetectionMode(rule) === "automated") return "safe-auto-fix";
+  if (ruleDetectionMode(rule) === "manual-guidance") return "manual-review";
+  return "guided-fix";
+}
+
+function ruleTarget(element: JsxElement): string {
+  const importantAttributes = ["id", "name", "type", "role", "href", "src", "alt", "aria-label", "aria-labelledby", "for", "htmlFor"];
+  const attributes = importantAttributes.flatMap((name) => {
+    const attribute = element.attributes.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
+    if (!attribute || attribute.value === true) return [];
+    return `[${attribute.name}=${normalizeTargetValue(attribute.value)}]`;
+  });
+  return `${element.tagName.toLowerCase()}${attributes.join("")}`;
+}
+
+function semanticLocation(elements: JsxElement[], element: JsxElement): string {
+  const parts: string[] = [];
+  let current: JsxElement | undefined = element;
+
+  while (current) {
+    const siblings = current.parentId === undefined
+      ? elements.filter((candidate) => candidate.parentId === undefined)
+      : elements[current.parentId]?.childIds.map((childId) => elements[childId]).filter(Boolean) ?? [];
+    const sameTagBefore = siblings
+      .filter((sibling) => sibling.tagName.toLowerCase() === current?.tagName.toLowerCase() && sibling.id <= (current?.id ?? -1))
+      .length;
+    parts.unshift(`${current.tagName.toLowerCase()}:nth-${sameTagBefore}`);
+    current = current.parentId === undefined ? undefined : elements[current.parentId];
+  }
+
+  return parts.join(">");
+}
+
+function normalizeTargetValue(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+function summarizeFindings(marked: ReturnType<typeof markBaselineFindings>, suppressedFindings: number) {
   return {
     totalFindings: marked.findings.length,
     activeFindings: marked.activeFindings.length,
     baselineFindings: marked.baselineFindings.length,
+    suppressedFindings,
     regressions: marked.regressions.length,
     critical: marked.activeFindings.filter((finding) => finding.severity === "critical").length,
     warning: marked.activeFindings.filter((finding) => finding.severity === "warning").length,
@@ -299,9 +518,36 @@ function resolveInlineOptions(options: ScanOptions): ResolvedScanOptions {
     baseline: options.baseline,
     verbose: options.verbose ?? false,
     runtimeUrl: options.runtimeUrl,
+    runtime: {
+      baseUrl: options.runtime?.baseUrl ?? options.runtimeUrl,
+      routes: options.runtime?.routes ?? [],
+      discoverRoutes: options.runtime?.discoverRoutes ?? true,
+      viewports: options.runtime?.viewports ?? [{ name: "desktop", width: 1280, height: 900, deviceScaleFactor: 1 }],
+      auth: options.runtime?.auth,
+      setupScript: options.runtime?.setupScript,
+      waitUntil: options.runtime?.waitUntil ?? "networkidle0",
+      waitForSelector: options.runtime?.waitForSelector,
+      waitForTimeoutMs: options.runtime?.waitForTimeoutMs,
+      timeoutMs: options.runtime?.timeoutMs ?? 30000,
+      cookies: options.runtime?.cookies ?? [],
+      localStorage: options.runtime?.localStorage ?? {},
+      headers: options.runtime?.headers ?? {},
+      screenshot: options.runtime?.screenshot ?? true
+    },
     semantic: options.semantic ?? "auto",
     componentPresets: options.componentPresets ?? [],
     components: resolveComponentMappings(options.componentPresets ?? [], {}, options.components),
+    suppressions: normalizeSuppressions(options.suppressions, "inline options"),
+    pr: {
+      maxComments: 20,
+      severityThreshold: "info",
+      commentMode: "both",
+      changedFilesOnly: false,
+      baselinePolicy: "new",
+      statusCheckName: "ClearDOM PR review",
+      uploadSarif: false
+    },
+    packages: [],
     configPath: options.configPath,
     rootDir: process.cwd()
   };

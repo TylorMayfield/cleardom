@@ -15,6 +15,11 @@ export async function readBaseline(filePath: string | undefined, rootDir: string
 
 export async function writeBaseline(filePath: string, rootDir: string, standard: StandardId, findings: Finding[]): Promise<BaselineFile> {
   const baseline = createBaseline(standard, findings);
+  await writeBaselineFile(filePath, rootDir, baseline);
+  return baseline;
+}
+
+export async function writeBaselineFile(filePath: string, rootDir: string, baseline: BaselineFile): Promise<BaselineFile> {
   const resolved = path.resolve(rootDir, filePath);
   await fs.mkdir(path.dirname(resolved), { recursive: true });
   await fs.writeFile(resolved, `${JSON.stringify(baseline, null, 2)}\n`, "utf8");
@@ -27,6 +32,32 @@ export function createBaseline(standard: StandardId, findings: Finding[]): Basel
     generatedAt: new Date().toISOString(),
     standard,
     findings: findings.map(toBaselineFinding)
+  };
+}
+
+export function mergeBaselineFindings(baseline: BaselineFile | undefined, standard: StandardId, findings: Finding[]): BaselineFile {
+  const merged = new Map<string, BaselineFinding>();
+  for (const finding of baseline?.findings ?? []) {
+    merged.set(finding.fingerprint, finding);
+  }
+  for (const finding of findings) {
+    merged.set(finding.fingerprint, toBaselineFinding(finding));
+  }
+
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    standard: baseline?.standard ?? standard,
+    findings: [...merged.values()].sort((left, right) => left.file.localeCompare(right.file) || left.ruleId.localeCompare(right.ruleId))
+  };
+}
+
+export function pruneBaselineFindings(baseline: BaselineFile, currentFindings: Finding[]): BaselineFile {
+  const currentFingerprints = new Set(currentFindings.map((finding) => finding.fingerprint));
+  return {
+    ...baseline,
+    generatedAt: new Date().toISOString(),
+    findings: baseline.findings.filter((finding) => currentFingerprints.has(finding.fingerprint))
   };
 }
 
@@ -54,14 +85,14 @@ export function markBaselineFindings(findings: Finding[], baseline: BaselineFile
 export function fingerprintFinding(input: {
   ruleId: string;
   file: string;
-  excerpt: string;
-  message: string;
+  target: string;
+  semanticLocation: string;
 }): string {
   return stableHash([
     input.ruleId,
     normalizePath(input.file),
-    normalizeSource(input.excerpt),
-    normalizeSource(input.message)
+    normalizeSource(input.semanticLocation),
+    normalizeSource(input.target)
   ].join("|"));
 }
 
@@ -70,7 +101,9 @@ function toBaselineFinding(finding: Finding): BaselineFinding {
     fingerprint: finding.fingerprint,
     ruleId: finding.ruleId,
     file: normalizePath(finding.file),
-    message: finding.message
+    message: finding.message,
+    target: finding.target,
+    semanticLocation: finding.semanticLocation
   };
 }
 

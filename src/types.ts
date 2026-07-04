@@ -1,11 +1,17 @@
 export type Severity = "critical" | "warning" | "info";
 export type Confidence = "high" | "medium" | "low";
+export type DetectionMode = "automated" | "needs-review" | "manual-guidance";
+export type FindingImpact = "blocking" | "serious" | "moderate" | "minor";
+export type FindingSource = "static" | "semantic" | "runtime";
+export type FixKind = "safe-auto-fix" | "guided-fix" | "manual-review";
 export type Platform = "web" | "react-native-ios" | "react-native-android";
 export type AttributeValueKind = "static" | "expression" | "boolean";
 export type RuleCategory = "names-and-roles" | "forms" | "keyboard" | "readability" | "react-native" | "structure";
 export type FailOn = "none" | "critical" | "warning" | "findings" | "regression";
-export type OutputFormat = "text" | "json" | "sarif";
+export type OutputFormat = "text" | "json" | "sarif" | "html";
 export type SemanticMode = "auto" | "off" | "required";
+export type PrCommentMode = "off" | "summary" | "inline" | "both";
+export type PrBaselinePolicy = "new" | "all";
 export type SemanticAdapterId = "typescript" | "lightweight";
 export type WcagVersion = "wcag10" | "wcag20" | "wcag21" | "wcag22" | "wcag30";
 export type WcagLevel = "a" | "aa" | "aaa";
@@ -32,6 +38,7 @@ export type JsxAttribute = {
 export type JsxElement = {
   id: number;
   tagName: string;
+  importSource?: string;
   attributes: JsxAttribute[];
   parentId?: number;
   childIds: number[];
@@ -102,6 +109,11 @@ export type RuleDefinition = {
   title: string;
   severity: Severity;
   confidence: Confidence;
+  detectionMode?: DetectionMode;
+  impact?: FindingImpact;
+  confidenceReason?: string;
+  source?: FindingSource;
+  fixKind?: FixKind;
   category: RuleCategory;
   wcag: string[];
   standards: StandardReference[];
@@ -163,18 +175,106 @@ export type ScanConfig = {
   baseline?: string;
   verbose?: boolean;
   runtimeUrl?: string;
+  runtime?: RuntimeScanConfig;
   semantic?: SemanticMode;
   componentPresets?: ComponentPreset[];
   components?: Record<string, ComponentMapping>;
+  suppressions?: SuppressionConfig[];
+  pr?: PrReviewConfig;
+  packages?: PackageConfig[];
+};
+
+export type RuntimeScanConfig = {
+  baseUrl?: string;
+  routes?: string[];
+  discoverRoutes?: boolean;
+  viewports?: RuntimeViewport[];
+  auth?: RuntimeAuthConfig;
+  setupScript?: string;
+  waitUntil?: RuntimeWaitUntil;
+  waitForSelector?: string;
+  waitForTimeoutMs?: number;
+  timeoutMs?: number;
+  cookies?: RuntimeCookie[];
+  localStorage?: Record<string, string>;
+  headers?: Record<string, string>;
+  screenshot?: boolean;
+};
+
+export type RuntimeViewport = {
+  name?: string;
+  width: number;
+  height: number;
+  deviceScaleFactor?: number;
+  isMobile?: boolean;
+};
+
+export type RuntimeAuthConfig = {
+  setupScript?: string;
+};
+
+export type RuntimeWaitUntil = "load" | "domcontentloaded" | "networkidle0" | "networkidle2";
+
+export type RuntimeCookie = {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  url?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: "Strict" | "Lax" | "None";
+};
+
+export type PrReviewConfig = {
+  maxComments?: number;
+  severityThreshold?: Severity;
+  commentMode?: PrCommentMode;
+  changedFilesOnly?: boolean;
+  baselinePolicy?: PrBaselinePolicy;
+  statusCheckName?: string;
+  uploadSarif?: boolean;
+};
+
+export type PackageConfig = {
+  name: string;
+  path: string;
+  label?: string;
+  include?: string[];
+  exclude?: string[];
+  rules?: Record<string, RuleOption>;
+  standard?: StandardId | "latest" | "current";
+  failOn?: FailOn;
+  baseline?: string;
+  semantic?: SemanticMode;
+  componentPresets?: ComponentPreset[];
+  components?: Record<string, ComponentMapping>;
+};
+
+export type SuppressionConfig = {
+  rule?: string;
+  rules?: string[];
+  file?: string;
+  files?: string[];
+  reason: string;
+  expires: string;
 };
 
 export type ComponentPreset = "radix" | "mui" | "react-aria" | "react-native" | "chakra" | "ant-design" | "headless-ui" | "mantine" | "react-bootstrap";
 
 export type ComponentMapping = {
   role?: "button" | "link" | "textbox" | "checkbox" | "radio" | "switch" | "tab" | "menuitem" | "image";
+  importSource?: string | string[];
+  asProp?: string;
+  roleProps?: string[];
+  valueProps?: string[];
   nameProps?: string[];
   labelProps?: string[];
+  childLabelProps?: string[];
+  disabledProps?: string[];
   decorativeProps?: string[];
+  wrapper?: boolean;
 };
 
 export type ScanOptions = ScanConfig & {
@@ -191,11 +291,40 @@ export type ResolvedScanOptions = {
   baseline?: string;
   verbose: boolean;
   runtimeUrl?: string;
+  runtime: ResolvedRuntimeScanConfig;
   semantic: SemanticMode;
   componentPresets: ComponentPreset[];
   components: Record<string, ComponentMapping>;
+  suppressions: ResolvedSuppression[];
+  pr: Required<PrReviewConfig>;
+  packages: PackageConfig[];
   configPath?: string;
   rootDir: string;
+};
+
+export type ResolvedRuntimeScanConfig = {
+  baseUrl?: string;
+  routes: string[];
+  discoverRoutes: boolean;
+  viewports: RuntimeViewport[];
+  auth?: RuntimeAuthConfig;
+  setupScript?: string;
+  waitUntil: RuntimeWaitUntil;
+  waitForSelector?: string;
+  waitForTimeoutMs?: number;
+  timeoutMs: number;
+  cookies: RuntimeCookie[];
+  localStorage: Record<string, string>;
+  headers: Record<string, string>;
+  screenshot: boolean;
+};
+
+export type ResolvedSuppression = {
+  rules: string[];
+  files: string[];
+  reason: string;
+  expires: string;
+  source: "config";
 };
 
 export type Finding = {
@@ -203,6 +332,11 @@ export type Finding = {
   title: string;
   severity: Severity;
   confidence: Confidence;
+  impact: FindingImpact;
+  confidenceReason: string;
+  detectionMode: DetectionMode;
+  source: FindingSource;
+  fixKind: FixKind;
   category: RuleCategory;
   file: string;
   line: number;
@@ -212,8 +346,30 @@ export type Finding = {
   wcag: string[];
   standards: StandardReference[];
   platforms: Platform[];
+  target: string;
+  semanticLocation: string;
   fingerprint: string;
   baselineStatus: "active" | "baseline";
+  runtime?: RuntimeFindingEvidence;
+};
+
+export type RuntimeFindingEvidence = {
+  url: string;
+  route: string;
+  viewport: RuntimeViewport;
+  selector: string;
+  screenshot?: string;
+};
+
+export type SuppressedFinding = Finding & {
+  suppression: SuppressionMatch;
+};
+
+export type SuppressionMatch = {
+  kind: "inline" | "config";
+  reason: string;
+  expires?: string;
+  scope: string;
 };
 
 export type SemanticDiagnostic = {
@@ -235,6 +391,7 @@ export type ScanResult = {
   findings: Finding[];
   activeFindings: Finding[];
   baselineFindings: Finding[];
+  suppressedFindings: SuppressedFinding[];
   regressions: Finding[];
   summary: ScanSummary;
   scoreBreakdown: ScoreBreakdown;
@@ -243,7 +400,26 @@ export type ScanResult = {
   standard: StandardDefinition;
   semanticAnalysis: SemanticAnalysisSummary;
   semanticDiagnostics: SemanticDiagnostic[];
+  runtimeDiagnostics: RuntimeDiagnostic[];
+  runtimePages: RuntimePageResult[];
   baseline?: BaselineFile;
+};
+
+export type RuntimeDiagnostic = {
+  url?: string;
+  route?: string;
+  viewport?: string;
+  stage: "discover-routes" | "setup" | "navigation" | "collector" | "screenshot";
+  message: string;
+  severity: "info" | "warning" | "error";
+};
+
+export type RuntimePageResult = {
+  url: string;
+  route: string;
+  viewport: RuntimeViewport;
+  status?: number;
+  findings: number;
 };
 
 export type ComparisonResult = {
@@ -267,6 +443,7 @@ export type ScanSummary = {
   totalFindings: number;
   activeFindings: number;
   baselineFindings: number;
+  suppressedFindings: number;
   regressions: number;
   critical: number;
   warning: number;
@@ -293,6 +470,8 @@ export type BaselineFinding = {
   ruleId: string;
   file: string;
   message: string;
+  target?: string;
+  semanticLocation?: string;
 };
 
 export type RuleSummary = {
@@ -300,6 +479,7 @@ export type RuleSummary = {
   title: string;
   severity: Severity;
   confidence: Confidence;
+  detectionMode: DetectionMode;
   category: RuleCategory;
   wcag: string[];
   standards: StandardReference[];

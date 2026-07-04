@@ -1,4 +1,4 @@
-import { isReactNativeTouchControl } from "../rule-utils.js";
+import { elementRole, isDisabled, isReactNativeTouchControl } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const nativeRoleRule: RuleDefinition = {
@@ -24,8 +24,14 @@ export const nativeRoleRule: RuleDefinition = {
   ],
   check(context) {
     return context.elements
-      .filter((element) => isReactNativeTouchControl(element.tagName))
+      .filter((element) => isReactNativeControl(element, context) && !isDisabled(element, context))
       .filter((element) => !context.hasAttribute(element, "accessibilityRole"))
       .map((element) => context.createFinding(this, element, "Add accessibilityRole so the control type is announced."));
   }
 };
+
+function isReactNativeControl(element: Parameters<RuleDefinition["check"]>[0]["elements"][number], context: Parameters<RuleDefinition["check"]>[0]): boolean {
+  if (isReactNativeTouchControl(element.tagName)) return true;
+  if (element.importSource === "react-native") return elementRole(element, context) === "button";
+  return context.options.componentPresets.includes("react-native") && elementRole(element, context) === "button";
+}

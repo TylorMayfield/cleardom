@@ -67,20 +67,24 @@ See `examples/wcag-benchmark/manifest.json` for the WCAG 2.2 A/AA coverage map a
 ## Commands
 
 ```sh
-cleardom [path|url] [--diff] [--format text|json|sarif] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom [path|url] [--diff] [--format text|json|sarif|html] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom install [--yes] [--agents] [--github-actions] [--no-github-actions] [--agent codex|claude|cursor]
 cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]
-cleardom scan [path|url] [--diff] [--format text|json|sarif] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
-cleardom ci [path] [--format text|json|sarif] [--baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom scan [path|url] [--diff] [--format text|json|sarif|html] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom ci [path] [--format text|json|sarif|html] [--baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom doctor [path] [--config cleardom.config.json] [--runtime-url http://localhost:3000]
+cleardom report [path|url] [--format html|markdown|json] [--output cleardom-report.html]
 cleardom review [path] [--dry-run] [--max-comments 20]
+cleardom suppress [path] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1] [--baseline cleardom-baseline.json]
+cleardom baseline update|prune [path] [--baseline cleardom-baseline.json]
 cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
 cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
 cleardom rules
 cleardom standards
-cleardom fix [path] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
+cleardom fix [path] [--apply] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
 ```
 
-`fix` is an agent-assisted remediation workflow. It scans the target, filters active findings when requested, and prints a task prompt with exact locations, rule guidance, local code context, and the command the agent should run to verify the repair.
+`doctor` checks local Chrome availability, ClearDOM config, GitHub token context, include/exclude patterns, baseline setup, semantic mode, and runtime URL readiness. `report` writes shareable local scan reports outside benchmark mode. `fix` is an agent-assisted remediation workflow; `fix --apply` is intentionally limited to safe config-level or explicitly autofixable mechanical changes, so product-code remediation remains prompt-based unless a rule provides a safe transform. Use `suppress` to baseline selected accepted findings, then `baseline update` and `baseline prune` to refresh or remove stale adoption debt.
 
 ## Product onboarding
 
@@ -142,11 +146,48 @@ Create `cleardom.config.json` in the project root:
   "failOn": "critical",
   "semantic": "auto",
   "runtimeUrl": "",
+  "runtime": {
+    "baseUrl": "http://localhost:3000",
+    "routes": ["/", "/settings"],
+    "discoverRoutes": true,
+    "viewports": [
+      { "name": "desktop", "width": 1280, "height": 900 },
+      { "name": "mobile", "width": 390, "height": 844, "isMobile": true }
+    ],
+    "auth": { "setupScript": "./scripts/cleardom-auth.mjs" },
+    "waitUntil": "networkidle0",
+    "waitForSelector": "main",
+    "timeoutMs": 30000,
+    "headers": { "x-cleardom-scan": "true" },
+    "cookies": [],
+    "localStorage": {},
+    "screenshot": true
+  },
   "componentPresets": ["radix", "mui", "react-aria"],
   "components": {
-    "IconButton": { "role": "button", "nameProps": ["aria-label", "label"] },
-    "Button": { "role": "button", "nameProps": ["aria-label", "label"] },
-    "TextInput": { "role": "textbox", "nameProps": ["aria-label", "label"] }
+    "IconButton": {
+      "importSource": "@acme/ui",
+      "role": "button",
+      "nameProps": ["aria-label", "label"],
+      "disabledProps": ["disabled", "isDisabled"]
+    },
+    "Button": {
+      "importSource": "@acme/ui",
+      "role": "button",
+      "asProp": "component",
+      "childLabelProps": ["children"]
+    },
+    "TextInput": {
+      "importSource": "@acme/ui",
+      "role": "textbox",
+      "nameProps": ["aria-label", "label"],
+      "valueProps": ["value", "defaultValue"]
+    },
+    "Field": {
+      "importSource": "@acme/ui",
+      "wrapper": true,
+      "labelProps": ["label"]
+    }
   },
   "rules": {
     "CDOM_2_4_4_AMBIGUOUS_LABEL": "info",
@@ -155,17 +196,27 @@ Create `cleardom.config.json` in the project root:
 }
 ```
 
-Component mappings teach ClearDOM about your design system without adding runtime dependencies. A mapped component can declare the semantic role it represents and which props provide its accessible name.
+Component mappings teach ClearDOM about your design system without adding runtime dependencies. A mapped component can declare the import source it should apply to, the semantic role it represents, the polymorphic prop that changes the rendered element, role/value/name/visible-label props, child-label props such as `children`, disabled aliases, and wrapper components that provide labels to descendant controls.
 
 Component presets provide starter mappings for common UI libraries. Supported presets are `radix`, `mui`, `react-aria`, `react-native`, `chakra`, `ant-design`, `headless-ui`, `mantine`, and `react-bootstrap`; explicit `components` entries override preset mappings.
 
 ## Framework coverage
 
-ClearDOM's source checks are strongest for React-family JSX and TSX: React, Next.js, Remix, Gatsby, Vite React, Preact, Solid, Qwik-style JSX, React Native, and Expo. It also includes first-pass source adapters for Vue, Svelte, Astro, Angular component templates, plain HTML, and MDX. Those template adapters extract HTML-like markup and common event/attribute aliases; pair them with `--runtime-url` for framework-agnostic rendered DOM and CSS checks.
+ClearDOM documents framework support in tiers:
+
+| Tier | Adapters | Support |
+| --- | --- | --- |
+| Full source semantics | JSX/TSX | React, Next.js, Remix, Gatsby, Vite React, Preact, Solid-style JSX, React Native, and Expo get TypeScript Program-backed static resolution when `--semantic auto` can initialize. |
+| Template source adapters | HTML, Vue, Svelte, Astro, Angular templates | Static parsing extracts HTML-like markup and common binding/event aliases. Pair with `--runtime-url` for rendered DOM and CSS checks. |
+| Content adapter | MDX | Authored markup is scanned while imports and fenced examples are ignored. |
 
 `--semantic auto` is the default. For JavaScript, TypeScript, JSX, and TSX files, ClearDOM builds a TypeScript Program and resolves safe static semantics such as string constants, simple imported constants, object-literal prop spreads, numeric literals, template literals without dynamic holes, and simple intrinsic tag aliases. Use `--semantic off` to force the lightweight adapters, or `--semantic required` when CI should fail if compiler-backed source analysis cannot initialize. JSON output includes `semanticAnalysis` and `semanticDiagnostics`.
 
-Runtime checks use Chromium through `puppeteer-core` for CSS-dependent issues that static source cannot see. Set `CHROME_PATH=/path/to/chrome` or `PUPPETEER_EXECUTABLE_PATH=/path/to/chrome`, start your app locally, then pass `--runtime-url`.
+Web runtime checks use Chromium through `puppeteer-core` for CSS-dependent issues that static source cannot see. Set `CHROME_PATH=/path/to/chrome` or `PUPPETEER_EXECUTABLE_PATH=/path/to/chrome`, start your web app locally, then pass `--runtime-url` or configure `runtime.baseUrl`.
+
+The `runtime` block supports explicit `routes`, safe route discovery from common framework file layouts, multiple `viewports`, auth/setup scripts, custom headers, cookies, localStorage, wait strategy, selectors, timeouts, and screenshot evidence. URL scans and runtime scans reuse a single browser session. JSON and HTML reports include runtime diagnostics plus selector and screenshot evidence for runtime findings.
+
+React Native checks are static guidance for iOS and Android semantics. They flag missing labels and roles in source, including mapped design-system components, but rendered VoiceOver and TalkBack behavior still needs manual verification on a device or simulator.
 
 Rule options can be `"off"`, `"critical"`, `"warning"`, `"info"`, or an object like:
 

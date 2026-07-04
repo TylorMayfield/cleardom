@@ -44,6 +44,9 @@ test("scan --verbose includes scan details and score breakdown", async () => {
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--verbose"]);
 
   assert.match(result.stdout, /Scan details/);
+  assert.match(result.stdout, /Framework adapters: JSX\/TSX full/);
+  assert.match(result.stdout, /Web runtime checks: available with --runtime-url and Chromium/);
+  assert.match(result.stdout, /React Native checks: static source guidance; verify VoiceOver and TalkBack behavior manually/);
   assert.match(result.stdout, /Score breakdown/);
 });
 
@@ -59,6 +62,43 @@ test("fix prints an agent remediation prompt with finding context", async () => 
   assert.match(result.stdout, /> 1 \| <button \/>/);
   assert.doesNotMatch(result.stdout, /CDOM_4_1_2_ANCHOR_HREF -/);
   assert.match(result.stdout, /npx cleardom@latest scan .* --fail-on none/);
+});
+
+test("fix --apply does not rewrite product code without explicit transforms", async () => {
+  const fixture = await createFixture("<button />");
+  const file = path.join(fixture, "Fixture.tsx");
+  const result = await execFileAsync(process.execPath, [cliPath, "fix", fixture, "--apply"]);
+
+  assert.match(result.stdout, /ClearDOM automatic fixes/);
+  assert.match(result.stdout, /Applied fixes: 0/);
+  assert.equal(await fs.readFile(file, "utf8"), "<button />");
+});
+
+test("doctor validates local developer workflow context", async () => {
+  const fixture = await createFixture('<button aria-label="Close" />');
+  const result = await execFileAsync(process.execPath, [cliPath, "doctor", fixture]);
+
+  assert.match(result.stdout, /ClearDOM doctor/);
+  assert.match(result.stdout, /Config:/);
+  assert.match(result.stdout, /Chrome:/);
+  assert.match(result.stdout, /GitHub token:/);
+  assert.match(result.stdout, /Runtime URL:/);
+});
+
+test("report writes shareable markdown, html, and json scan reports", async () => {
+  const fixture = await createFixture("<button />");
+  const markdownPath = path.join(fixture, "report.md");
+  const htmlPath = path.join(fixture, "report.html");
+
+  const markdown = await execFileAsync(process.execPath, [cliPath, "report", fixture, "--format", "markdown", "--output", markdownPath]);
+  const html = await execFileAsync(process.execPath, [cliPath, "report", fixture, "--format", "html", "--output", htmlPath]);
+  const json = await execFileAsync(process.execPath, [cliPath, "report", fixture, "--format", "json"]);
+
+  assert.match(markdown.stdout, /Wrote ClearDOM markdown report/);
+  assert.match(await fs.readFile(markdownPath, "utf8"), /# ClearDOM Scan Report/);
+  assert.match(html.stdout, /Wrote ClearDOM html report/);
+  assert.match(await fs.readFile(htmlPath, "utf8"), /<!doctype html>/);
+  assert.equal(JSON.parse(json.stdout).activeFindings.length > 0, true);
 });
 
 test("scan --json includes score, findings, and rules", async () => {
@@ -324,6 +364,35 @@ test("baseline fails on new regressions", async () => {
     execFileAsync(process.execPath, [cliPath, "scan", directory, "--baseline", baselinePath, "--fail-on", "regression"]),
     (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === 1
   );
+});
+
+test("suppress adds selected findings to the baseline", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "Fixture.tsx"), "<button />\n<a>Receipt</a>", "utf8");
+  const baselinePath = path.join(directory, "cleardom-baseline.json");
+
+  const suppressed = await execFileAsync(process.execPath, [cliPath, "suppress", directory, "--rule", "CDOM_4_1_2_UNNAMED_CONTROL", "--baseline", baselinePath]);
+  const baseline = JSON.parse(await fs.readFile(baselinePath, "utf8")) as { findings: Array<{ ruleId: string }> };
+
+  assert.match(suppressed.stdout, /Suppressed 1 finding/);
+  assert.equal(baseline.findings.length, 1);
+  assert.equal(baseline.findings[0].ruleId, "CDOM_4_1_2_UNNAMED_CONTROL");
+});
+
+test("baseline update refreshes current findings and prune removes stale ones", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "Fixture.tsx"), "<button />", "utf8");
+  const baselinePath = path.join(directory, "cleardom-baseline.json");
+
+  const updated = await execFileAsync(process.execPath, [cliPath, "baseline", "update", directory, "--baseline", baselinePath]);
+  assert.match(updated.stdout, /Updated .* with 1 current finding/);
+
+  await fs.writeFile(path.join(directory, "Fixture.tsx"), '<button aria-label="Close" />', "utf8");
+  const pruned = await execFileAsync(process.execPath, [cliPath, "baseline", "prune", directory, "--baseline", baselinePath]);
+  const baseline = JSON.parse(await fs.readFile(baselinePath, "utf8")) as { findings: unknown[] };
+
+  assert.match(pruned.stdout, /Pruned 1 stale finding/);
+  assert.equal(baseline.findings.length, 0);
 });
 
 test("ci uses the default baseline and fails only on new regressions", async () => {

@@ -6,8 +6,9 @@ import { promisify } from "node:util";
 import { writeBaseline } from "./baseline.js";
 import { compareScanResults } from "./compare.js";
 import { resolveScanOptions } from "./config.js";
+import { formatSarif } from "./format.js";
 import { scanPath, shouldFail } from "./scanner.js";
-import type { ComparisonResult, Finding, OutputFormat, ResolvedScanOptions, ScanOptions, ScanResult } from "./types.js";
+import type { ComparisonResult, Finding, OutputFormat, PackageConfig, PrBaselinePolicy, ResolvedScanOptions, ScanOptions, ScanResult, Severity } from "./types.js";
 
 const marker = "<!-- cleardom:pr-summary -->";
 const inlineMarker = "<!-- cleardom:inline -->";
@@ -21,6 +22,12 @@ type GithubPrOptions = {
   writeBaseline?: string;
   dryRun?: boolean;
   maxComments?: number;
+};
+
+type PullRequestDiff = {
+  files: GithubChangedFile[];
+  changedFiles: Set<string>;
+  addedLines: Map<string, Set<number>>;
 };
 
 export type GithubContext = {
@@ -65,9 +72,17 @@ export async function installGithubActions(rootDir = process.cwd()): Promise<{ f
 export async function runGithubPr(options: GithubPrOptions): Promise<{ result: ScanResult; comparison?: ComparisonResult; posted: boolean; summary: string }> {
   const resolvedOptions = await resolveScanOptions(options.options);
   const context = await githubContext();
-  const result = await scanPath(options.target, resolvedOptions);
+  const prOptions = {
+    ...resolvedOptions.pr,
+    maxComments: options.maxComments ?? resolvedOptions.pr.maxComments
+  };
+  const diff = context && !options.dryRun ? await pullRequestDiff(context) : undefined;
+  const scanOptions = prOptions.changedFilesOnly && diff
+    ? { ...resolvedOptions, include: changedFileIncludes(diff.changedFiles, resolvedOptions) }
+    : resolvedOptions;
+  const result = await scanPath(options.target, scanOptions);
   const comparison = context && !options.dryRun
-    ? await compareWithBaseTree(context, options.target, resolvedOptions, result)
+    ? await compareWithBaseTree(context, options.target, scanOptions, result)
     : undefined;
 
   if (options.writeBaseline) {
@@ -75,15 +90,24 @@ export async function runGithubPr(options: GithubPrOptions): Promise<{ result: S
   }
 
   const summary = comparison
-    ? formatPullRequestComparisonSummary(comparison, resolvedOptions)
-    : formatPullRequestSummary(result, resolvedOptions);
+    ? formatPullRequestComparisonSummary(comparison, scanOptions)
+    : formatPullRequestSummary(result, scanOptions);
 
   if (context && !options.dryRun) {
-    await postStickySummary(context, summary);
-    await postInlineComments(context, result, resolvedOptions, options.maxComments ?? 20, comparison?.newFindings);
+    const reviewFindings = filterReviewFindings(findingsForPolicy(result, comparison, prOptions.baselinePolicy), scanOptions, prOptions.severityThreshold, diff);
+    if (prOptions.commentMode === "summary" || prOptions.commentMode === "both") {
+      await postStickySummary(context, summary);
+    }
+    if (prOptions.commentMode === "inline" || prOptions.commentMode === "both") {
+      await postInlineComments(context, result, scanOptions, prOptions.maxComments, reviewFindings, diff);
+    }
+    await createCheckRun(context, result, comparison, scanOptions, reviewFindings, summary, prOptions.statusCheckName);
+    if (prOptions.uploadSarif) {
+      await uploadSarif(context, result, scanOptions);
+    }
   }
 
-  process.exitCode = comparison ? (comparison.newFindings.length > 0 ? 1 : 0) : (shouldFail(result, resolvedOptions.failOn) ? 1 : 0);
+  process.exitCode = comparison ? (filterBySeverity(comparison.newFindings, prOptions.severityThreshold).length > 0 ? 1 : 0) : (shouldFail(result, scanOptions.failOn) ? 1 : 0);
   return { result, comparison, posted: Boolean(context && !options.dryRun), summary };
 }
 
@@ -107,6 +131,7 @@ export function formatPullRequestSummary(result: ScanResult, options: ResolvedSc
     `| Info | ${result.summary.info} |`,
     ""
   ];
+  pushPackageSummary(lines, result.activeFindings, options);
 
   const findings = result.activeFindings.slice(0, 30);
   if (findings.length > 0) {
@@ -143,6 +168,7 @@ export function formatPullRequestComparisonSummary(comparison: ComparisonResult,
     `| Base active findings | ${comparison.summary.baseActiveFindings} |`,
     ""
   ];
+  pushPackageSummary(lines, result.activeFindings, options);
 
   if (comparison.newFindings.length > 0) {
     lines.push("## New Findings", "");
@@ -184,6 +210,7 @@ jobs:
       pull-requests: write
       issues: write
       security-events: write
+      checks: write
       statuses: write
     steps:
       - uses: actions/checkout@v4
@@ -284,9 +311,17 @@ async function postStickySummary(context: GithubContext, summary: string): Promi
   });
 }
 
-async function postInlineComments(context: GithubContext, result: ScanResult, options: ResolvedScanOptions, maxComments: number, findings = result.activeFindings): Promise<void> {
+async function pullRequestDiff(context: GithubContext): Promise<PullRequestDiff> {
   const files = await githubRequestAll<GithubChangedFile>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/files?per_page=100`);
-  const addedLines = new Map(files.map((file) => [file.filename, parseAddedLines(file.patch ?? "")]));
+  return {
+    files,
+    changedFiles: new Set(files.map((file) => file.filename)),
+    addedLines: new Map(files.map((file) => [file.filename, parseAddedLines(file.patch ?? "")]))
+  };
+}
+
+async function postInlineComments(context: GithubContext, result: ScanResult, options: ResolvedScanOptions, maxComments: number, findings: Finding[], diff?: PullRequestDiff): Promise<void> {
+  const resolvedDiff = diff ?? await pullRequestDiff(context);
   const existing = await githubRequestAll<GithubComment>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/comments?per_page=100`);
   const existingKeys = new Set(existing.filter((comment) => comment.body?.includes(inlineMarker)).map((comment) => `${comment.path}:${comment.line}:${extractRuleId(comment.body ?? "")}`));
 
@@ -294,7 +329,7 @@ async function postInlineComments(context: GithubContext, result: ScanResult, op
   for (const finding of findings) {
     if (posted >= maxComments) return;
     const file = relativeFindingPath(finding, options);
-    const lines = addedLines.get(file);
+    const lines = resolvedDiff.addedLines.get(file);
     if (!lines?.has(finding.line)) continue;
 
     const key = `${file}:${finding.line}:${finding.ruleId}`;
@@ -312,6 +347,92 @@ async function postInlineComments(context: GithubContext, result: ScanResult, op
     });
     posted += 1;
   }
+}
+
+async function createCheckRun(
+  context: GithubContext,
+  result: ScanResult,
+  comparison: ComparisonResult | undefined,
+  options: ResolvedScanOptions,
+  findings: Finding[],
+  summary: string,
+  name: string
+): Promise<void> {
+  const annotations = findings.slice(0, 50).map((finding) => ({
+    path: relativeFindingPath(finding, options),
+    start_line: finding.line,
+    end_line: finding.line,
+    annotation_level: checkAnnotationLevel(finding.severity),
+    message: finding.message,
+    title: `${finding.ruleId}: ${finding.title}`,
+    raw_details: finding.excerpt
+  }));
+
+  await githubRequest(context, `/repos/${context.repository}/check-runs`, {
+    method: "POST",
+    headers: { Accept: "application/vnd.github+json" },
+    body: JSON.stringify({
+      name,
+      head_sha: context.pullRequest.headSha,
+      status: "completed",
+      conclusion: comparison
+        ? (comparison.newFindings.length > 0 ? "failure" : "success")
+        : (shouldFail(result, options.failOn) ? "failure" : "success"),
+      output: {
+        title: `${name}: ${findings.length === 0 ? "passed" : `${findings.length} actionable ${findings.length === 1 ? "finding" : "findings"}`}`,
+        summary: truncate(summary.replace(marker, "").trim(), 65000),
+        annotations
+      }
+    })
+  });
+}
+
+async function uploadSarif(context: GithubContext, result: ScanResult, options: ResolvedScanOptions): Promise<void> {
+  const sarif = formatSarif(result);
+  await githubRequest(context, `/repos/${context.repository}/code-scanning/sarifs`, {
+    method: "POST",
+    body: JSON.stringify({
+      commit_sha: context.pullRequest.headSha,
+      ref: `refs/pull/${context.pullRequest.number}/head`,
+      sarif: Buffer.from(sarif, "utf8").toString("base64"),
+      checkout_uri: `${context.serverUrl}/${context.repository}`,
+      tool_name: options.pr.statusCheckName
+    })
+  });
+}
+
+function findingsForPolicy(result: ScanResult, comparison: ComparisonResult | undefined, policy: PrBaselinePolicy): Finding[] {
+  if (policy === "all") return result.activeFindings;
+  return comparison?.newFindings ?? result.regressions;
+}
+
+function filterReviewFindings(findings: Finding[], options: ResolvedScanOptions, severity: Severity, diff?: PullRequestDiff): Finding[] {
+  const bySeverity = filterBySeverity(findings, severity);
+  if (!diff) return bySeverity;
+  return bySeverity.filter((finding) => {
+    const file = relativeFindingPath(finding, options);
+    return diff.addedLines.get(file)?.has(finding.line) ?? false;
+  });
+}
+
+function filterBySeverity(findings: Finding[], threshold: Severity): Finding[] {
+  const order: Record<Severity, number> = { critical: 3, warning: 2, info: 1 };
+  return findings.filter((finding) => order[finding.severity] >= order[threshold]);
+}
+
+function changedFileIncludes(files: Set<string>, options: ResolvedScanOptions): string[] {
+  const sourceFiles = [...files].filter((file) => !file.startsWith(".github/"));
+  return sourceFiles.length > 0 ? sourceFiles : ["__cleardom_no_changed_files__"];
+}
+
+function checkAnnotationLevel(severity: Severity): "failure" | "warning" | "notice" {
+  if (severity === "critical") return "failure";
+  if (severity === "warning") return "warning";
+  return "notice";
+}
+
+function truncate(value: string, limit: number): string {
+  return value.length <= limit ? value : `${value.slice(0, limit - 20)}\n\n[truncated]`;
 }
 
 function inlineCommentBody(finding: Finding, result: ScanResult): string {
@@ -349,6 +470,36 @@ function pushFindingsByFile(lines: string[], findings: Finding[], result: ScanRe
     lines.push("");
   }
   if (lines[lines.length - 1] === "") lines.pop();
+}
+
+function pushPackageSummary(lines: string[], findings: Finding[], options: ResolvedScanOptions): void {
+  if (options.packages.length === 0) return;
+  const packages = options.packages.map((pkg) => ({ ...pkg, label: pkg.label ?? pkg.name }));
+  const rows = packages.map((pkg) => {
+    const packageFindings = findings.filter((finding) => findingPackage(finding, options, pkg) === pkg.label);
+    return {
+      label: pkg.label,
+      critical: packageFindings.filter((finding) => finding.severity === "critical").length,
+      warning: packageFindings.filter((finding) => finding.severity === "warning").length,
+      info: packageFindings.filter((finding) => finding.severity === "info").length,
+      total: packageFindings.length
+    };
+  }).filter((row) => row.total > 0);
+
+  if (rows.length === 0) return;
+  lines.push("## Package Summary", "");
+  lines.push("| Package | Active | Critical | Warnings | Info |");
+  lines.push("| --- | ---: | ---: | ---: | ---: |");
+  for (const row of rows) {
+    lines.push(`| ${row.label} | ${row.total} | ${row.critical} | ${row.warning} | ${row.info} |`);
+  }
+  lines.push("");
+}
+
+function findingPackage(finding: Finding, options: ResolvedScanOptions, pkg: PackageConfig): string | undefined {
+  const file = relativeFindingPath(finding, options);
+  const packagePath = normalizePath(pkg.path).replace(/\/$/, "");
+  return file === packagePath || file.startsWith(`${packagePath}/`) ? (pkg.label ?? pkg.name) : undefined;
 }
 
 function issueSummary(result: ScanResult): string {
