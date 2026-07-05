@@ -1,5 +1,8 @@
 import { promises as fs } from "node:fs";
+import { execFile } from "node:child_process";
 import * as path from "node:path";
+import { promisify } from "node:util";
+import { resolveBrowserExecutable } from "./browser.js";
 import { resolveScanOptions } from "./config.js";
 import type { ResolvedScanOptions, ScanOptions } from "./types.js";
 
@@ -16,6 +19,8 @@ export type DoctorResult = {
   checks: DoctorCheck[];
 };
 
+const execFileAsync = promisify(execFile);
+
 export async function runDoctor(options: ScanOptions = {}, cwd = process.cwd()): Promise<DoctorResult> {
   const checks: DoctorCheck[] = [];
   let resolved: ResolvedScanOptions | undefined;
@@ -27,15 +32,16 @@ export async function runDoctor(options: ScanOptions = {}, cwd = process.cwd()):
     checks.push({ name: "Config", status: "fail", message: errorMessage(error) });
   }
 
-  checks.push(await chromeCheck());
   checks.push(githubTokenCheck());
 
   if (resolved) {
+    checks.push(await browserCheck(resolved));
     checks.push(patternCheck("Include patterns", resolved.include));
     checks.push(patternCheck("Exclude patterns", resolved.exclude));
     checks.push(await baselineCheck(resolved));
     checks.push(semanticCheck(resolved));
     checks.push(await runtimeUrlCheck(resolved));
+    checks.push(...await nativeChecks(resolved, cwd));
   }
 
   return {
@@ -53,27 +59,12 @@ export function formatDoctor(result: DoctorResult): string {
   return lines.join("\n");
 }
 
-async function chromeCheck(): Promise<DoctorCheck> {
-  const candidates = [
-    process.env.CHROME_PATH,
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/usr/bin/google-chrome",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser"
-  ].filter((candidate): candidate is string => Boolean(candidate));
-
-  for (const candidate of candidates) {
-    if (await isExecutable(candidate)) {
-      return { name: "Chrome", status: "pass", message: `Found ${candidate}` };
-    }
-  }
-
+async function browserCheck(options: ResolvedScanOptions): Promise<DoctorCheck> {
+  const resolution = await resolveBrowserExecutable(options);
   return {
-    name: "Chrome",
-    status: "warn",
-    message: "No Chrome executable found. Static scans work; URL/runtime scans need CHROME_PATH or PUPPETEER_EXECUTABLE_PATH."
+    name: "Browser",
+    status: resolution.executablePath ? "pass" : "warn",
+    message: resolution.message
   };
 }
 
@@ -137,19 +128,42 @@ async function runtimeUrlCheck(options: ResolvedScanOptions): Promise<DoctorChec
   }
 }
 
-async function isExecutable(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function label(status: DoctorStatus): string {
   if (status === "pass") return "pass";
   if (status === "warn") return "warn";
   return "fail";
+}
+
+async function nativeChecks(options: ResolvedScanOptions, cwd: string): Promise<DoctorCheck[]> {
+  if (!options.native.enabled) return [];
+  const checks: DoctorCheck[] = [];
+  checks.push({ name: "Native provider", status: options.native.provider === "eas" ? "pass" : "fail", message: `Configured provider: ${options.native.provider}` });
+  checks.push({ name: "Expo token", status: process.env.EXPO_TOKEN ? "pass" : "warn", message: process.env.EXPO_TOKEN ? "EXPO_TOKEN is set." : "EXPO_TOKEN is not set; EAS Simulator needs Expo auth in CI/headless environments." });
+  checks.push(await commandCheck("EAS CLI", ["npx", ["--yes", "eas-cli@latest", "--version"], cwd]));
+  checks.push(await gitignoreCheck(cwd));
+  return checks;
+}
+
+async function commandCheck(name: string, command: [string, string[], string]): Promise<DoctorCheck> {
+  try {
+    const result = await execFileAsync(command[0], command[1], { cwd: command[2], timeout: 15000 });
+    return { name, status: "pass", message: result.stdout.trim() || "available" };
+  } catch {
+    return { name, status: "warn", message: `${name} was not available through npx.` };
+  }
+}
+
+async function gitignoreCheck(cwd: string): Promise<DoctorCheck> {
+  const gitignore = path.join(cwd, ".gitignore");
+  try {
+    const raw = await fs.readFile(gitignore, "utf8");
+    if (raw.split(/\r?\n/).some((line) => line.trim() === ".env.eas-simulator")) {
+      return { name: "EAS simulator env", status: "pass", message: ".env.eas-simulator is gitignored." };
+    }
+    return { name: "EAS simulator env", status: "warn", message: "Add .env.eas-simulator to .gitignore before native scans." };
+  } catch {
+    return { name: "EAS simulator env", status: "warn", message: "No .gitignore found; ensure .env.eas-simulator is not committed." };
+  }
 }
 
 function errorMessage(error: unknown): string {

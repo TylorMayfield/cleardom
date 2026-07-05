@@ -2,7 +2,8 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as puppeteer from "puppeteer-core";
 import { fingerprintFinding, markBaselineFindings, readBaseline } from "./baseline.js";
-import { isRuleEnabled, matchesAnyPattern, normalizeSuppressions, resolveComponentMappings, resolveScanOptions, severityOverride } from "./config.js";
+import { resolveBrowserExecutable } from "./browser.js";
+import { isRuleEnabled, matchesAnyPattern, normalizeSuppressions, ownerForFinding, resolveComponentMappings, resolveScanOptions, severityOverride } from "./config.js";
 import { auditRuntimeUrls, prepareRuntimePage, runRuntimeSetupScript } from "./runtime.js";
 import { normalizeRuleId, rules, summarizeRule } from "./rules/index.js";
 import { createSemanticProject, isSemanticSourceFile, parseSemanticSource } from "./semantic.js";
@@ -33,7 +34,15 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}): P
   if (runtimeBaseUrl) {
     const discovered = await discoverRuntimeRoutes(root, resolvedOptions);
     runtimeDiagnostics.push(...discovered.diagnostics);
-    const targets = runtimeTargets(runtimeBaseUrl, mergeRoutes(resolvedOptions.runtime.routes, discovered.routes));
+    const initialRoutes = mergeRoutes(resolvedOptions.runtime.routes, discovered.routes);
+    const crawled = await discoverCrawledRoutes(runtimeBaseUrl, initialRoutes, resolvedOptions);
+    runtimeDiagnostics.push(...crawled.diagnostics);
+    const stories = await discoverStoryRoutes(resolvedOptions);
+    runtimeDiagnostics.push(...stories.diagnostics);
+    const targets = [
+      ...runtimeTargets(runtimeBaseUrl, mergeRoutes(initialRoutes, crawled.routes)),
+      ...runtimeTargets(resolvedOptions.runtime.stories.baseUrl || runtimeBaseUrl, stories.routes)
+    ];
     const runtime = await auditRuntimeUrls(targets, resolvedOptions);
     runtimeDiagnostics.push(...runtime.diagnostics);
     runtimePages = runtime.pages;
@@ -42,7 +51,7 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}): P
 
   const suppressionResult = applySuppressions(findings, sources, resolvedOptions);
   const baseline = await readBaseline(resolvedOptions.baseline, resolvedOptions.rootDir);
-  const marked = markBaselineFindings(suppressionResult.findings, baseline);
+  const marked = withOwners(markBaselineFindings(suppressionResult.findings, baseline), resolvedOptions);
   const scoreBreakdown = buildScoreBreakdown(marked.activeFindings);
   const score = Math.round(Object.values(scoreBreakdown).reduce((total, value) => total + value, 0) / Object.values(scoreBreakdown).length);
 
@@ -66,12 +75,32 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}): P
   };
 }
 
+async function discoverStoryRoutes(options: ResolvedScanOptions): Promise<{ routes: string[]; diagnostics: RuntimeDiagnostic[] }> {
+  if (!options.runtime.stories.enabled) return { routes: [], diagnostics: [] };
+  const baseUrl = options.runtime.stories.baseUrl ?? options.runtime.baseUrl;
+  if (!baseUrl) return { routes: [], diagnostics: [{ stage: "discover-routes", severity: "warning", message: "Story scanning is enabled but no Storybook base URL is configured." }] };
+  try {
+    const response = await fetch(new URL("/index.json", ensureTrailingSlash(baseUrl)));
+    if (!response.ok) return { routes: [], diagnostics: [{ stage: "discover-routes", severity: "warning", message: `Storybook index returned HTTP ${response.status}.` }] };
+    const index = await response.json() as { entries?: Record<string, { type?: string }> };
+    const routes = Object.entries(index.entries ?? {})
+      .filter(([, entry]) => entry.type === "story")
+      .map(([id]) => `/iframe.html?id=${encodeURIComponent(id)}`)
+      .filter((route) => !matchesAnyPattern(route, options.runtime.stories.exclude))
+      .filter((route) => options.runtime.stories.include.length === 0 || matchesAnyPattern(route, options.runtime.stories.include));
+    return { routes, diagnostics: [] };
+  } catch (error) {
+    return { routes: [], diagnostics: [{ stage: "discover-routes", severity: "warning", message: `Could not discover Storybook stories: ${error instanceof Error ? error.message : String(error)}` }] };
+  }
+}
+
 export async function scanUrl(url: string, options: ScanOptions = {}, chromePath?: string): Promise<ScanResult> {
   const resolvedOptions = await resolveScanOptions(options);
-  const executablePath = chromePath ?? process.env.CHROME_PATH ?? process.env.PUPPETEER_EXECUTABLE_PATH;
+  const browserResolution = await resolveBrowserExecutable(resolvedOptions, chromePath);
+  const executablePath = browserResolution.executablePath;
   
   if (!executablePath) {
-    throw new Error("Scanning live URLs requires CHROME_PATH or PUPPETEER_EXECUTABLE_PATH to point to a Chromium/Chrome executable.");
+    throw new Error(browserResolution.message);
   }
 
   const browser = await puppeteer.launch({
@@ -119,7 +148,7 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
 
     const suppressionResult = applySuppressions(findings, sources, resolvedOptions);
     const baseline = await readBaseline(resolvedOptions.baseline, resolvedOptions.rootDir);
-    const marked = markBaselineFindings(suppressionResult.findings, baseline);
+    const marked = withOwners(markBaselineFindings(suppressionResult.findings, baseline), resolvedOptions);
     const scoreBreakdown = buildScoreBreakdown(marked.activeFindings);
     const score = Math.round(Object.values(scoreBreakdown).reduce((total, value) => total + value, 0) / Object.values(scoreBreakdown).length);
 
@@ -239,9 +268,67 @@ async function discoverRuntimeRoutes(root: string, options: ResolvedScanOptions)
   }
 }
 
+async function discoverCrawledRoutes(baseUrl: string, seedRoutes: string[], options: ResolvedScanOptions): Promise<{ routes: string[]; diagnostics: RuntimeDiagnostic[] }> {
+  if (!options.runtime.crawl.enabled) return { routes: [], diagnostics: [] };
+  const browserResolution = await resolveBrowserExecutable(options);
+  if (!browserResolution.executablePath) {
+    return { routes: [], diagnostics: [{ stage: "discover-routes", severity: "warning", message: browserResolution.message }] };
+  }
+
+  const browser = await puppeteer.launch({
+    executablePath: browserResolution.executablePath,
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+  });
+  const origin = new URL(baseUrl).origin;
+  const seen = new Set(seedRoutes.map(normalizeRoute));
+  const queue = seedRoutes.map(normalizeRoute).slice(0, options.runtime.crawl.maxRoutes);
+  const diagnostics: RuntimeDiagnostic[] = [];
+
+  try {
+    for (let depth = 0; depth <= options.runtime.crawl.maxDepth && queue.length > 0 && seen.size < options.runtime.crawl.maxRoutes; depth += 1) {
+      const batch = queue.splice(0, queue.length);
+      for (const route of batch) {
+        const url = new URL(route, ensureTrailingSlash(baseUrl)).toString();
+        const page = await browser.newPage();
+        try {
+          await prepareRuntimePage(page, options.runtime, url);
+          await runRuntimeSetupScript(page, browser, options.runtime, url, route);
+          const response = await page.goto(url, { waitUntil: options.runtime.waitUntil, timeout: options.runtime.timeoutMs });
+          if (!response?.ok()) continue;
+          const links = await page.evaluate(() => [...document.querySelectorAll<HTMLAnchorElement>("a[href]")].map((anchor) => anchor.href));
+          for (const link of links) {
+            const parsed = new URL(link);
+            if (parsed.origin !== origin) continue;
+            const candidate = normalizeRoute(`${parsed.pathname}${parsed.search}`);
+            if (seen.has(candidate) || isRuntimeRouteExcluded(candidate, options)) continue;
+            seen.add(candidate);
+            queue.push(candidate);
+            if (seen.size >= options.runtime.crawl.maxRoutes) break;
+          }
+        } catch (error) {
+          diagnostics.push({ stage: "discover-routes", severity: "warning", route, url, message: `Could not crawl ${route}: ${error instanceof Error ? error.message : String(error)}` });
+        } finally {
+          await page.close().catch(() => undefined);
+        }
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+
+  return { routes: [...seen], diagnostics };
+}
+
 function mergeRoutes(configuredRoutes: string[], discoveredRoutes: string[]): string[] {
   const routes = [...new Set([...configuredRoutes, ...discoveredRoutes].map(normalizeRoute))];
   return routes.length > 0 ? routes : ["/"];
+}
+
+function isRuntimeRouteExcluded(route: string, options: ResolvedScanOptions): boolean {
+  const include = options.runtime.crawl.include;
+  if (include.length > 0 && !matchesAnyPattern(route, include)) return true;
+  return matchesAnyPattern(route, options.runtime.crawl.exclude);
 }
 
 function runtimeTargets(baseUrl: string, routes: string[]): Array<{ url: string; route: string }> {
@@ -386,6 +473,8 @@ function createRuleContext(
       return this.getAttribute(element, name) !== undefined;
     },
     elementText(element: JsxElement): string {
+      const ariaHidden = this.getAttribute(element, "aria-hidden");
+      if (ariaHidden?.value === "true") return "";
       const childText = element.childIds.map((childId) => this.elementText(elements[childId])).join(" ");
       return `${element.ownText} ${childText}`.replace(/\s+/g, " ").trim();
     },
@@ -503,6 +592,16 @@ function summarizeFindings(marked: ReturnType<typeof markBaselineFindings>, supp
   };
 }
 
+function withOwners(marked: ReturnType<typeof markBaselineFindings>, options: ResolvedScanOptions): ReturnType<typeof markBaselineFindings> {
+  const assign = (finding: Finding): Finding => ({ ...finding, owner: finding.owner ?? ownerForFinding(finding, options) });
+  return {
+    findings: marked.findings.map(assign),
+    activeFindings: marked.activeFindings.map(assign),
+    baselineFindings: marked.baselineFindings.map(assign),
+    regressions: marked.regressions.map(assign)
+  };
+}
+
 function isResolvedOptions(options: ScanOptions | ResolvedScanOptions): options is ResolvedScanOptions {
   return "failOn" in options && "rules" in options && "include" in options && "exclude" in options && "standard" in options;
 }
@@ -532,12 +631,53 @@ function resolveInlineOptions(options: ScanOptions): ResolvedScanOptions {
       cookies: options.runtime?.cookies ?? [],
       localStorage: options.runtime?.localStorage ?? {},
       headers: options.runtime?.headers ?? {},
-      screenshot: options.runtime?.screenshot ?? true
+      screenshot: options.runtime?.screenshot ?? true,
+      browser: {
+        mode: options.runtime?.browser?.mode ?? "auto",
+        executablePath: options.runtime?.browser?.executablePath ?? ""
+      },
+      crawl: {
+        enabled: options.runtime?.crawl?.enabled ?? false,
+        maxDepth: options.runtime?.crawl?.maxDepth ?? 1,
+        maxRoutes: options.runtime?.crawl?.maxRoutes ?? 25,
+        include: options.runtime?.crawl?.include ?? [],
+        exclude: options.runtime?.crawl?.exclude ?? ["/logout", "/sign-out", "/signout", "/delete", "/destroy", "/remove"]
+      },
+      interactions: {
+        presets: options.runtime?.interactions?.presets ?? [],
+        scripts: options.runtime?.interactions?.scripts ?? []
+      },
+      stories: {
+        enabled: options.runtime?.stories?.enabled ?? false,
+        baseUrl: options.runtime?.stories?.baseUrl ?? "",
+        include: options.runtime?.stories?.include ?? [],
+        exclude: options.runtime?.stories?.exclude ?? []
+      }
     },
     semantic: options.semantic ?? "auto",
     componentPresets: options.componentPresets ?? [],
     components: resolveComponentMappings(options.componentPresets ?? [], {}, options.components),
     suppressions: normalizeSuppressions(options.suppressions, "inline options"),
+    suppressionPolicy: {
+      requireReason: options.suppressionPolicy?.requireReason ?? true,
+      requireExpires: options.suppressionPolicy?.requireExpires ?? true,
+      requireApprovedBy: options.suppressionPolicy?.requireApprovedBy ?? true
+    },
+    ownership: (options.ownership ?? []).map((entry) => ({
+      files: entry.files,
+      owner: entry.owner,
+      reviewers: entry.reviewers ?? [],
+      rules: entry.rules ?? []
+    })),
+    native: {
+      enabled: options.native?.enabled ?? false,
+      platforms: options.native?.platforms ?? ["ios"],
+      provider: options.native?.provider ?? "eas",
+      appId: options.native?.appId ?? "",
+      deepLinks: options.native?.deepLinks ?? [],
+      screens: options.native?.screens ?? [],
+      maxDurationMinutes: options.native?.maxDurationMinutes ?? 20
+    },
     pr: {
       maxComments: 20,
       severityThreshold: "info",

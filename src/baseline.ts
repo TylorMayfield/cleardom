@@ -5,7 +5,15 @@ import type { BaselineFile, BaselineFinding, Finding, StandardId } from "./types
 export async function readBaseline(filePath: string | undefined, rootDir: string): Promise<BaselineFile | undefined> {
   if (!filePath) return undefined;
   const resolved = path.resolve(rootDir, filePath);
-  const raw = await fs.readFile(resolved, "utf8");
+  let raw: string;
+  try {
+    raw = await fs.readFile(resolved, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
   const baseline = JSON.parse(raw) as BaselineFile;
   if (baseline.version !== 1 || !Array.isArray(baseline.findings)) {
     throw new Error(`Invalid ClearDOM baseline at ${resolved}`);

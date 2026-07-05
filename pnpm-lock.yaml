@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@puppeteer/browsers':
+        specifier: ^2.10.13
+        version: 2.13.2
       puppeteer-core:
         specifier: ^25.2.1
         version: 25.2.1

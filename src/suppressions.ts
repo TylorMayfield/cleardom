@@ -94,6 +94,9 @@ function findConfigSuppression(finding: Finding, options: ResolvedScanOptions): 
     kind: "config",
     reason: suppression.reason,
     expires: suppression.expires,
+    approvedBy: suppression.approvedBy,
+    ticket: suppression.ticket,
+    owner: suppression.owner,
     scope: `${suppression.rules.join(",")} in ${suppression.files.join(",")}`
   };
 }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
+import { resolveScanOptions } from "./config.js";
 
 const execFileAsync = promisify(execFile);
 const cliPath = path.resolve("dist/cli.js");
@@ -23,6 +24,16 @@ test("default command scans the current project path", async () => {
 
   assert.match(result.stdout, /ClearDOM score:/);
   assert.match(result.stdout, /Checked 1 file/);
+});
+
+test("help flags print usage without scanning", async () => {
+  for (const flag of ["help", "--help", "-h"]) {
+    const result = await execFileAsync(process.execPath, [cliPath, flag]);
+
+    assert.match(result.stdout, /Usage:/);
+    assert.match(result.stdout, /cleardom \[path\|url\]/);
+    assert.doesNotMatch(result.stdout, /ClearDOM score:/);
+  }
 });
 
 test("scan text output leads with fixes and keeps details behind verbose", async () => {
@@ -74,13 +85,42 @@ test("fix --apply does not rewrite product code without explicit transforms", as
   assert.equal(await fs.readFile(file, "utf8"), "<button />");
 });
 
+test("fix --preview and --apply handle safe mechanical transforms", async () => {
+  const fixture = await createFixture('<button tabIndex={3}>Save</button>');
+  const file = path.join(fixture, "Fixture.tsx");
+  const preview = await execFileAsync(process.execPath, [cliPath, "fix", fixture, "--preview", "--rule", "CDOM_2_4_3_POSITIVE_TABINDEX"]);
+
+  assert.match(preview.stdout, /ClearDOM fix preview/);
+  assert.match(preview.stdout, /Auto-fixable: 1/);
+  assert.match(preview.stdout, /-<button tabIndex=\{3\}>Save<\/button>/);
+  assert.match(preview.stdout, /\+<button tabIndex=\{0\}>Save<\/button>/);
+  assert.equal(await fs.readFile(file, "utf8"), '<button tabIndex={3}>Save</button>');
+
+  const applied = await execFileAsync(process.execPath, [cliPath, "fix", fixture, "--apply", "--rule", "CDOM_2_4_3_POSITIVE_TABINDEX"]);
+  assert.match(applied.stdout, /Applied fixes: 1/);
+  assert.equal(await fs.readFile(file, "utf8"), '<button tabIndex={0}>Save</button>');
+});
+
+test("fix --plan groups findings by owner and rule", async () => {
+  const fixture = await createFixture("<button />");
+  const configPath = path.join(fixture, "cleardom.config.json");
+  await fs.writeFile(configPath, JSON.stringify({
+    ownership: [{ files: ["Fixture.tsx"], owner: "@design-systems" }]
+  }), "utf8");
+  const result = await execFileAsync(process.execPath, [cliPath, "fix", fixture, "--plan", "--format", "json", "--config", configPath]);
+  const parsed = JSON.parse(result.stdout) as { plan: Array<{ ruleId: string; owner?: string; verification: string }> };
+
+  assert.equal(parsed.plan.some((group) => group.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL" && group.owner === "@design-systems"), true);
+  assert.match(parsed.plan[0].verification, /npx cleardom@latest scan/);
+});
+
 test("doctor validates local developer workflow context", async () => {
   const fixture = await createFixture('<button aria-label="Close" />');
   const result = await execFileAsync(process.execPath, [cliPath, "doctor", fixture]);
 
   assert.match(result.stdout, /ClearDOM doctor/);
   assert.match(result.stdout, /Config:/);
-  assert.match(result.stdout, /Chrome:/);
+  assert.match(result.stdout, /Browser:/);
   assert.match(result.stdout, /GitHub token:/);
   assert.match(result.stdout, /Runtime URL:/);
 });
@@ -115,6 +155,23 @@ test("scan --json includes score, findings, and rules", async () => {
   assert.equal(json.findings.length > 0, true);
   assert.equal(json.activeFindings.length > 0, true);
   assert.equal(json.rules.length > 0, true);
+});
+
+test("scan detects common component presets from package metadata", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.mkdir(path.join(directory, "src"), { recursive: true });
+  await fs.writeFile(path.join(directory, "package.json"), JSON.stringify({
+    dependencies: {
+      react: "19.0.0",
+      "@mui/material": "7.0.0"
+    }
+  }), "utf8");
+  await fs.writeFile(path.join(directory, "src", "App.tsx"), 'import { IconButton } from "@mui/material";\nexport function App() { return <IconButton><span aria-hidden="true">x</span></IconButton>; }', "utf8");
+
+  const result = await execFileAsync(process.execPath, [cliPath, "scan", ".", "--json"], { cwd: directory });
+  const json = JSON.parse(result.stdout) as { activeFindings: Array<{ ruleId: string; file: string }> };
+
+  assert.equal(json.activeFindings.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), true);
 });
 
 test("--semantic required fails when no compiler-backed files are available", async () => {
@@ -157,11 +214,26 @@ test("new static rules are exposed through explain and SARIF metadata", async ()
 
 test("init --dry-run prints default config", async () => {
   const result = await execFileAsync(process.execPath, [cliPath, "init", "--dry-run"]);
-  const json = JSON.parse(result.stdout) as { standard: string; baseline: string; failOn: string };
+  const json = JSON.parse(result.stdout) as {
+    standard: string;
+    baseline: string;
+    failOn: string;
+    runtime: { browser?: unknown; crawl?: unknown; interactions?: unknown; stories?: unknown };
+    native?: { enabled?: boolean };
+    ownership?: unknown[];
+    suppressionPolicy?: { requireApprovedBy?: boolean };
+  };
 
   assert.equal(json.standard, "wcag22-aa");
   assert.equal(json.baseline, "cleardom-baseline.json");
   assert.equal(json.failOn, "critical");
+  assert.equal(typeof json.runtime.browser, "object");
+  assert.equal(typeof json.runtime.crawl, "object");
+  assert.equal(typeof json.runtime.interactions, "object");
+  assert.equal(typeof json.runtime.stories, "object");
+  assert.equal(json.native?.enabled, false);
+  assert.equal(Array.isArray(json.ownership), true);
+  assert.equal(json.suppressionPolicy?.requireApprovedBy, false);
 });
 
 test("init detects the project stack and prints onboarding next steps", async () => {
@@ -175,15 +247,44 @@ test("init detects the project stack and prints onboarding next steps", async ()
   }), "utf8");
 
   const result = await execFileAsync(process.execPath, [cliPath, "init"], { cwd: directory });
-  const config = JSON.parse(await fs.readFile(path.join(directory, "cleardom.config.json"), "utf8")) as { include: string[]; componentPresets: string[] };
+  const config = JSON.parse(await fs.readFile(path.join(directory, "cleardom.config.json"), "utf8")) as {
+    include: string[];
+    componentPresets: string[];
+    native?: { enabled?: boolean };
+    ownership?: unknown[];
+    suppressionPolicy?: { requireApprovedBy?: boolean };
+  };
 
   assert.match(result.stdout, /ClearDOM setup wizard/);
   assert.match(result.stdout, /Detected: Next\.js, React/);
   assert.match(result.stdout, /What changed:/);
   assert.match(result.stdout, /Next steps:/);
+  assert.match(result.stdout, /Scaffolded paths:/);
+  assert.match(result.stdout, /Optional runtime checks:/);
+  assert.match(result.stdout, /Optional native checks:/);
   assert.match(result.stdout, /cleardom scan \. --write-baseline cleardom-baseline\.json/);
   assert.equal(config.include.includes("app/**/*.{js,jsx,ts,tsx,mdx}"), true);
   assert.equal(config.componentPresets.includes("mui"), true);
+  assert.equal(config.native?.enabled, false);
+  assert.equal(Array.isArray(config.ownership), true);
+  assert.equal(config.suppressionPolicy?.requireApprovedBy, false);
+});
+
+test("init keeps root HTML files in scope for vanilla web projects", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "package.json"), JSON.stringify({
+    dependencies: { vite: "6.0.0" }
+  }), "utf8");
+  await fs.writeFile(path.join(directory, "index.html"), "<button></button>", "utf8");
+
+  await execFileAsync(process.execPath, [cliPath, "init"], { cwd: directory });
+  const config = JSON.parse(await fs.readFile(path.join(directory, "cleardom.config.json"), "utf8")) as { include: string[] };
+  const result = await execFileAsync(process.execPath, [cliPath, "scan", directory, "--config", path.join(directory, "cleardom.config.json"), "--fail-on", "none", "--json"]);
+  const json = JSON.parse(result.stdout) as { checkedFiles: number; activeFindings: Array<{ ruleId: string }> };
+
+  assert.equal(config.include.includes("*.html"), true);
+  assert.equal(json.checkedFiles, 1);
+  assert.equal(json.activeFindings.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), true);
 });
 
 test("init can create a baseline during setup", async () => {
@@ -203,8 +304,16 @@ test("init --ci-dry-run previews the GitHub workflow without writing it", async 
   const result = await execFileAsync(process.execPath, [cliPath, "init", "--ci-dry-run"], { cwd: directory });
 
   assert.match(result.stdout, /CI dry-run preview:/);
-  assert.match(result.stdout, /npx cleardom@latest review \./);
+  assert.match(result.stdout, /npx cleardom@latest review \. --changed-files-only/);
   await assert.rejects(fs.readFile(path.join(directory, ".github", "workflows", "cleardom.yml"), "utf8"), /ENOENT/);
+});
+
+test("PR review scans changed files by default", async () => {
+  const options = await resolveScanOptions();
+
+  assert.equal(options.pr.changedFilesOnly, true);
+  assert.equal(options.pr.baselinePolicy, "new");
+  assert.equal(options.pr.commentMode, "both");
 });
 
 test("install --agents writes idempotent project-level agent guidance", async () => {
@@ -241,9 +350,14 @@ test("install writes a GitHub Actions PR workflow by default", async () => {
   const workflow = await fs.readFile(path.join(directory, ".github", "workflows", "cleardom.yml"), "utf8");
 
   assert.match(result.stdout, /GitHub Actions PR review/);
-  assert.match(workflow, /npx cleardom@latest review \./);
+  assert.doesNotMatch(result.stdout, /AGENTS\.md/);
+  assert.match(workflow, /npx cleardom@latest review \. --changed-files-only/);
+  assert.match(workflow, /types: \[opened, synchronize, reopened, ready_for_review\]/);
+  assert.match(workflow, /fetch-depth: 0/);
+  assert.match(workflow, /concurrency:/);
   assert.match(workflow, /pull-requests: write/);
   assert.match(workflow, /issues: write/);
+  await assert.rejects(fs.readFile(path.join(directory, "AGENTS.md"), "utf8"), /ENOENT/);
 });
 
 test("review --dry-run prints a pull request summary without GitHub credentials", async () => {
@@ -291,12 +405,29 @@ test("scan --format sarif emits SARIF", async () => {
 });
 
 test("scan routes URL targets to live URL scanning", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-url-"));
+  const configPath = path.join(directory, "cleardom.config.json");
+  await fs.writeFile(configPath, JSON.stringify({ runtime: { browser: { mode: "managed" } } }), "utf8");
+
   await assert.rejects(
-    execFileAsync(process.execPath, [cliPath, "scan", "https://example.com", "--json"], {
+    execFileAsync(process.execPath, [cliPath, "scan", "https://example.com", "--json", "--config", configPath], {
       env: { ...process.env, CHROME_PATH: "", PUPPETEER_EXECUTABLE_PATH: "" }
     }),
-    /Scanning live URLs requires CHROME_PATH/
+    /No Chrome executable found/
   );
+});
+
+test("native scan maps simulator snapshot evidence", async () => {
+  const fixture = await createFixture("import { Pressable } from 'react-native';\n<Pressable accessibilityRole=\"button\" accessibilityLabel=\"Save\" />");
+  const result = await execFileAsync(process.execPath, [cliPath, "native", "scan", fixture, "--format", "json"], {
+    env: {
+      ...process.env,
+      CLEARDOM_NATIVE_MOCK_SNAPSHOT: '@e1 role="button"\n@e2 label="Delete" role="button"\n@e3 label="Delete" role="button"'
+    }
+  });
+  const json = JSON.parse(result.stdout) as { activeFindings: Array<{ source: string; native?: { platform: string } }> };
+
+  assert.equal(json.activeFindings.some((finding) => finding.source === "native-runtime" && finding.native?.platform === "ios"), true);
 });
 
 test("standards command lists every supported WCAG profile", async () => {

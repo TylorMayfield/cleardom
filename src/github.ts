@@ -199,8 +199,13 @@ export function githubWorkflow(): string {
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+
+concurrency:
+  group: cleardom-\${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cleardom:
@@ -221,7 +226,7 @@ jobs:
           node-version: 20
       - name: ClearDOM PR review
         if: github.event_name == 'pull_request'
-        run: npx cleardom@latest review .
+        run: npx cleardom@latest review . --changed-files-only
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
       - name: ClearDOM main scan
@@ -442,7 +447,9 @@ function inlineCommentBody(finding: Finding, result: ScanResult): string {
     `**${finding.ruleId}: ${finding.title}**`,
     "",
     finding.message,
+    finding.owner ? `Owner: ${finding.owner}` : undefined,
     rule?.guidance ? `Fix: ${rule.guidance}` : undefined,
+    rule?.remediation?.safeAutofix ? `Autofix: ${rule.remediation.safeAutofix}` : undefined,
     rule?.docsUrl ? `Docs: ${rule.docsUrl}` : undefined
   ].filter(Boolean).join("\n");
 }
@@ -451,7 +458,9 @@ function pushFinding(lines: string[], finding: Finding, result: ScanResult, opti
   const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
   lines.push(`- **${finding.ruleId}** ${markdownLocation(finding, options)}: ${finding.title}`);
   lines.push(`  ${finding.message}`);
+  if (finding.owner) lines.push(`  Owner: ${finding.owner}`);
   if (rule?.guidance) lines.push(`  Fix: ${rule.guidance}`);
+  if (rule?.remediation?.safeAutofix) lines.push(`  Autofix: ${rule.remediation.safeAutofix}`);
   if (rule?.docsUrl) lines.push(`  Docs: ${rule.docsUrl}`);
 }
 

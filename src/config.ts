@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { normalizeRuleId } from "./rules/index.js";
 import { resolveStandardId } from "./standards.js";
-import type { ComponentMapping, ComponentPreset, PrReviewConfig, ResolvedScanOptions, ResolvedSuppression, RuleOption, ScanConfig, ScanOptions, Severity, SuppressionConfig } from "./types.js";
+import type { ComponentMapping, ComponentPreset, Finding, NativeScanConfig, OwnershipConfig, PrReviewConfig, ResolvedOwnership, ResolvedScanOptions, ResolvedSuppression, RuleOption, RuntimeBrowserConfig, RuntimeCrawlConfig, ScanConfig, ScanOptions, Severity, SuppressionConfig, SuppressionPolicyConfig } from "./types.js";
 
 const defaultOptions: ResolvedScanOptions = {
   include: [],
@@ -21,17 +21,42 @@ const defaultOptions: ResolvedScanOptions = {
     cookies: [],
     localStorage: {},
     headers: {},
-    screenshot: true
+    screenshot: true,
+    browser: { mode: "auto", executablePath: "" },
+    crawl: {
+      enabled: false,
+      maxDepth: 1,
+      maxRoutes: 25,
+      include: [],
+      exclude: ["/logout", "/sign-out", "/signout", "/delete", "/destroy", "/remove"]
+    },
+    interactions: { presets: [], scripts: [] },
+    stories: { enabled: false, baseUrl: "", include: [], exclude: [] }
   },
   semantic: "auto",
   componentPresets: [],
   components: {},
   suppressions: [],
+  suppressionPolicy: {
+    requireReason: true,
+    requireExpires: true,
+    requireApprovedBy: true
+  },
+  ownership: [],
+  native: {
+    enabled: false,
+    platforms: ["ios"],
+    provider: "eas",
+    appId: "",
+    deepLinks: [],
+    screens: [],
+    maxDurationMinutes: 20
+  },
   pr: {
     maxComments: 20,
     severityThreshold: "info",
     commentMode: "both",
-    changedFilesOnly: false,
+    changedFilesOnly: true,
     baselinePolicy: "new",
     statusCheckName: "ClearDOM PR review",
     uploadSarif: false
@@ -121,6 +146,10 @@ const componentPresetMappings: Record<ComponentPreset, Record<string, ComponentM
 export async function resolveScanOptions(options: ScanOptions = {}, cwd = process.cwd()): Promise<ResolvedScanOptions> {
   const configFile = resolveConfigPath(options.configPath, cwd);
   const config = await readConfig(configFile.path, Boolean(options.configPath));
+  const rootDir = configFile.exists ? path.dirname(configFile.path) : cwd;
+  const componentPresets = options.componentPresets
+    ?? config.componentPresets
+    ?? await detectComponentPresets(rootDir);
   return {
     include: options.include ?? config.include ?? defaultOptions.include,
     exclude: options.exclude ?? config.exclude ?? defaultOptions.exclude,
@@ -133,13 +162,20 @@ export async function resolveScanOptions(options: ScanOptions = {}, cwd = proces
     runtimeUrl: options.runtimeUrl ?? config.runtimeUrl,
     runtime: resolveRuntimeConfig(config, options),
     semantic: options.semantic ?? config.semantic ?? defaultOptions.semantic,
-    componentPresets: options.componentPresets ?? config.componentPresets ?? defaultOptions.componentPresets,
-    components: resolveComponentMappings(options.componentPresets ?? config.componentPresets ?? [], config.components, options.components),
-    suppressions: normalizeSuppressions([...(config.suppressions ?? []), ...(options.suppressions ?? [])], configFile.path),
+    componentPresets,
+    components: resolveComponentMappings(componentPresets, config.components, options.components),
+    suppressionPolicy: resolveSuppressionPolicy(config.suppressionPolicy, options.suppressionPolicy),
+    suppressions: normalizeSuppressions(
+      [...(config.suppressions ?? []), ...(options.suppressions ?? [])],
+      configFile.path,
+      resolveSuppressionPolicy(config.suppressionPolicy, options.suppressionPolicy)
+    ),
+    ownership: normalizeOwnership([...(config.ownership ?? []), ...(options.ownership ?? [])]),
+    native: resolveNativeConfig(config.native, options.native),
     pr: resolvePrConfig(config.pr, options.pr),
     packages: config.packages ?? [],
     configPath: options.configPath,
-    rootDir: configFile.exists ? path.dirname(configFile.path) : cwd
+    rootDir
   };
 }
 
@@ -160,7 +196,74 @@ function resolveRuntimeConfig(config: ScanConfig, options: ScanOptions): Resolve
     cookies: runtime.cookies ?? defaultOptions.runtime.cookies,
     localStorage: runtime.localStorage ?? defaultOptions.runtime.localStorage,
     headers: runtime.headers ?? defaultOptions.runtime.headers,
-    screenshot: runtime.screenshot ?? defaultOptions.runtime.screenshot
+    screenshot: runtime.screenshot ?? defaultOptions.runtime.screenshot,
+    browser: resolveRuntimeBrowser(runtime.browser),
+    crawl: resolveRuntimeCrawl(runtime.crawl),
+    interactions: {
+      presets: runtime.interactions?.presets ?? defaultOptions.runtime.interactions.presets,
+      scripts: runtime.interactions?.scripts ?? defaultOptions.runtime.interactions.scripts
+    },
+    stories: {
+      enabled: runtime.stories?.enabled ?? defaultOptions.runtime.stories.enabled,
+      baseUrl: runtime.stories?.baseUrl ?? defaultOptions.runtime.stories.baseUrl,
+      include: runtime.stories?.include ?? defaultOptions.runtime.stories.include,
+      exclude: runtime.stories?.exclude ?? defaultOptions.runtime.stories.exclude
+    }
+  };
+}
+
+async function detectComponentPresets(rootDir: string): Promise<ComponentPreset[]> {
+  const packageJson = await readPackageJson(rootDir);
+  const dependencies = new Set(Object.keys({
+    ...(packageJson?.dependencies ?? {}),
+    ...(packageJson?.devDependencies ?? {}),
+    ...(packageJson?.peerDependencies ?? {})
+  }));
+  const presets: ComponentPreset[] = [];
+
+  if (hasAnyDependency(dependencies, ["@radix-ui/react-dialog", "@radix-ui/react-slot", "@radix-ui/themes"])) presets.push("radix");
+  if (hasAnyDependency(dependencies, ["@mui/material", "@material-ui/core"])) presets.push("mui");
+  if (hasAnyDependency(dependencies, ["react-aria", "react-aria-components", "@react-aria/button"])) presets.push("react-aria");
+  if (hasAnyDependency(dependencies, ["react-native", "expo"])) presets.push("react-native");
+  if (dependencies.has("@chakra-ui/react")) presets.push("chakra");
+  if (dependencies.has("antd")) presets.push("ant-design");
+  if (dependencies.has("@headlessui/react")) presets.push("headless-ui");
+  if (dependencies.has("@mantine/core")) presets.push("mantine");
+  if (dependencies.has("react-bootstrap")) presets.push("react-bootstrap");
+
+  return presets;
+}
+
+async function readPackageJson(rootDir: string): Promise<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string> } | undefined> {
+  try {
+    return JSON.parse(await fs.readFile(path.join(rootDir, "package.json"), "utf8")) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string> };
+  } catch {
+    return undefined;
+  }
+}
+
+function hasAnyDependency(dependencies: Set<string>, names: string[]): boolean {
+  return names.some((name) => dependencies.has(name));
+}
+
+function resolveRuntimeBrowser(browser: RuntimeBrowserConfig | undefined): ResolvedScanOptions["runtime"]["browser"] {
+  const mode = browser?.mode ?? defaultOptions.runtime.browser.mode;
+  if (mode !== "auto" && mode !== "system" && mode !== "managed") {
+    throw new Error("runtime.browser.mode must be one of: auto, system, managed.");
+  }
+  return {
+    mode,
+    executablePath: browser?.executablePath ?? defaultOptions.runtime.browser.executablePath
+  };
+}
+
+function resolveRuntimeCrawl(crawl: RuntimeCrawlConfig | undefined): ResolvedScanOptions["runtime"]["crawl"] {
+  return {
+    enabled: crawl?.enabled ?? defaultOptions.runtime.crawl.enabled,
+    maxDepth: crawl?.maxDepth ?? defaultOptions.runtime.crawl.maxDepth,
+    maxRoutes: crawl?.maxRoutes ?? defaultOptions.runtime.crawl.maxRoutes,
+    include: crawl?.include ?? defaultOptions.runtime.crawl.include,
+    exclude: crawl?.exclude ?? defaultOptions.runtime.crawl.exclude
   };
 }
 
@@ -231,7 +334,19 @@ export function matchesAnyPattern(filePath: string, patterns: string[]): boolean
   return patterns.some((pattern) => globToRegExp(pattern).test(normalized));
 }
 
-export function normalizeSuppressions(suppressions: SuppressionConfig[] | undefined, configPath: string): ResolvedSuppression[] {
+function resolveSuppressionPolicy(config: SuppressionPolicyConfig | undefined, options: SuppressionPolicyConfig | undefined): Required<SuppressionPolicyConfig> {
+  return {
+    requireReason: options?.requireReason ?? config?.requireReason ?? defaultOptions.suppressionPolicy.requireReason,
+    requireExpires: options?.requireExpires ?? config?.requireExpires ?? defaultOptions.suppressionPolicy.requireExpires,
+    requireApprovedBy: options?.requireApprovedBy ?? config?.requireApprovedBy ?? defaultOptions.suppressionPolicy.requireApprovedBy
+  };
+}
+
+export function normalizeSuppressions(
+  suppressions: SuppressionConfig[] | undefined,
+  configPath: string,
+  policy: Required<SuppressionPolicyConfig> = defaultOptions.suppressionPolicy
+): ResolvedSuppression[] {
   return (suppressions ?? []).map((suppression, index) => {
     const rules = [...(suppression.rule ? [suppression.rule] : []), ...(suppression.rules ?? [])].map(normalizeRuleId);
     const files = [...(suppression.file ? [suppression.file] : []), ...(suppression.files ?? [])];
@@ -242,28 +357,67 @@ export function normalizeSuppressions(suppressions: SuppressionConfig[] | undefi
     if (files.length === 0) {
       throw new Error(`Invalid suppression ${index + 1} in ${configPath}: at least one file or files entry is required.`);
     }
-    if (!suppression.reason?.trim()) {
+    if (policy.requireReason && !suppression.reason?.trim()) {
       throw new Error(`Invalid suppression ${index + 1} in ${configPath}: reason is required.`);
     }
-    if (!suppression.expires?.trim()) {
+    if (policy.requireExpires && !suppression.expires?.trim()) {
       throw new Error(`Invalid suppression ${index + 1} in ${configPath}: expires is required.`);
     }
-    if (Number.isNaN(Date.parse(suppression.expires))) {
+    if (suppression.expires?.trim() && Number.isNaN(Date.parse(suppression.expires))) {
       throw new Error(`Invalid suppression ${index + 1} in ${configPath}: expires must be a valid date.`);
+    }
+    if (policy.requireApprovedBy && !suppression.approvedBy?.trim()) {
+      throw new Error(`Invalid suppression ${index + 1} in ${configPath}: approvedBy is required.`);
     }
 
     return {
       rules,
       files,
-      reason: suppression.reason.trim(),
-      expires: suppression.expires,
+      reason: suppression.reason?.trim() ?? "",
+      expires: suppression.expires ?? "",
+      approvedBy: suppression.approvedBy?.trim(),
+      ticket: suppression.ticket?.trim(),
+      owner: suppression.owner?.trim(),
       source: "config"
     };
   });
 }
 
 export function isSuppressionExpired(expires: string, now = new Date()): boolean {
+  if (!expires) return false;
   return Date.parse(expires) < Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+}
+
+function normalizeOwnership(ownership: OwnershipConfig[]): ResolvedOwnership[] {
+  return ownership.map((entry) => ({
+    files: entry.files,
+    owner: entry.owner,
+    reviewers: entry.reviewers ?? [],
+    rules: (entry.rules ?? []).map(normalizeRuleId)
+  }));
+}
+
+export function ownerForFinding(finding: Finding, options: ResolvedScanOptions): string | undefined {
+  const relativeFile = normalizePath(path.relative(options.rootDir, finding.file));
+  const normalizedFile = normalizePath(finding.file);
+  const match = options.ownership.find((entry) => {
+    if (entry.rules.length > 0 && !entry.rules.includes(finding.ruleId)) return false;
+    return matchesAnyPattern(relativeFile, entry.files) || matchesAnyPattern(normalizedFile, entry.files);
+  });
+  return match?.owner;
+}
+
+function resolveNativeConfig(config: NativeScanConfig | undefined, options: NativeScanConfig | undefined): Required<NativeScanConfig> {
+  const merged = { ...defaultOptions.native, ...config, ...options };
+  return {
+    enabled: Boolean(merged.enabled),
+    platforms: merged.platforms && merged.platforms.length > 0 ? merged.platforms : defaultOptions.native.platforms,
+    provider: merged.provider ?? "eas",
+    appId: merged.appId ?? "",
+    deepLinks: merged.deepLinks ?? [],
+    screens: merged.screens ?? [],
+    maxDurationMinutes: merged.maxDurationMinutes ?? defaultOptions.native.maxDurationMinutes
+  };
 }
 
 async function readConfig(resolved: string, explicit: boolean): Promise<ScanConfig> {

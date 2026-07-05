@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import * as puppeteer from "puppeteer-core";
 import { fingerprintFinding } from "./baseline.js";
+import { resolveBrowserExecutable } from "./browser.js";
 import { isRuleEnabled, severityOverride } from "./config.js";
 import {
   collectContrastIssues,
@@ -55,9 +56,10 @@ export async function auditRuntimeUrls(
   chromePath?: string,
   browser?: puppeteer.Browser
 ): Promise<{ findings: Finding[]; diagnostics: RuntimeDiagnostic[]; pages: RuntimePageResult[] }> {
-  const executablePath = chromePath ?? process.env.CHROME_PATH ?? process.env.PUPPETEER_EXECUTABLE_PATH;
+  const browserResolution = await resolveBrowserExecutable(options, chromePath);
+  const executablePath = browserResolution.executablePath;
   if (!browser && !executablePath) {
-    throw new Error("Runtime checks require CHROME_PATH or PUPPETEER_EXECUTABLE_PATH to point to a Chromium/Chrome executable.");
+    throw new Error(browserResolution.message);
   }
 
   const ownedBrowser = browser ? undefined : await puppeteer.launch({
@@ -197,14 +199,14 @@ async function auditRuntimePage(
   }
 
   const issues: RuntimeIssue[] = [];
-  await collectRuntimeIssues(page, issues, diagnostics, url, route, viewport);
+  await collectRuntimeIssues(page, issues, diagnostics, url, route, viewport, options);
 
   const findings: Finding[] = [];
   for (const issue of issues) {
     const rule = runtimeRules.find((candidate) => candidate.id === issue.ruleId);
     if (!rule || !ruleAppliesToStandard(rule, options.standard) || !isRuleEnabled(rule.id, options.rules[rule.id])) continue;
-    const screenshot = options.runtime.screenshot ? await captureRuntimeScreenshot(page, issue.selector, diagnostics, url, route, viewport) : undefined;
-    findings.push(runtimeFinding(rule, issue, url, route, viewport, screenshot, options, severityOverride(options.rules[rule.id]) ?? rule.severity));
+    const evidence = options.runtime.screenshot ? await captureRuntimeEvidence(page, issue.selector, diagnostics, url, route, viewport, issue.interactionStep) : undefined;
+    findings.push(runtimeFinding(rule, issue, url, route, viewport, evidence?.elementScreenshot ?? evidence?.pageScreenshot, evidence, options, severityOverride(options.rules[rule.id]) ?? rule.severity));
   }
 
   return { findings, diagnostics, status };
@@ -216,7 +218,21 @@ async function collectRuntimeIssues(
   diagnostics: RuntimeDiagnostic[],
   url: string,
   route: string,
-  viewport: RuntimeViewport
+  viewport: RuntimeViewport,
+  options: ResolvedScanOptions
+): Promise<void> {
+  await collectBaseRuntimeIssues(page, issues, diagnostics, url, route, viewport);
+  await collectInteractionRuntimeIssues(page, issues, diagnostics, url, route, viewport, options);
+}
+
+async function collectBaseRuntimeIssues(
+  page: puppeteer.Page,
+  issues: RuntimeIssue[],
+  diagnostics: RuntimeDiagnostic[],
+  url: string,
+  route: string,
+  viewport: RuntimeViewport,
+  interactionStep?: string
 ): Promise<void> {
   const collectors: Array<() => Promise<RuntimeIssue[]>> = [
     async () => page.evaluate("collectContrastIssues()") as Promise<RuntimeIssue[]>,
@@ -232,11 +248,92 @@ async function collectRuntimeIssues(
 
   for (const collector of collectors) {
     try {
-      issues.push(...await collector());
+      issues.push(...(await collector()).map((issue) => ({ ...issue, interactionStep: interactionStep ?? issue.interactionStep })));
     } catch (error) {
       diagnostics.push(runtimeDiagnostic("collector", url, route, viewport, error, "warning"));
     }
   }
+}
+
+async function collectInteractionRuntimeIssues(
+  page: puppeteer.Page,
+  issues: RuntimeIssue[],
+  diagnostics: RuntimeDiagnostic[],
+  url: string,
+  route: string,
+  viewport: RuntimeViewport,
+  options: ResolvedScanOptions
+): Promise<void> {
+  for (const preset of options.runtime.interactions.presets) {
+    try {
+      const steps = await runInteractionPreset(page, preset);
+      for (const step of steps) {
+        await collectBaseRuntimeIssues(page, issues, diagnostics, url, route, viewport, step);
+      }
+    } catch (error) {
+      diagnostics.push(runtimeDiagnostic("interaction", url, route, viewport, error, "warning"));
+    }
+  }
+
+  for (const script of options.runtime.interactions.scripts) {
+    try {
+      const moduleUrl = pathToFileURL(script).href;
+      const imported = await import(moduleUrl) as {
+        default?: (context: RuntimeSetupContext) => Promise<string[] | void> | string[] | void;
+        interactions?: (context: RuntimeSetupContext) => Promise<string[] | void> | string[] | void;
+      };
+      const run = imported.default ?? imported.interactions;
+      if (typeof run !== "function") throw new Error(`Interaction script ${script} must export default or interactions.`);
+      const steps = await run({ page, browser: page.browser(), config: options.runtime, url, route }) ?? [`script:${script}`];
+      for (const step of steps) {
+        await collectBaseRuntimeIssues(page, issues, diagnostics, url, route, viewport, step);
+      }
+    } catch (error) {
+      diagnostics.push(runtimeDiagnostic("interaction", url, route, viewport, error, "warning"));
+    }
+  }
+}
+
+async function runInteractionPreset(page: puppeteer.Page, preset: string): Promise<string[]> {
+  if (preset === "menus" || preset === "dialogs" || preset === "drawers") {
+    const selector = await page.evaluate(() => {
+      const candidates = [...document.querySelectorAll<HTMLElement>("[aria-haspopup], [aria-controls], button")];
+      return candidates.map((element) => selectorFor(element)).find(Boolean);
+    }) as string | undefined;
+    if (!selector) return [];
+    await page.click(selector).catch(() => undefined);
+    await waitForInteraction();
+    return [`preset:${preset}:${selector}`];
+  }
+
+  if (preset === "accordions") {
+    const selector = await page.evaluate(() => {
+      const candidates = [...document.querySelectorAll<HTMLElement>("[aria-expanded], summary")];
+      return candidates.map((element) => selectorFor(element)).find(Boolean);
+    }) as string | undefined;
+    if (!selector) return [];
+    await page.click(selector).catch(() => undefined);
+    await waitForInteraction();
+    return [`preset:${preset}:${selector}`];
+  }
+
+  if (preset === "forms") {
+    const selector = await page.evaluate(() => {
+      const candidate = document.querySelector<HTMLElement>("input:not([type=hidden]), textarea");
+      return candidate ? selectorFor(candidate) : undefined;
+    }) as string | undefined;
+    if (!selector) return [];
+    await page.focus(selector).catch(() => undefined);
+    await page.keyboard.type("ClearDOM test").catch(() => undefined);
+    await waitForInteraction();
+    return [`preset:${preset}:${selector}`];
+  }
+
+  return [];
+}
+
+function waitForInteraction(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 50));
 }
 
 async function captureRuntimeScreenshot(
@@ -261,6 +358,30 @@ async function captureRuntimeScreenshot(
     diagnostics.push(runtimeDiagnostic("screenshot", url, route, viewport, error, "warning"));
     return undefined;
   }
+}
+
+async function captureRuntimeEvidence(
+  page: puppeteer.Page,
+  selector: string,
+  diagnostics: RuntimeDiagnostic[],
+  url: string,
+  route: string,
+  viewport: RuntimeViewport,
+  interactionStep?: string
+): Promise<NonNullable<Finding["runtime"]>["evidence"] | undefined> {
+  const pageScreenshot = await captureRuntimeScreenshot(page, "document", diagnostics, url, route, viewport);
+  const elementScreenshot = await captureRuntimeScreenshot(page, selector, diagnostics, url, route, viewport);
+  const domSnippet = await page.evaluate((value) => document.querySelector(value)?.outerHTML.slice(0, 1000), selector).catch(() => undefined) as string | undefined;
+  return {
+    pageScreenshot,
+    elementScreenshot,
+    highlightedScreenshot: elementScreenshot,
+    domSnippet,
+    route,
+    viewport,
+    interactionStep,
+    timestamp: new Date().toISOString()
+  };
 }
 
 function runtimeDiagnostic(
@@ -315,6 +436,7 @@ function runtimeFinding(
   route: string,
   viewport: RuntimeViewport,
   screenshot: string | undefined,
+  evidence: NonNullable<Finding["runtime"]>["evidence"] | undefined,
   options: ResolvedScanOptions,
   severity: Severity
 ): Finding {
@@ -352,7 +474,8 @@ function runtimeFinding(
       route,
       viewport,
       selector: issue.selector,
-      screenshot
+      screenshot,
+      evidence
     }
   };
 }

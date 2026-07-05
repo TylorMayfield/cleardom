@@ -5,11 +5,14 @@ import * as path from "node:path";
 import { promisify } from "node:util";
 import { detectAgents, installAgents, parseAgentId } from "./agents.js";
 import { mergeBaselineFindings, pruneBaselineFindings, readBaseline, writeBaseline, writeBaselineFile } from "./baseline.js";
+import { installManagedBrowser } from "./browser.js";
 import { resolveScanOptions } from "./config.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
 import { formatAgentFixPrompt } from "./fix.js";
+import { buildFixPlan, formatFixPlan, formatFixRunResult, runSafeFixes } from "./fixes.js";
 import { formatRules, formatSarif, formatScanHtml, formatScanJson, formatScanResult, formatStandards } from "./format.js";
 import { githubWorkflow, installGithubActions, runGithubPr } from "./github.js";
+import { runNativeScan } from "./native.js";
 import { formatReport, type ReportFormat } from "./report.js";
 import { findRule, normalizeRuleId, rules, summarizeRule } from "./rules/index.js";
 import { scanPath, scanUrl, shouldFail } from "./scanner.js";
@@ -21,7 +24,9 @@ const command = args[0] ?? "scan";
 const execFileAsync = promisify(execFile);
 
 try {
-  if (command === "scan" || command === "ci") {
+  if (command === "help" || command === "--help" || command === "-h") {
+    help();
+  } else if (command === "scan" || command === "ci") {
     await runScan(command, args.slice(1));
   } else if (command.startsWith("-") || isPathLikeCommand(command) || await pathExists(command)) {
     await runScan("scan", args);
@@ -53,6 +58,10 @@ try {
     await suppressCommand(args.slice(1));
   } else if (command === "baseline") {
     await baselineCommand(args.slice(1));
+  } else if (command === "browser") {
+    await browserCommand(args.slice(1));
+  } else if (command === "native") {
+    await nativeCommand(args.slice(1));
   } else {
     help();
   }
@@ -81,6 +90,28 @@ function explain(ruleId: string): void {
   console.log(`Platforms: ${rule.platforms.join(", ")}`);
   console.log("");
   console.log(rule.guidance);
+  const remediation = rule.remediation ?? {
+    before: rule.examples[0]?.code,
+    after: rule.examples[1]?.code,
+    safeAutofix: rule.fixable ? "Some instances may be safely autofixable when ClearDOM can preserve the accessibility intent mechanically." : undefined,
+    manualVerification: "Re-run ClearDOM and verify the user-facing behavior."
+  };
+  if (remediation.before || remediation.after || remediation.safeAutofix || remediation.manualVerification) {
+    console.log("");
+    console.log("Remediation:");
+    if (remediation.safeAutofix) console.log(`Safe autofix: ${remediation.safeAutofix}`);
+    if (remediation.manualVerification) console.log(`Manual verification: ${remediation.manualVerification}`);
+    if (remediation.before) {
+      console.log("");
+      console.log("Before:");
+      console.log(remediation.before);
+    }
+    if (remediation.after) {
+      console.log("");
+      console.log("After:");
+      console.log(remediation.after);
+    }
+  }
   if (rule.examples.length > 0) {
     console.log("");
     console.log("Examples:");
@@ -263,14 +294,13 @@ function parseAgentArgs(values: string[]): { agents: boolean; agentIds: Array<Re
 
 function parseInstallArgs(values: string[]): { agents: boolean; githubActions: boolean; agentIds: Array<ReturnType<typeof parseAgentId>> } {
   const agentIds: Array<ReturnType<typeof parseAgentId>> = [];
-  let agents = values.length === 0;
+  let agents = false;
   let githubActions = values.length === 0;
 
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
 
     if (value === "--yes" || value === "-y") {
-      agents = true;
       githubActions = true;
       continue;
     }
@@ -437,8 +467,19 @@ async function fixCommand(values: string[]): Promise<void> {
     limit: parsed.limit
   });
 
+  if (parsed.plan) {
+    const plan = buildFixPlan(fixPrompt.findings, result.rules, resolvedOptions, parsed.scan.target);
+    console.log(formatFixPlan(plan, parsed.planFormat));
+    return;
+  }
+
+  if (parsed.preview) {
+    console.log(formatFixRunResult(await runSafeFixes(fixPrompt.findings, false), false));
+    return;
+  }
+
   if (parsed.apply) {
-    console.log(formatApplyFixResult(fixPrompt.findings));
+    console.log(formatFixRunResult(await runSafeFixes(fixPrompt.findings, true), true));
     return;
   }
 
@@ -452,6 +493,9 @@ function parseFixArgs(values: string[]): {
   file?: string;
   limit: number;
   apply: boolean;
+  preview: boolean;
+  plan: boolean;
+  planFormat: "text" | "json" | "markdown";
 } {
   const scanArgs: string[] = [];
   const ruleIds: string[] = [];
@@ -459,6 +503,9 @@ function parseFixArgs(values: string[]): {
   let file: string | undefined;
   let limit = 1;
   let apply = false;
+  let preview = false;
+  let plan = false;
+  let planFormat: "text" | "json" | "markdown" = "text";
 
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
@@ -494,6 +541,27 @@ function parseFixArgs(values: string[]): {
       continue;
     }
 
+    if (value === "--preview") {
+      preview = true;
+      continue;
+    }
+
+    if (value === "--plan") {
+      plan = true;
+      limit = Number.MAX_SAFE_INTEGER;
+      continue;
+    }
+
+    if (value === "--format" && plan) {
+      const format = requireValue(values, index, "--format");
+      if (format !== "text" && format !== "json" && format !== "markdown") {
+        throw new Error("fix --plan --format must be one of: text, json, markdown");
+      }
+      planFormat = format;
+      index += 1;
+      continue;
+    }
+
     if (value === "--rule") {
       const ruleValue = requireValue(values, index, "--rule");
       if (ruleValue.includes("=")) {
@@ -514,7 +582,10 @@ function parseFixArgs(values: string[]): {
     ruleIds,
     file,
     limit,
-    apply
+    apply,
+    preview,
+    plan,
+    planFormat
   };
 }
 
@@ -673,6 +744,28 @@ async function baselineCommand(values: string[]): Promise<void> {
   console.log(`Pruned ${removed} stale ${removed === 1 ? "finding" : "findings"} from ${baselinePath}.`);
 }
 
+async function browserCommand(values: string[]): Promise<void> {
+  const subcommand = values[0] ?? "install";
+  if (subcommand !== "install") {
+    throw new Error("Usage: cleardom browser install");
+  }
+  const executablePath = await installManagedBrowser(process.cwd());
+  console.log(`Installed ClearDOM managed browser at ${executablePath}`);
+}
+
+async function nativeCommand(values: string[]): Promise<void> {
+  const subcommand = values[0] ?? "scan";
+  if (subcommand !== "scan") {
+    throw new Error("Usage: cleardom native scan [path] [--format text|json|sarif|html]");
+  }
+  const parsed = parseScanArgs(values.slice(1));
+  const resolvedOptions = await resolveScanOptions({ ...parsed.options, native: { ...parsed.options.native, enabled: true } });
+  const staticResult = await scanPath(parsed.target, resolvedOptions);
+  const result = await runNativeScan(parsed.target, resolvedOptions, staticResult);
+  console.log(formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose));
+  process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
+}
+
 function filterFindings(findings: Finding[], rootDir: string, ruleIds: string[], file?: string): Finding[] {
   const requestedRules = new Set(ruleIds.map((ruleId) => ruleId.toLowerCase()));
   const requestedFile = file ? path.resolve(rootDir, file) : undefined;
@@ -682,18 +775,6 @@ function filterFindings(findings: Finding[], rootDir: string, ruleIds: string[],
     if (/^https?:\/\//i.test(finding.file)) return finding.file === file;
     return path.resolve(finding.file) === requestedFile || normalizePath(path.relative(rootDir, finding.file)) === normalizePath(file ?? "");
   });
-}
-
-function formatApplyFixResult(findings: Finding[]): string {
-  return [
-    "ClearDOM automatic fixes",
-    "",
-    `Matched findings: ${findings.length}`,
-    "Applied fixes: 0",
-    "",
-    "No safe automatic transforms are available for the matched findings.",
-    "ClearDOM did not rewrite product code. Use `cleardom fix` for an agent remediation prompt, or `cleardom suppress` to baseline accepted findings."
-  ].join("\n");
 }
 
 async function ciOptions(target: string, options: ScanOptions): Promise<ScanOptions> {
@@ -797,11 +878,13 @@ Usage:
   cleardom review [path] [--dry-run] [--max-comments 20] [--severity-threshold critical|warning|info] [--comment-mode off|summary|inline|both] [--changed-files-only] [--baseline-policy new|all] [--status-check-name "ClearDOM PR review"] [--upload-sarif]
   cleardom suppress [path] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1] [--baseline cleardom-baseline.json]
   cleardom baseline update|prune [path] [--baseline cleardom-baseline.json]
+  cleardom browser install
+  cleardom native scan [path] [--format text|json|sarif|html]
   cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
   cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
   cleardom rules
   cleardom standards
-  cleardom fix [path] [--apply] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
+  cleardom fix [path] [--preview] [--apply] [--plan --format text|json|markdown] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
 `);
 }
 
@@ -919,6 +1002,9 @@ async function initConfig(values: string[]): Promise<void> {
 
   next.push("Run locally: cleardom scan .");
   next.push("Gate only new issues in CI: cleardom ci .");
+  next.push("Optional runtime checks: set runtime.baseUrl, then run cleardom browser install if doctor cannot find Chrome");
+  next.push("Optional native checks: set native.enabled, native.appId or native.deepLinks, then run cleardom native scan .");
+  next.push("Optional team routing: add ownership entries and tighten suppressionPolicy when CI is ready");
 
   console.log(formatInitSummary(rootDir, detection, config, changed, next, parsed.ciDryRun));
 }
@@ -1056,6 +1142,8 @@ function recommendedConfig(detection: StackDetection): ScanConfig {
   if (frameworks.has("Svelte")) include.add("src/**/*.svelte");
   if (frameworks.has("Astro")) include.add("src/**/*.astro");
   if (frameworks.has("Angular")) include.add("src/**/*.component.html");
+  include.add("*.html");
+  include.add("*.htm");
   include.add("src/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}");
   include.add("components/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}");
 
@@ -1072,13 +1160,41 @@ function recommendedConfig(detection: StackDetection): ScanConfig {
       baseUrl: "",
       routes: [],
       discoverRoutes: true,
-      viewports: [{ name: "desktop", width: 1280, height: 900 }],
+      viewports: [
+        { name: "desktop", width: 1280, height: 900 },
+        { name: "mobile", width: 390, height: 844, isMobile: true }
+      ],
+      browser: { mode: "auto" },
+      crawl: {
+        enabled: false,
+        maxDepth: 1,
+        maxRoutes: 25,
+        include: [],
+        exclude: ["/logout", "/sign-out", "/signout", "/delete", "/destroy", "/remove"]
+      },
+      interactions: { presets: [], scripts: [] },
+      stories: { enabled: detection.hasStorybook, baseUrl: "", include: [], exclude: [] },
       waitUntil: "networkidle0",
       timeoutMs: 30000,
       headers: {},
       cookies: [],
       localStorage: {},
       screenshot: true
+    },
+    native: {
+      enabled: false,
+      provider: "eas",
+      platforms: frameworks.has("React Native") || frameworks.has("Expo") ? ["ios"] : [],
+      appId: "",
+      deepLinks: [],
+      screens: [],
+      maxDurationMinutes: 20
+    },
+    ownership: [],
+    suppressionPolicy: {
+      requireReason: true,
+      requireExpires: true,
+      requireApprovedBy: false
     },
     semantic: "auto",
     componentPresets: detection.uiLibraries.length > 0 ? detection.uiLibraries : ["radix", "mui", "react-aria"],
@@ -1095,6 +1211,14 @@ function recommendedConfig(detection: StackDetection): ScanConfig {
 }
 
 function formatInitSummary(rootDir: string, detection: StackDetection, config: ScanConfig, changed: string[], next: string[], showWorkflow: boolean): string {
+  const scaffolded = [
+    "source scanning",
+    "runtime browser checks",
+    "safe autofix planning",
+    "ownership routing",
+    "suppression policy",
+    "native simulator checks"
+  ];
   const lines = [
     "ClearDOM setup wizard",
     "",
@@ -1102,6 +1226,7 @@ function formatInitSummary(rootDir: string, detection: StackDetection, config: S
     `Detected: ${detection.summary}`,
     `Recommended stack config: ${config.standard}, semantic ${config.semantic}, fail on ${config.failOn}`,
     `Component presets: ${(config.componentPresets ?? []).join(", ") || "none"}`,
+    `Scaffolded paths: ${scaffolded.join(", ")}`,
     "",
     "What changed:",
     ...changed.map((line) => `  ${line}`)

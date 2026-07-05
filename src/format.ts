@@ -30,6 +30,9 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
       if (rule?.guidance) {
         lines.push(`     Fix: ${rule.guidance}`);
       }
+      if (rule?.remediation?.safeAutofix) {
+        lines.push(`     Autofix: ${rule.remediation.safeAutofix}`);
+      }
       lines.push(`     Learn: cleardom explain ${finding.ruleId}${rule?.docsUrl ? ` | ${rule.docsUrl}` : ""}`);
       if (verbose) {
         lines.push(`     ${finding.excerpt}`);
@@ -37,6 +40,9 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
         lines.push(`     Target: ${finding.target}`);
         if (finding.runtime) {
           lines.push(`     Runtime: ${finding.runtime.route} ${finding.runtime.viewport.name ?? `${finding.runtime.viewport.width}x${finding.runtime.viewport.height}`} selector ${finding.runtime.selector}`);
+        }
+        if (finding.native) {
+          lines.push(`     Native: ${finding.native.platform} ${finding.native.screen ?? ""}${finding.native.deepLink ? ` ${finding.native.deepLink}` : ""}`.trimEnd());
         }
       }
     }
@@ -108,8 +114,11 @@ export function formatScanHtml(result: ScanResult): string {
           <div><dt>Message</dt><dd>${escapeHtml(finding.message)}</dd></div>
           ${finding.runtime ? `<div><dt>Runtime selector</dt><dd><code>${escapeHtml(finding.runtime.selector)}</code></dd></div>
           <div><dt>Runtime route</dt><dd>${escapeHtml(finding.runtime.route)} at ${escapeHtml(finding.runtime.viewport.name ?? `${finding.runtime.viewport.width}x${finding.runtime.viewport.height}`)}</dd></div>` : ""}
+          ${finding.native ? `<div><dt>Native evidence</dt><dd>${escapeHtml(finding.native.platform)} ${escapeHtml(finding.native.screen ?? "")}</dd></div>` : ""}
+          ${ruleRemediationHtml(result, finding)}
         </dl>
         ${finding.runtime?.screenshot ? `<img alt="Screenshot evidence for ${escapeHtml(finding.ruleId)}" src="${finding.runtime.screenshot}">` : ""}
+        ${finding.native?.screenshot ? `<img alt="Native screenshot evidence for ${escapeHtml(finding.ruleId)}" src="${finding.native.screenshot}">` : ""}
       </article>`).join("\n");
   const diagnostics = result.runtimeDiagnostics.map((diagnostic) => `<li>${escapeHtml(diagnostic.severity)} ${escapeHtml(diagnostic.stage)}${diagnostic.url ? ` ${escapeHtml(diagnostic.url)}` : ""}: ${escapeHtml(diagnostic.message)}</li>`).join("\n");
 
@@ -170,7 +179,8 @@ export function formatSarif(result: ScanResult): string {
               fullDescription: { text: `${rule.category}; WCAG: ${rule.wcag.join(", ")}` },
               properties: {
                 confidence: rule.confidence,
-                detectionMode: rule.detectionMode
+                detectionMode: rule.detectionMode,
+                remediation: rule.remediation
               },
               defaultConfiguration: {
                 level: sarifLevel(rule.severity)
@@ -224,6 +234,8 @@ export function formatRules(rules: RuleSummary[]): string {
     lines.push(`  Platforms: ${rule.platforms.join(", ")}`);
     lines.push(`  WCAG: ${rule.wcag.join(", ")}`);
     lines.push(`  Standards: ${formatStandardRefs(rule.standards)}`);
+    if (rule.remediation?.safeAutofix) lines.push(`  Safe autofix: ${rule.remediation.safeAutofix}`);
+    if (rule.remediation?.manualVerification) lines.push(`  Manual verification: ${rule.remediation.manualVerification}`);
     lines.push("");
   }
   return lines.join("\n");
@@ -300,6 +312,12 @@ function sarifLevel(severity: Severity): "error" | "warning" | "note" {
 
 function htmlMetric(label: string, value: string): string {
   return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+}
+
+function ruleRemediationHtml(result: ScanResult, finding: Finding): string {
+  const remediation = result.rules.find((rule) => rule.id === finding.ruleId)?.remediation;
+  if (!remediation?.safeAutofix && !remediation?.manualVerification) return "";
+  return `<div><dt>Remediation</dt><dd>${escapeHtml([remediation.safeAutofix, remediation.manualVerification].filter(Boolean).join(" "))}</dd></div>`;
 }
 
 function escapeHtml(value: string | number): string {

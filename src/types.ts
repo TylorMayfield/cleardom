@@ -2,7 +2,7 @@ export type Severity = "critical" | "warning" | "info";
 export type Confidence = "high" | "medium" | "low";
 export type DetectionMode = "automated" | "needs-review" | "manual-guidance";
 export type FindingImpact = "blocking" | "serious" | "moderate" | "minor";
-export type FindingSource = "static" | "semantic" | "runtime";
+export type FindingSource = "static" | "semantic" | "runtime" | "native-runtime";
 export type FixKind = "safe-auto-fix" | "guided-fix" | "manual-review";
 export type Platform = "web" | "react-native-ios" | "react-native-android";
 export type AttributeValueKind = "static" | "expression" | "boolean";
@@ -122,12 +122,20 @@ export type RuleDefinition = {
   summary: string;
   guidance: string;
   examples: RuleExample[];
+  remediation?: RuleRemediation;
   check: RuleCheck;
 };
 
 export type RuleExample = {
   label: string;
   code: string;
+};
+
+export type RuleRemediation = {
+  before?: string;
+  after?: string;
+  safeAutofix?: string;
+  manualVerification?: string;
 };
 
 export type StandardReference = {
@@ -180,6 +188,9 @@ export type ScanConfig = {
   componentPresets?: ComponentPreset[];
   components?: Record<string, ComponentMapping>;
   suppressions?: SuppressionConfig[];
+  suppressionPolicy?: SuppressionPolicyConfig;
+  ownership?: OwnershipConfig[];
+  native?: NativeScanConfig;
   pr?: PrReviewConfig;
   packages?: PackageConfig[];
 };
@@ -199,6 +210,37 @@ export type RuntimeScanConfig = {
   localStorage?: Record<string, string>;
   headers?: Record<string, string>;
   screenshot?: boolean;
+  browser?: RuntimeBrowserConfig;
+  crawl?: RuntimeCrawlConfig;
+  interactions?: RuntimeInteractionConfig;
+  stories?: RuntimeStoriesConfig;
+};
+
+export type RuntimeBrowserConfig = {
+  mode?: "auto" | "system" | "managed";
+  executablePath?: string;
+};
+
+export type RuntimeCrawlConfig = {
+  enabled?: boolean;
+  maxDepth?: number;
+  maxRoutes?: number;
+  include?: string[];
+  exclude?: string[];
+};
+
+export type RuntimeInteractionPreset = "menus" | "dialogs" | "accordions" | "forms" | "drawers";
+
+export type RuntimeInteractionConfig = {
+  presets?: RuntimeInteractionPreset[];
+  scripts?: string[];
+};
+
+export type RuntimeStoriesConfig = {
+  enabled?: boolean;
+  baseUrl?: string;
+  include?: string[];
+  exclude?: string[];
 };
 
 export type RuntimeViewport = {
@@ -259,6 +301,44 @@ export type SuppressionConfig = {
   files?: string[];
   reason: string;
   expires: string;
+  approvedBy?: string;
+  ticket?: string;
+  owner?: string;
+};
+
+export type SuppressionPolicyConfig = {
+  requireReason?: boolean;
+  requireExpires?: boolean;
+  requireApprovedBy?: boolean;
+};
+
+export type OwnershipConfig = {
+  files: string[];
+  owner: string;
+  reviewers?: string[];
+  rules?: string[];
+};
+
+export type NativeScanConfig = {
+  enabled?: boolean;
+  platforms?: Array<"ios" | "android">;
+  provider?: "eas";
+  appId?: string;
+  deepLinks?: string[];
+  screens?: NativeScreenConfig[];
+  maxDurationMinutes?: number;
+};
+
+export type NativeScreenConfig = {
+  name: string;
+  deepLink?: string;
+  actions?: NativeScreenAction[];
+};
+
+export type NativeScreenAction = {
+  press?: string;
+  fill?: string;
+  text?: string;
 };
 
 export type ComponentPreset = "radix" | "mui" | "react-aria" | "react-native" | "chakra" | "ant-design" | "headless-ui" | "mantine" | "react-bootstrap";
@@ -296,6 +376,9 @@ export type ResolvedScanOptions = {
   componentPresets: ComponentPreset[];
   components: Record<string, ComponentMapping>;
   suppressions: ResolvedSuppression[];
+  suppressionPolicy: Required<SuppressionPolicyConfig>;
+  ownership: ResolvedOwnership[];
+  native: Required<NativeScanConfig>;
   pr: Required<PrReviewConfig>;
   packages: PackageConfig[];
   configPath?: string;
@@ -317,6 +400,10 @@ export type ResolvedRuntimeScanConfig = {
   localStorage: Record<string, string>;
   headers: Record<string, string>;
   screenshot: boolean;
+  browser: Required<RuntimeBrowserConfig>;
+  crawl: Required<RuntimeCrawlConfig>;
+  interactions: Required<RuntimeInteractionConfig>;
+  stories: Required<RuntimeStoriesConfig>;
 };
 
 export type ResolvedSuppression = {
@@ -324,7 +411,17 @@ export type ResolvedSuppression = {
   files: string[];
   reason: string;
   expires: string;
+  approvedBy?: string;
+  ticket?: string;
+  owner?: string;
   source: "config";
+};
+
+export type ResolvedOwnership = {
+  files: string[];
+  owner: string;
+  reviewers: string[];
+  rules: string[];
 };
 
 export type Finding = {
@@ -350,7 +447,9 @@ export type Finding = {
   semanticLocation: string;
   fingerprint: string;
   baselineStatus: "active" | "baseline";
+  owner?: string;
   runtime?: RuntimeFindingEvidence;
+  native?: NativeFindingEvidence;
 };
 
 export type RuntimeFindingEvidence = {
@@ -358,6 +457,31 @@ export type RuntimeFindingEvidence = {
   route: string;
   viewport: RuntimeViewport;
   selector: string;
+  screenshot?: string;
+  evidence?: RuntimeEvidence;
+};
+
+export type RuntimeEvidence = {
+  pageScreenshot?: string;
+  elementScreenshot?: string;
+  highlightedScreenshot?: string;
+  domSnippet?: string;
+  route: string;
+  viewport: RuntimeViewport;
+  interactionStep?: string;
+  timestamp: string;
+};
+
+export type NativeFindingEvidence = {
+  platform: "ios" | "android";
+  screen?: string;
+  deepLink?: string;
+  accessibilityTree?: string;
+  element?: {
+    label?: string;
+    role?: string;
+    state?: string;
+  };
   screenshot?: string;
 };
 
@@ -369,6 +493,9 @@ export type SuppressionMatch = {
   kind: "inline" | "config";
   reason: string;
   expires?: string;
+  approvedBy?: string;
+  ticket?: string;
+  owner?: string;
   scope: string;
 };
 
@@ -409,7 +536,7 @@ export type RuntimeDiagnostic = {
   url?: string;
   route?: string;
   viewport?: string;
-  stage: "discover-routes" | "setup" | "navigation" | "collector" | "screenshot";
+  stage: "discover-routes" | "setup" | "navigation" | "collector" | "screenshot" | "browser" | "interaction" | "native";
   message: string;
   severity: "info" | "warning" | "error";
 };
@@ -486,6 +613,7 @@ export type RuleSummary = {
   platforms: Platform[];
   fixable: boolean;
   guidance: string;
+  remediation?: RuleRemediation;
   docsUrl: string;
 };
 

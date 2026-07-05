@@ -177,10 +177,24 @@ export function summarizeRule(rule: RuleDefinition, severity: Severity = rule.se
     platforms: rule.platforms,
     fixable: rule.fixable,
     guidance: rule.guidance,
+    remediation: rule.remediation ?? defaultRemediation(rule),
     docsUrl: ruleDocsUrl(rule.id)
   };
 }
 
 export function ruleDocsUrl(ruleId: string): string {
   return `https://github.com/cleardom/cleardom#${ruleId.toLowerCase()}`;
+}
+
+function defaultRemediation(rule: RuleDefinition): RuleSummary["remediation"] {
+  const before = rule.examples[0]?.code;
+  const after = rule.examples[1]?.code ?? rule.examples[0]?.code;
+  return {
+    before,
+    after,
+    safeAutofix: rule.fixable ? "Some instances may be safely autofixable when ClearDOM can preserve the accessibility intent mechanically." : undefined,
+    manualVerification: rule.detectionMode === "manual-guidance" || rule.confidence === "low"
+      ? "Confirm the user-facing behavior manually because this rule depends on product context."
+      : "Re-run ClearDOM and verify the component still behaves correctly for keyboard and assistive-technology users."
+  };
 }

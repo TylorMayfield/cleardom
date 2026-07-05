@@ -21,6 +21,12 @@ test("accepts visible text and aria labels as accessible names", () => {
   assert.equal(scanSource('<button title="Close"><XIcon /></button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
 });
 
+test("ignores aria-hidden child text when computing accessible names", () => {
+  const findings = scanSource('<button><span aria-hidden="true">x</span></button>', "Button.tsx");
+
+  assert.equal(findings.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), true);
+});
+
 test("TypeScript semantic analysis resolves constants and object spreads", () => {
   const source = `
     const label = "Close cart";
@@ -180,7 +186,8 @@ test("config suppressions require scoped metadata and report suppressed findings
       rule: "CDOM_4_1_2_UNNAMED_CONTROL",
       file: "Button.tsx",
       reason: "Third-party component is labelled after hydration.",
-      expires: "2099-01-01"
+      expires: "2099-01-01",
+      approvedBy: "@a11y"
     }]
   }), "utf8");
 

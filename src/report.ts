@@ -47,7 +47,16 @@ function markdownReport(result: ScanResult, options: ResolvedScanOptions): strin
       if (finding.runtime) {
         lines.push(`- Runtime selector: \`${finding.runtime.selector}\``);
         lines.push(`- Runtime route: ${finding.runtime.route} (${finding.runtime.viewport.name ?? `${finding.runtime.viewport.width}x${finding.runtime.viewport.height}`})`);
+        if (finding.runtime.evidence?.interactionStep) lines.push(`- Interaction: ${finding.runtime.evidence.interactionStep}`);
       }
+      if (finding.native) {
+        lines.push(`- Native platform: ${finding.native.platform}`);
+        if (finding.native.screen) lines.push(`- Native screen: ${finding.native.screen}`);
+        if (finding.native.deepLink) lines.push(`- Native deep link: ${finding.native.deepLink}`);
+      }
+      const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
+      if (rule?.remediation?.safeAutofix) lines.push(`- Safe autofix: ${rule.remediation.safeAutofix}`);
+      if (rule?.remediation?.manualVerification) lines.push(`- Verify: ${rule.remediation.manualVerification}`);
       lines.push("");
     }
   }
@@ -80,8 +89,11 @@ function htmlReport(result: ScanResult, options: ResolvedScanOptions): string {
           <div><dt>Message</dt><dd>${escapeHtml(finding.message)}</dd></div>
           ${finding.runtime ? `<div><dt>Runtime selector</dt><dd><code>${escapeHtml(finding.runtime.selector)}</code></dd></div>
           <div><dt>Runtime route</dt><dd>${escapeHtml(finding.runtime.route)} at ${escapeHtml(finding.runtime.viewport.name ?? `${finding.runtime.viewport.width}x${finding.runtime.viewport.height}`)}</dd></div>` : ""}
+          ${finding.native ? `<div><dt>Native evidence</dt><dd>${escapeHtml(finding.native.platform)} ${escapeHtml(finding.native.screen ?? "")}</dd></div>` : ""}
+          ${ruleRemediationHtml(result, finding)}
         </dl>
         ${finding.runtime?.screenshot ? `<img alt="Screenshot evidence for ${escapeHtml(finding.ruleId)}" src="${finding.runtime.screenshot}">` : ""}
+        ${finding.native?.screenshot ? `<img alt="Native screenshot evidence for ${escapeHtml(finding.ruleId)}" src="${finding.native.screenshot}">` : ""}
       </article>`).join("\n");
   const diagnostics = result.runtimeDiagnostics.map((diagnostic) => `<li>${escapeHtml(diagnostic.severity)} ${escapeHtml(diagnostic.stage)}${diagnostic.url ? ` ${escapeHtml(diagnostic.url)}` : ""}: ${escapeHtml(diagnostic.message)}</li>`).join("\n");
 
@@ -137,6 +149,12 @@ function htmlReport(result: ScanResult, options: ResolvedScanOptions): string {
 
 function metric(label: string, value: string): string {
   return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+}
+
+function ruleRemediationHtml(result: ScanResult, finding: Finding): string {
+  const remediation = result.rules.find((rule) => rule.id === finding.ruleId)?.remediation;
+  if (!remediation?.safeAutofix && !remediation?.manualVerification) return "";
+  return `<div><dt>Remediation</dt><dd>${escapeHtml([remediation.safeAutofix, remediation.manualVerification].filter(Boolean).join(" "))}</dd></div>`;
 }
 
 function formatLocation(finding: Finding, rootDir: string): string {
