@@ -23,11 +23,11 @@ Existing projects can adopt gradually: commit a baseline once with `npx cleardom
 
 ```sh
 npx cleardom@latest install
-git add .github/workflows/cleardom.yml AGENTS.md CLAUDE.md .cursor/rules/cleardom.mdc
+git add .github/workflows/cleardom.yml
 git commit -m "Add ClearDOM PR review"
 ```
 
-The installed workflow runs `cleardom review .` on every pull request. It posts one sticky summary, adds capped inline comments on changed lines, and fails the status check only for newly introduced findings. Legacy accessibility debt can stay visible without blocking unrelated changes.
+The installed workflow runs `cleardom review . --changed-files-only` on every pull request. It posts one sticky summary, adds capped inline comments on changed lines, and fails the status check only for newly introduced findings in changed files. Legacy accessibility debt can stay visible without blocking unrelated changes.
 
 Preview the same comment locally before opening a PR:
 
@@ -77,14 +77,16 @@ cleardom report [path|url] [--format html|markdown|json] [--output cleardom-repo
 cleardom review [path] [--dry-run] [--max-comments 20]
 cleardom suppress [path] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1] [--baseline cleardom-baseline.json]
 cleardom baseline update|prune [path] [--baseline cleardom-baseline.json]
+cleardom browser install
+cleardom native scan [path] [--format text|json|sarif|html]
 cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
 cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
 cleardom rules
 cleardom standards
-cleardom fix [path] [--apply] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
+cleardom fix [path] [--preview] [--apply] [--plan --format text|json|markdown] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
 ```
 
-`doctor` checks local Chrome availability, ClearDOM config, GitHub token context, include/exclude patterns, baseline setup, semantic mode, and runtime URL readiness. `report` writes shareable local scan reports outside benchmark mode. `fix` is an agent-assisted remediation workflow; `fix --apply` is intentionally limited to safe config-level or explicitly autofixable mechanical changes, so product-code remediation remains prompt-based unless a rule provides a safe transform. Use `suppress` to baseline selected accepted findings, then `baseline update` and `baseline prune` to refresh or remove stale adoption debt.
+`doctor` checks browser availability, ClearDOM config, GitHub token context, include/exclude patterns, baseline setup, semantic mode, runtime URL readiness, and native simulator readiness when enabled. `browser install` adds a managed Chrome for runtime scans when the system has no usable browser. `report` writes shareable local scan reports outside benchmark mode. `fix` is an agent-assisted remediation workflow; `fix --preview` shows safe mechanical diffs, `fix --apply` applies only safe transforms, and `fix --plan` groups work by rule/file/owner. Use `suppress` to baseline selected accepted findings, then `baseline update` and `baseline prune` to refresh or remove stale adoption debt.
 
 ## Product onboarding
 
@@ -94,7 +96,7 @@ Start a project with the setup wizard:
 npx cleardom@latest init
 ```
 
-`init` detects common app stacks and UI libraries from `package.json` and project files, then writes a recommended `cleardom.config.json`. The setup output calls out what changed after install and the next commands to run.
+`init` detects common app stacks and UI libraries from `package.json` and project files, then writes one recommended `cleardom.config.json` that scaffolds every product path: source scanning, runtime browser checks, safe fix planning, ownership routing, suppression policy, and native simulator checks. Optional paths are present but disabled or empty until you fill in the relevant settings.
 
 Useful setup variants:
 
@@ -116,19 +118,19 @@ ClearDOM can install the project-level workflow pieces that make it behave like 
 npx cleardom@latest install
 ```
 
-By default this writes `.github/workflows/cleardom.yml` and ClearDOM-managed agent guidance in `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/cleardom.mdc`. Existing file content is preserved, and rerunning the command refreshes managed content without duplicating it.
+By default this writes `.github/workflows/cleardom.yml` so pull requests get a sticky summary, capped inline comments on changed lines, and a ClearDOM status check. Existing workflow content is refreshed idempotently when rerunning the command.
 
-Install only agent guidance or one target with `--agents` and `--agent`:
+Install agent guidance separately with `--agents` and target one agent with `--agent`:
 
 ```sh
-cleardom install --agents --no-github-actions
+cleardom install --agents
 cleardom agents install --agent cursor
 cleardom agents detect
 cleardom agents upgrade
 cleardom agents uninstall --agent cursor
 ```
 
-The installed GitHub Actions workflow runs `cleardom review .` on pull requests. In Actions, that command uses `GITHUB_TOKEN` to scan the PR head and base commit, create or update one sticky PR summary comment, and add capped inline comments on changed lines for newly introduced findings. The summary shows new, fixed, and existing findings; pull requests fail only on new findings so legacy debt stays visible without blocking unrelated work. Outside Actions, use `--dry-run` to preview the same Markdown summary locally:
+The installed GitHub Actions workflow runs `cleardom review . --changed-files-only` on pull requests. In Actions, that command uses `GITHUB_TOKEN` to scan the PR head and base commit, create or update one sticky PR summary comment, and add capped inline comments on changed lines for newly introduced findings. Pull requests fail only on new findings in changed files, so legacy debt stays visible without blocking unrelated work. Outside Actions, use `--dry-run` to preview the same Markdown summary locally:
 
 ```sh
 cleardom review . --dry-run
@@ -161,7 +163,32 @@ Create `cleardom.config.json` in the project root:
     "headers": { "x-cleardom-scan": "true" },
     "cookies": [],
     "localStorage": {},
-    "screenshot": true
+    "screenshot": true,
+    "browser": { "mode": "auto" },
+    "crawl": {
+      "enabled": false,
+      "maxDepth": 1,
+      "maxRoutes": 25,
+      "include": [],
+      "exclude": ["/logout", "/sign-out", "/signout", "/delete", "/destroy", "/remove"]
+    },
+    "interactions": { "presets": [], "scripts": [] },
+    "stories": { "enabled": false, "baseUrl": "", "include": [], "exclude": [] }
+  },
+  "native": {
+    "enabled": false,
+    "provider": "eas",
+    "platforms": ["ios"],
+    "appId": "",
+    "deepLinks": [],
+    "screens": [],
+    "maxDurationMinutes": 20
+  },
+  "ownership": [],
+  "suppressionPolicy": {
+    "requireReason": true,
+    "requireExpires": true,
+    "requireApprovedBy": false
   },
   "componentPresets": ["radix", "mui", "react-aria"],
   "components": {
@@ -212,11 +239,11 @@ ClearDOM documents framework support in tiers:
 
 `--semantic auto` is the default. For JavaScript, TypeScript, JSX, and TSX files, ClearDOM builds a TypeScript Program and resolves safe static semantics such as string constants, simple imported constants, object-literal prop spreads, numeric literals, template literals without dynamic holes, and simple intrinsic tag aliases. Use `--semantic off` to force the lightweight adapters, or `--semantic required` when CI should fail if compiler-backed source analysis cannot initialize. JSON output includes `semanticAnalysis` and `semanticDiagnostics`.
 
-Web runtime checks use Chromium through `puppeteer-core` for CSS-dependent issues that static source cannot see. Set `CHROME_PATH=/path/to/chrome` or `PUPPETEER_EXECUTABLE_PATH=/path/to/chrome`, start your web app locally, then pass `--runtime-url` or configure `runtime.baseUrl`.
+Web runtime checks use Chromium through `puppeteer-core` for CSS-dependent issues that static source cannot see. ClearDOM looks for an explicit browser path, `CHROME_PATH`, `PUPPETEER_EXECUTABLE_PATH`, a managed browser installed with `cleardom browser install`, and then common system Chrome locations. Start your web app locally, then pass `--runtime-url` or configure `runtime.baseUrl`.
 
-The `runtime` block supports explicit `routes`, safe route discovery from common framework file layouts, multiple `viewports`, auth/setup scripts, custom headers, cookies, localStorage, wait strategy, selectors, timeouts, and screenshot evidence. URL scans and runtime scans reuse a single browser session. JSON and HTML reports include runtime diagnostics plus selector and screenshot evidence for runtime findings.
+The `runtime` block supports explicit `routes`, safe route discovery from common framework file layouts, optional same-origin crawl, interaction presets/scripts, Storybook story scanning, multiple `viewports`, auth/setup scripts, custom headers, cookies, localStorage, wait strategy, selectors, timeouts, and screenshot evidence. URL scans and runtime scans reuse a single browser session. JSON and HTML reports include runtime diagnostics plus selector and screenshot evidence for runtime findings.
 
-React Native checks are static guidance for iOS and Android semantics. They flag missing labels and roles in source, including mapped design-system components, but rendered VoiceOver and TalkBack behavior still needs manual verification on a device or simulator.
+React Native checks are static guidance for iOS and Android semantics. They flag missing labels and roles in source, including mapped design-system components. To collect simulator-backed evidence, fill in the scaffolded `native` block and run `cleardom native scan .`; rendered VoiceOver and TalkBack behavior still needs manual verification on a device or simulator.
 
 Rule options can be `"off"`, `"critical"`, `"warning"`, `"info"`, or an object like:
 
@@ -256,7 +283,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npx cleardom@latest review .
+      - run: npx cleardom@latest review . --changed-files-only
         if: github.event_name == 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,22 +2,40 @@ name: ClearDOM
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+
+concurrency:
+  group: cleardom-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cleardom:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write
+      issues: write
       security-events: write
+      checks: write
+      statuses: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npx cleardom@latest ci . --format sarif > cleardom.sarif
+      - name: ClearDOM PR review
+        if: github.event_name == 'pull_request'
+        run: npx cleardom@latest review . --changed-files-only
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: ClearDOM main scan
+        if: github.event_name != 'pull_request'
+        run: npx cleardom@latest ci . --format sarif > cleardom.sarif
       - uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         with:
           sarif_file: cleardom.sarif
