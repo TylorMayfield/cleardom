@@ -120,9 +120,102 @@ test("doctor validates local developer workflow context", async () => {
 
   assert.match(result.stdout, /ClearDOM doctor/);
   assert.match(result.stdout, /Config:/);
+  assert.match(result.stdout, /Project stack:/);
   assert.match(result.stdout, /Browser:/);
   assert.match(result.stdout, /GitHub token:/);
   assert.match(result.stdout, /Runtime URL:/);
+});
+
+test("doctor explains the React setup flow from the target project", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "package.json"), JSON.stringify({
+    dependencies: {
+      react: "19.0.0",
+      "@mui/material": "7.0.0"
+    }
+  }), "utf8");
+
+  const result = await execFileAsync(process.execPath, [cliPath, "doctor", directory]);
+
+  assert.match(result.stdout, /Project stack: Detected React/);
+  assert.match(result.stdout, /React setup: JSX\/TSX source scans are enabled with semantic auto/);
+  assert.match(result.stdout, /Component presets: mui/);
+  assert.match(result.stdout, /cleardom scan \. --diff/);
+});
+
+test("doctor explains the vanilla web setup flow", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "package.json"), JSON.stringify({
+    dependencies: { vite: "6.0.0" }
+  }), "utf8");
+  await fs.writeFile(path.join(directory, "index.html"), "<main><button>Save</button></main>", "utf8");
+
+  const result = await execFileAsync(process.execPath, [cliPath, "doctor", directory]);
+
+  assert.match(result.stdout, /Project stack: Detected Vite/);
+  assert.match(result.stdout, /Vanilla web setup: HTML files are in scope/);
+  assert.match(result.stdout, /--runtime-url http:\/\/localhost:3000/);
+});
+
+test("doctor explains template framework setup flows", async () => {
+  const cases = [
+    { name: "Vue", dependencies: { vite: "6.0.0", vue: "3.5.0" }, expectedStack: /Detected Vite Vue, Vue/, expectedConfigPattern: "src/**/*.vue" },
+    { name: "Svelte", dependencies: { "@sveltejs/kit": "2.0.0", svelte: "5.0.0" }, expectedStack: /Detected Svelte/, expectedConfigPattern: "src/**/*.svelte" },
+    { name: "Astro", dependencies: { astro: "5.0.0" }, expectedStack: /Detected Astro/, expectedConfigPattern: "src/**/*.astro" },
+    { name: "Angular", dependencies: { "@angular/core": "20.0.0" }, topLevelFile: "angular.json", expectedStack: /Detected Angular/, expectedConfigPattern: "src/**/*.component.html" }
+  ];
+
+  for (const fixture of cases) {
+    const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+    await fs.writeFile(path.join(directory, "package.json"), JSON.stringify({ dependencies: fixture.dependencies }), "utf8");
+    if (fixture.topLevelFile) {
+      await fs.writeFile(path.join(directory, fixture.topLevelFile), "{}", "utf8");
+    }
+
+    const doctor = await execFileAsync(process.execPath, [cliPath, "doctor", directory]);
+    const init = await execFileAsync(process.execPath, [cliPath, "init", "--dry-run"], { cwd: directory });
+    const config = JSON.parse(init.stdout) as { include: string[] };
+
+    assert.match(doctor.stdout, fixture.expectedStack, fixture.name);
+    assert.match(doctor.stdout, /Template setup: .*source adapters are in scope/, fixture.name);
+    assert.match(doctor.stdout, /--runtime-url/, fixture.name);
+    assert.equal(config.include.includes(fixture.expectedConfigPattern), true, fixture.name);
+  }
+});
+
+test("doctor explains Solid setup as JSX source scanning", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "package.json"), JSON.stringify({
+    dependencies: {
+      vite: "6.0.0",
+      "solid-js": "1.9.0"
+    }
+  }), "utf8");
+
+  const result = await execFileAsync(process.execPath, [cliPath, "doctor", directory]);
+
+  assert.match(result.stdout, /Project stack: Detected Vite, Solid/);
+  assert.match(result.stdout, /Solid setup: JSX\/TSX source scans are enabled with semantic auto/);
+  assert.match(result.stdout, /cleardom scan \. --diff/);
+  assert.doesNotMatch(result.stdout, /Vanilla web setup/);
+});
+
+test("doctor explains the Expo setup flow", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "package.json"), JSON.stringify({
+    dependencies: {
+      expo: "54.0.0",
+      react: "19.0.0",
+      "react-native": "0.81.0"
+    }
+  }), "utf8");
+
+  const result = await execFileAsync(process.execPath, [cliPath, "doctor", directory]);
+
+  assert.match(result.stdout, /Project stack: Detected React, React Native, Expo/);
+  assert.match(result.stdout, /React setup:/);
+  assert.match(result.stdout, /Expo setup: React Native component mappings are enabled/);
+  assert.match(result.stdout, /cleardom native scan \./);
 });
 
 test("report writes shareable markdown, html, and json scan reports", async () => {

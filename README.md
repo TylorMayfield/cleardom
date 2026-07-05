@@ -90,13 +90,24 @@ cleardom fix [path] [--preview] [--apply] [--plan --format text|json|markdown] [
 
 ## Product onboarding
 
-Start a project with the setup wizard:
+Start like React Doctor: run ClearDOM from the project root, fix changed-file findings while you work, then install the PR reviewer when the local signal looks useful.
+
+```sh
+npx cleardom@latest
+npx cleardom@latest --diff
+npx cleardom@latest install
+```
+
+ClearDOM detects common app stacks and UI libraries from `package.json` and project files. React, Next.js, Vite React, Solid, React Native, and Expo projects get JSX/TSX semantic source scanning and component presets automatically. Vue, Svelte, Astro, and Angular projects use template source adapters. Vanilla JavaScript web projects can scan HTML and authored source without a config file.
+
+Use `init` when you want a committed project config, baseline, runtime browser settings, native simulator settings, ownership routing, or suppression policy:
 
 ```sh
 npx cleardom@latest init
+npx cleardom@latest doctor .
 ```
 
-`init` detects common app stacks and UI libraries from `package.json` and project files, then writes one recommended `cleardom.config.json` that scaffolds every product path: source scanning, runtime browser checks, safe fix planning, ownership routing, suppression policy, and native simulator checks. Optional paths are present but disabled or empty until you fill in the relevant settings.
+`doctor` is the setup safety pass, not the first required step. It reports the detected stack and the next useful command for React, Solid, template frameworks, vanilla web, and Expo/React Native projects. For rendered DOM, CSS, and keyboard checks in web apps, start the local app and add `--runtime-url`. For Expo and React Native, simulator-backed checks stay opt-in until `native.appId` or `native.deepLinks` are configured.
 
 Useful setup variants:
 

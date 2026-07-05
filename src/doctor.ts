@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { promisify } from "node:util";
 import { resolveBrowserExecutable } from "./browser.js";
 import { resolveScanOptions } from "./config.js";
+import { detectProjectStack, type StackDetection } from "./project.js";
 import type { ResolvedScanOptions, ScanOptions } from "./types.js";
 
 export type DoctorStatus = "pass" | "warn" | "fail";
@@ -35,6 +36,9 @@ export async function runDoctor(options: ScanOptions = {}, cwd = process.cwd()):
   checks.push(githubTokenCheck());
 
   if (resolved) {
+    const detection = await detectProjectStack(resolved.rootDir);
+    checks.push(projectStackCheck(detection));
+    checks.push(...setupFlowChecks(resolved, detection));
     checks.push(await browserCheck(resolved));
     checks.push(patternCheck("Include patterns", resolved.include));
     checks.push(patternCheck("Exclude patterns", resolved.exclude));
@@ -110,6 +114,77 @@ function semanticCheck(options: ResolvedScanOptions): DoctorCheck {
     return { name: "Semantic mode", status: "pass", message: options.semantic };
   }
   return { name: "Semantic mode", status: "fail", message: `Unsupported semantic mode ${String(options.semantic)}` };
+}
+
+function projectStackCheck(detection: StackDetection): DoctorCheck {
+  if (detection.summary === "generic source project") {
+    return { name: "Project stack", status: "warn", message: "No common app stack detected. Run cleardom init --dry-run to preview a generic config." };
+  }
+  const manager = detection.packageManagers.length > 0 ? ` Package manager: ${detection.packageManagers.join(", ")}.` : "";
+  return { name: "Project stack", status: "pass", message: `Detected ${detection.summary}.${manager}` };
+}
+
+function setupFlowChecks(options: ResolvedScanOptions, detection: StackDetection): DoctorCheck[] {
+  const checks: DoctorCheck[] = [];
+  const frameworks = new Set(detection.frameworks);
+  const isReactWeb = ["React", "Next.js", "Remix", "Gatsby"].some((framework) => frameworks.has(framework));
+  const isSolid = frameworks.has("Solid");
+  const isNative = frameworks.has("Expo") || frameworks.has("React Native");
+  const templateFrameworks = ["Vite Vue", "Vue", "Svelte", "Astro", "Angular"].filter((framework) => frameworks.has(framework));
+  const isVanillaWeb = !isReactWeb && !isSolid && !isNative && templateFrameworks.length === 0 && (frameworks.has("Vite") || options.include.some((pattern) => pattern.includes("html")));
+
+  if (isReactWeb) {
+    const presets = options.componentPresets.length > 0 ? options.componentPresets.join(", ") : "none";
+    checks.push({
+      name: "React setup",
+      status: options.semantic === "off" ? "warn" : "pass",
+      message: `JSX/TSX source scans are enabled with semantic ${options.semantic}. Component presets: ${presets}. Next: cleardom scan . --diff.`
+    });
+  }
+
+  if (isSolid) {
+    checks.push({
+      name: "Solid setup",
+      status: options.semantic === "off" ? "warn" : "pass",
+      message: `JSX/TSX source scans are enabled with semantic ${options.semantic}. Next: cleardom scan . --diff.`
+    });
+  }
+
+  if (templateFrameworks.length > 0) {
+    checks.push({
+      name: "Template setup",
+      status: "pass",
+      message: `${templateFrameworks.join(", ")} source adapters are in scope. Pair with --runtime-url for rendered DOM, CSS, and keyboard checks.`
+    });
+  }
+
+  if (isVanillaWeb) {
+    checks.push({
+      name: "Vanilla web setup",
+      status: "pass",
+      message: "HTML files are in scope. For rendered CSS and keyboard checks, start the app and run cleardom doctor . --runtime-url http://localhost:3000."
+    });
+  }
+
+  if (isNative) {
+    checks.push({
+      name: "Expo setup",
+      status: options.componentPresets.includes("react-native") ? "pass" : "warn",
+      message: options.componentPresets.includes("react-native")
+        ? `React Native component mappings are enabled. Native simulator checks are ${options.native.enabled ? "enabled" : "available but disabled"}; run cleardom native scan . after setting native.appId or deepLinks.`
+        : "Add componentPresets: [\"react-native\"] so Pressable, TextInput, Image, and touchables are understood."
+    });
+  }
+
+  if (checks.length === 0) {
+    checks.push({
+      name: "Setup flow",
+      status: "warn",
+      message: "Run cleardom init to write a project config, then cleardom scan . or cleardom ci ."
+    });
+  }
+
+  return checks;
 }
 
 async function runtimeUrlCheck(options: ResolvedScanOptions): Promise<DoctorCheck> {

@@ -85,3 +85,98 @@ test("framework matrix scans common JavaScript and TypeScript framework files", 
   assert.equal(files.has("checkout.component.html"), true);
   assert.equal(files.has("Checkout.mdx"), true);
 });
+
+test("framework demos detect common accessibility issues in each supported framework", async () => {
+  const fixtureRoot = path.join(fixturesRoot, "framework-demos");
+  const result = await scanPath(fixtureRoot, {
+    configPath: path.join(fixtureRoot, "cleardom.config.json")
+  });
+  const findingsByFile = findingsGroupedByFixturePath(result.findings, "framework-demos");
+  const expected: Record<string, string[]> = {
+    "src/angular/checkout.component.html": [
+      "CDOM_1_1_1_IMAGE_ALT",
+      "CDOM_1_3_5_AUTOCOMPLETE",
+      "CDOM_2_1_1_KEYBOARD",
+      "CDOM_4_1_2_UNNAMED_CONTROL"
+    ],
+    "src/astro/Checkout.astro": [
+      "CDOM_1_1_1_IMAGE_ALT",
+      "CDOM_1_3_1_HEADING_ORDER",
+      "CDOM_1_3_5_AUTOCOMPLETE",
+      "CDOM_4_1_2_UNNAMED_CONTROL"
+    ],
+    "src/expo/ProfileScreen.tsx": [
+      "CDOM_3_3_2_PLACEHOLDER_LABEL",
+      "CDOM_4_1_2_FORM_LABEL",
+      "CDOM_4_1_2_NATIVE_LABEL",
+      "CDOM_4_1_2_NATIVE_ROLE"
+    ],
+    "src/html/index.html": [
+      "CDOM_1_1_1_IMAGE_ALT",
+      "CDOM_1_3_5_AUTOCOMPLETE",
+      "CDOM_2_1_1_KEYBOARD",
+      "CDOM_3_1_1_DOCUMENT_METADATA",
+      "CDOM_4_1_2_UNNAMED_CONTROL"
+    ],
+    "src/mdx/Checkout.mdx": [
+      "CDOM_1_1_1_IMAGE_ALT",
+      "CDOM_4_1_2_ANCHOR_HREF",
+      "CDOM_4_1_2_UNNAMED_CONTROL"
+    ],
+    "src/next/app/page.tsx": [
+      "CDOM_1_3_1_HEADING_ORDER",
+      "CDOM_1_3_5_AUTOCOMPLETE",
+      "CDOM_3_3_2_PLACEHOLDER_LABEL",
+      "CDOM_4_1_2_ANCHOR_HREF",
+      "CDOM_4_1_2_FORM_LABEL"
+    ],
+    "src/react/App.tsx": [
+      "CDOM_1_1_1_IMAGE_ALT",
+      "CDOM_1_3_5_AUTOCOMPLETE",
+      "CDOM_2_1_1_KEYBOARD",
+      "CDOM_4_1_2_UNNAMED_CONTROL"
+    ],
+    "src/solid/App.tsx": [
+      "CDOM_1_3_5_AUTOCOMPLETE",
+      "CDOM_2_1_1_KEYBOARD",
+      "CDOM_4_1_2_FORM_LABEL",
+      "CDOM_4_1_2_UNNAMED_CONTROL"
+    ],
+    "src/svelte/Checkout.svelte": [
+      "CDOM_2_1_1_KEYBOARD",
+      "CDOM_4_1_2_ANCHOR_HREF",
+      "CDOM_4_1_2_UNNAMED_CONTROL"
+    ],
+    "src/vue/Checkout.vue": [
+      "CDOM_1_1_1_IMAGE_ALT",
+      "CDOM_1_3_5_AUTOCOMPLETE",
+      "CDOM_2_1_1_KEYBOARD",
+      "CDOM_3_3_2_PLACEHOLDER_LABEL",
+      "CDOM_4_1_2_FORM_LABEL",
+      "CDOM_4_1_2_UNNAMED_CONTROL"
+    ]
+  };
+
+  assert.equal(result.checkedFiles, Object.keys(expected).length);
+  for (const [file, ruleIds] of Object.entries(expected)) {
+    const actual = findingsByFile.get(file) ?? new Set<string>();
+    for (const ruleId of ruleIds) {
+      assert.equal(actual.has(ruleId), true, `${file} should report ${ruleId}`);
+    }
+  }
+});
+
+function findingsGroupedByFixturePath(findings: Array<{ file: string; ruleId: string }>, fixtureName: string): Map<string, Set<string>> {
+  const grouped = new Map<string, Set<string>>();
+  for (const finding of findings) {
+    const marker = `${fixtureName}${path.sep}`;
+    const markerIndex = finding.file.indexOf(marker);
+    const key = markerIndex === -1
+      ? path.basename(finding.file)
+      : finding.file.slice(markerIndex + marker.length).replace(/\\/g, "/");
+    const rules = grouped.get(key) ?? new Set<string>();
+    rules.add(finding.ruleId);
+    grouped.set(key, rules);
+  }
+  return grouped;
+}

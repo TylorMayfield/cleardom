@@ -9,3 +9,4 @@ They complement the WCAG benchmark by modeling common project shapes:
 - `monorepo`: Multiple package roots, ignored build output, and include/exclude behavior.
 - `runtime-demo`: Static HTML for manual/runtime scanner demonstrations.
 - `framework-matrix`: JSX, Vue, Svelte, Astro, Angular template, MDX, and Solid-style smoke coverage.
+- `framework-demos`: Small intentionally broken demos for React, Next.js, Solid, Vue, Svelte, Astro, Angular, MDX, vanilla HTML, and Expo/React Native.
