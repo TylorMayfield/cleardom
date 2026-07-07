@@ -27,6 +27,8 @@ const execFileAsync = promisify(execFile);
 try {
   if (command === "help" || command === "--help" || command === "-h") {
     help();
+  } else if (command === "--version" || command === "-v") {
+    await printVersion();
   } else if (command === "scan" || command === "ci") {
     await runScan(command, args.slice(1));
   } else if (command.startsWith("-") || isPathLikeCommand(command) || await pathExists(command)) {
@@ -123,18 +125,24 @@ function explain(ruleId: string): void {
   }
 }
 
-function parseScanArgs(values: string[]): { target: string; format?: OutputFormat; writeBaseline?: string; diff: boolean; options: ScanOptions } {
+function parseScanArgs(values: string[]): { target: string; format?: OutputFormat; writeBaseline?: string; diff: boolean; includeRules: boolean; options: ScanOptions } {
   const options: ScanOptions = {};
   let target = ".";
   let format: OutputFormat | undefined;
   let writeBaselinePath: string | undefined;
   let diff = false;
+  let includeRules = false;
 
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
 
     if (value === "--json") {
       format = "json";
+      continue;
+    }
+
+    if (value === "--include-rules") {
+      includeRules = true;
       continue;
     }
 
@@ -215,7 +223,7 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
     }
   }
 
-  return { target, format, writeBaseline: writeBaselinePath, diff, options };
+  return { target, format, writeBaseline: writeBaselinePath, diff, includeRules, options };
 }
 
 async function installCommand(values: string[]): Promise<void> {
@@ -364,7 +372,7 @@ async function runScan(command: "scan" | "ci", values: string[]): Promise<void> 
   if (parsed.writeBaseline) {
     await writeBaseline(parsed.writeBaseline, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
   }
-  console.log(formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose));
+  console.log(formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose, parsed.includeRules));
   process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
 }
 
@@ -438,7 +446,7 @@ async function githubPrCommand(values: string[]): Promise<void> {
   });
 
   if (parsed.format === "json") {
-    console.log(result.comparison ? JSON.stringify(result.comparison, null, 2) : formatScanJson(result.result));
+    console.log(result.comparison ? JSON.stringify(result.comparison, null, 2) : formatScanJson(result.result, { includeRules: parsed.includeRules }));
     return;
   }
 
@@ -763,7 +771,7 @@ async function nativeCommand(values: string[]): Promise<void> {
   const resolvedOptions = await resolveScanOptions({ ...parsed.options, native: { ...parsed.options.native, enabled: true } });
   const staticResult = await scanPath(parsed.target, resolvedOptions);
   const result = await runNativeScan(parsed.target, resolvedOptions, staticResult);
-  console.log(formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose));
+  console.log(formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose, parsed.includeRules));
   process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
 }
 
@@ -872,15 +880,15 @@ Usage:
   cleardom [path|url] [--diff] [--format text|json|sarif|html]
   cleardom install [--yes] [--agents] [--github-actions] [--agent codex|claude|cursor]
   cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]
-  cleardom scan [path|url] [--diff] [--format text|json|sarif|html] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
-  cleardom ci [path] [--format text|json|sarif|html] [--baseline cleardom-baseline.json]
+  cleardom scan [path|url] [--diff] [--format text|json|sarif|html] [--include-rules] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
+  cleardom ci [path] [--format text|json|sarif|html] [--include-rules] [--baseline cleardom-baseline.json]
   cleardom doctor [path] [--config cleardom.config.json] [--runtime-url http://localhost:3000]
   cleardom report [path|url] [--format html|markdown|json] [--output cleardom-report.html]
   cleardom review [path] [--dry-run] [--max-comments 20] [--severity-threshold critical|warning|info] [--comment-mode off|summary|inline|both] [--changed-files-only] [--baseline-policy new|all] [--status-check-name "ClearDOM PR review"] [--upload-sarif]
   cleardom suppress [path] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1] [--baseline cleardom-baseline.json]
   cleardom baseline update|prune [path] [--baseline cleardom-baseline.json]
   cleardom browser install
-  cleardom native scan [path] [--format text|json|sarif|html]
+  cleardom native scan [path] [--format text|json|sarif|html] [--include-rules]
   cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
   cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
   cleardom rules
@@ -952,10 +960,15 @@ async function pathExists(value: string): Promise<boolean> {
   }
 }
 
-function formatScan(result: Awaited<ReturnType<typeof scanPath>>, format: OutputFormat, verbose: boolean): string {
-  if (format === "json") return formatScanJson(result);
+function formatScan(result: Awaited<ReturnType<typeof scanPath>>, format: OutputFormat, verbose: boolean, includeRules = false): string {
+  if (format === "json") return formatScanJson(result, { includeRules });
   if (format === "sarif") return formatSarif(result);
   return formatScanResult(result, verbose);
+}
+
+async function printVersion(): Promise<void> {
+  const packageJson = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8")) as { version?: string };
+  console.log(packageJson.version ?? "unknown");
 }
 
 async function initConfig(values: string[]): Promise<void> {

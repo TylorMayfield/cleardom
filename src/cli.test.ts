@@ -36,6 +36,15 @@ test("help flags print usage without scanning", async () => {
   }
 });
 
+test("version flags print package version without scanning", async () => {
+  for (const flag of ["--version", "-v"]) {
+    const result = await execFileAsync(process.execPath, [cliPath, flag]);
+
+    assert.equal(result.stdout.trim(), "0.2.2");
+    assert.doesNotMatch(result.stdout, /ClearDOM score:/);
+  }
+});
+
 test("scan text output leads with fixes and keeps details behind verbose", async () => {
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
@@ -234,10 +243,10 @@ test("report writes shareable markdown, html, and json scan reports", async () =
   assert.equal(JSON.parse(json.stdout).activeFindings.length > 0, true);
 });
 
-test("scan --json includes score, findings, and rules", async () => {
+test("scan --json includes score and findings without the rule catalog by default", async () => {
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--json"]);
-  const json = JSON.parse(result.stdout) as { score: number; checkedFiles: number; findings: unknown[]; activeFindings: unknown[]; scoreBreakdown: { semanticClarity: number }; rules: unknown[]; standard: { id: string }; semanticAnalysis: { adapter: string }; semanticDiagnostics: unknown[] };
+  const json = JSON.parse(result.stdout) as { score: number; checkedFiles: number; findings: unknown[]; activeFindings: unknown[]; scoreBreakdown: { semanticClarity: number }; rules?: unknown[]; standard: { id: string }; semanticAnalysis: { adapter: string }; semanticDiagnostics: unknown[] };
 
   assert.equal(json.checkedFiles, 1);
   assert.equal(json.standard.id, "wcag22-aa");
@@ -247,6 +256,14 @@ test("scan --json includes score, findings, and rules", async () => {
   assert.equal(typeof json.scoreBreakdown.semanticClarity, "number");
   assert.equal(json.findings.length > 0, true);
   assert.equal(json.activeFindings.length > 0, true);
+  assert.equal("rules" in json, false);
+});
+
+test("scan --json --include-rules includes the rule catalog", async () => {
+  const fixture = await createFixture("<button />");
+  const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--json", "--include-rules"]);
+  const json = JSON.parse(result.stdout) as { rules: unknown[] };
+
   assert.equal(json.rules.length > 0, true);
 });
 

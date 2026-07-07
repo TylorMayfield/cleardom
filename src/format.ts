@@ -99,8 +99,14 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
   return lines.join("\n");
 }
 
-export function formatScanJson(result: ScanResult): string {
-  return JSON.stringify(result, null, 2);
+export function formatScanJson(result: ScanResult, options: { includeRules?: boolean } = {}): string {
+  const payload = options.includeRules ? result : withoutRules(result);
+  return JSON.stringify(payload, null, 2);
+}
+
+function withoutRules(result: ScanResult): Omit<ScanResult, "rules"> {
+  const { rules: _rules, ...payload } = result;
+  return payload;
 }
 
 export function formatScanHtml(result: ScanResult): string {

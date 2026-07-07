@@ -1,6 +1,6 @@
 {
   "name": "cleardom",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "Developer-first accessibility and readability scanner for React and React Native.",
   "type": "module",
   "license": "MIT",
@@ -30,7 +30,7 @@
     "LICENSE"
   ],
   "bin": {
-    "cleardom": "./dist/cli.js"
+    "cleardom": "dist/cli.js"
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",

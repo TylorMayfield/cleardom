@@ -1,4 +1,4 @@
-import { hasClickHandler, hasKeyboardSupport, hasTabStop, isNativeInteractive } from "../rule-utils.js";
+import { hasClickHandler, hasKeyboardSupport, hasTabStop, isFrameworkLink, isNativeInteractive } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const keyboardRule: RuleDefinition = {
@@ -30,6 +30,7 @@ export const keyboardRule: RuleDefinition = {
     return context.elements
       .filter((element) => hasClickHandler(element, context))
       .filter((element) => !isNativeInteractive(element.tagName))
+      .filter((element) => !isFrameworkLink(element, context))
       .filter((element) => !hasKeyboardSupport(element, context) || !hasTabStop(element, context))
       .map((element) => context.createFinding(this, element, "Use a native control or add tabIndex plus keyboard handlers."));
   }

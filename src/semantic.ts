@@ -7,11 +7,13 @@ type MutableElement = JsxElement & {
   textParts: string[];
 };
 
-type StaticValue = string | boolean | StaticObject;
+type StaticValue = string | boolean | StaticObject | StaticArray;
 
 type StaticObject = {
   [key: string]: StaticValue;
 };
+
+type StaticArray = StaticValue[];
 
 export type SemanticProject = {
   elementsByFile: Map<string, JsxElement[]>;
@@ -124,6 +126,10 @@ function parseSemanticSourceFile(sourceFile: ts.SourceFile, checker?: ts.TypeChe
   const importSources = collectImportSources(sourceFile);
 
   function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node) && visitMapCallback(node)) {
+      return;
+    }
+
     if (ts.isJsxElement(node)) {
       const element = createElement(node.openingElement.tagName, node.openingElement.attributes, node, node.openingElement, sourceFile, elements, stack, constants, importSources, checker);
       stack.push(element);
@@ -146,6 +152,28 @@ function parseSemanticSourceFile(sourceFile: ts.SourceFile, checker?: ts.TypeChe
     }
 
     ts.forEachChild(node, visit);
+  }
+
+  function visitMapCallback(node: ts.CallExpression): boolean {
+    if (!ts.isPropertyAccessExpression(node.expression) || node.expression.name.text !== "map") return false;
+    const source = evaluateExpression(node.expression.expression, sourceFile, constants, checker);
+    if (!Array.isArray(source)) return false;
+    const callback = node.arguments[0];
+    if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) return false;
+    const parameter = callback.parameters[0]?.name;
+    if (!parameter || !ts.isIdentifier(parameter)) return false;
+    const item = representativeArrayItem(source);
+    if (!item) return false;
+
+    const previous = constants.get(parameter.text);
+    constants.set(parameter.text, item);
+    visit(callback.body);
+    if (previous === undefined) {
+      constants.delete(parameter.text);
+    } else {
+      constants.set(parameter.text, previous);
+    }
+    return true;
   }
 
   visit(sourceFile);
@@ -299,6 +327,7 @@ function appendDirectText(node: ts.Node, sourceFile: ts.SourceFile, element: Mut
     } else if (ts.isJsxExpression(child) && child.expression) {
       const value = evaluateExpression(child.expression, sourceFile, constants, checker);
       if (typeof value === "string") element.textParts.push(value);
+      if (value === undefined && isLikelyTextExpression(child.expression)) element.textParts.push(child.expression.getText(sourceFile));
     }
   }
 }
@@ -331,6 +360,14 @@ function evaluateExpression(node: ts.Expression, sourceFile: ts.SourceFile, cons
   if (ts.isTemplateExpression(node) && node.templateSpans.length === 0) return node.head.text;
   if (ts.isParenthesizedExpression(node)) return evaluateExpression(node.expression, sourceFile, constants, checker);
   if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node)) return evaluateExpression(node.expression, sourceFile, constants, checker);
+  if (ts.isConditionalExpression(node)) {
+    const whenTrue = evaluateExpression(node.whenTrue, sourceFile, constants, checker);
+    const whenFalse = evaluateExpression(node.whenFalse, sourceFile, constants, checker);
+    if (typeof whenTrue === "string" && typeof whenFalse === "string" && whenTrue.trim() && whenFalse.trim()) {
+      return `${whenTrue} ${whenFalse}`;
+    }
+    return undefined;
+  }
   if (ts.isIdentifier(node)) return constants.get(node.text) ?? resolveAliasedConstant(node, sourceFile, constants, checker);
   if (ts.isPropertyAccessExpression(node)) {
     const target = evaluateExpression(node.expression, sourceFile, constants, checker);
@@ -340,6 +377,9 @@ function evaluateExpression(node: ts.Expression, sourceFile: ts.SourceFile, cons
     const target = evaluateExpression(node.expression, sourceFile, constants, checker);
     const key = evaluateExpression(node.argumentExpression, sourceFile, constants, checker);
     return isStaticObject(target) && typeof key === "string" ? target[key] : undefined;
+  }
+  if (ts.isArrayLiteralExpression(node)) {
+    return node.elements.map((element) => evaluateExpression(element, sourceFile, constants, checker)).filter((value): value is StaticValue => value !== undefined);
   }
   if (ts.isObjectLiteralExpression(node)) {
     const output: StaticObject = {};
@@ -361,6 +401,35 @@ function evaluateExpression(node: ts.Expression, sourceFile: ts.SourceFile, cons
     return output;
   }
   return undefined;
+}
+
+function representativeArrayItem(values: StaticArray): StaticValue | undefined {
+  const objects = values.filter(isStaticObject);
+  if (objects.length === 0) return values.find((value) => typeof value === "string" || typeof value === "boolean");
+
+  const output: StaticObject = {};
+  for (const object of objects) {
+    for (const [key, value] of Object.entries(object)) {
+      if (output[key] === undefined) {
+        output[key] = value;
+        continue;
+      }
+      if (typeof output[key] === "string" && typeof value === "string" && !String(output[key]).includes(value)) {
+        output[key] = `${output[key]} ${value}`;
+      }
+    }
+  }
+  return output;
+}
+
+function isLikelyTextExpression(node: ts.Expression): boolean {
+  if (ts.isIdentifier(node)) return /^(label|name|title|text|children)$/i.test(node.text);
+  if (ts.isPropertyAccessExpression(node)) return /^(label|name|title|text)$/i.test(node.name.text);
+  if (ts.isElementAccessExpression(node) && node.argumentExpression) {
+    const key = node.argumentExpression;
+    return ts.isStringLiteralLike(key) && /^(label|name|title|text)$/i.test(key.text);
+  }
+  return false;
 }
 
 function resolveAliasedConstant(node: ts.Identifier, sourceFile: ts.SourceFile, constants: Map<string, StaticValue>, checker: ts.TypeChecker | undefined): StaticValue | undefined {

@@ -17,6 +17,13 @@ export function isNativeInteractive(tagName: string): boolean {
   return ["button", "a", "input", "select", "textarea"].includes(tagName.toLowerCase());
 }
 
+export function isFrameworkLink(element: JsxElement, context: RuleContext): boolean {
+  const tag = element.tagName.split(".").at(-1) ?? element.tagName;
+  if (tag !== "Link") return false;
+  if (!["next/link", "gatsby", "@remix-run/react", "react-router", "react-router-dom"].includes(element.importSource ?? "")) return false;
+  return context.hasAttribute(element, "href") || context.hasAttribute(element, "to");
+}
+
 export function hasClickHandler(element: JsxElement, context: RuleContext): boolean {
   return [
     "onClick",
@@ -32,6 +39,7 @@ export function isWebInteractive(element: JsxElement, context: RuleContext): boo
   const tag = element.tagName.toLowerCase();
   const role = elementRole(element, context);
   return ["button", "a"].includes(tag)
+    || isFrameworkLink(element, context)
     || ["button", "link", "menuitem", "tab", "switch", "checkbox", "radio"].includes(role ?? "");
 }
 
@@ -233,5 +241,9 @@ function expressionStaticValue(value: string): string | undefined {
   const trimmed = value.trim();
   const literal = trimmed.match(/^["'`]([^"'`{}]+)["'`]$/);
   if (literal) return literal[1];
+  const conditional = trimmed.match(/^[\w$.()[\]\s?!:=&|+-]+?\?\s*(["'`])([^"'`{}]+)\1\s*:\s*(["'`])([^"'`{}]+)\3$/);
+  if (conditional && conditional[2].trim() && conditional[4].trim()) {
+    return `${conditional[2]} ${conditional[4]}`;
+  }
   return undefined;
 }

@@ -21,6 +21,12 @@ export const unnamedControlRule: RuleDefinition = {
   fixable: true,
   summary: "Icon-only or empty controls can be announced as just \"button\" or \"link\".",
   guidance: "Add visible text, aria-label, aria-labelledby, or a component prop that maps to an accessible name.",
+  remediation: {
+    before: "<button><XIcon /></button>",
+    after: '<button aria-label="Close cart"><XIcon /></button>',
+    safeAutofix: "Add an accessible name only when the intended control action is clear from surrounding code.",
+    manualVerification: "Confirm the accessible name describes the action and, when visible text exists, includes that visible label."
+  },
   examples: [
     { label: "Web", code: '<button aria-label="Close cart"><XIcon /></button>' },
     { label: "Visible text", code: "<button>Close cart</button>" }

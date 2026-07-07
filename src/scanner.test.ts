@@ -16,6 +16,7 @@ test("accepts visible text and aria labels as accessible names", () => {
   assert.equal(scanSource("<button><span>Close</span></button>", "Button.tsx").some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
   assert.equal(scanSource('<button aria-label="Close"><XIcon /></button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
   assert.equal(scanSource('<button aria-label={"Close"}><XIcon /></button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
+  assert.equal(scanSource('<button aria-label={copied ? "Copied install command" : "Copy install command"}><CopyIcon /></button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
   assert.equal(scanSource('<button>{"Close"}</button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
   assert.equal(scanSource('<button aria-labelledby="close-label"><XIcon /></button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
   assert.equal(scanSource('<button title="Close"><XIcon /></button>', "Button.tsx").some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
@@ -145,6 +146,33 @@ test("flags image alt, anchor href, keyboard, and heading order issues", () => {
   assert.equal(findings.some((finding) => finding.ruleId === "CDOM_4_1_2_ANCHOR_HREF"), true);
   assert.equal(findings.some((finding) => finding.ruleId === "CDOM_2_1_1_KEYBOARD"), true);
   assert.equal(findings.some((finding) => finding.ruleId === "CDOM_1_3_1_HEADING_ORDER"), true);
+  assert.equal(scanSource('import Link from "next/link";\n<Link href="/about" onClick={track}>About</Link>', "Navigation.tsx").some((finding) => finding.ruleId === "CDOM_2_1_1_KEYBOARD"), false);
+});
+
+test("accepts Next Link text rendered from static map item properties", () => {
+  const source = `
+    import Link from "next/link";
+    const navLinks = [
+      { name: "Made", href: "/apps" },
+      { name: "Blog", href: "/blog" }
+    ];
+    export function Navigation() {
+      return (
+        <nav>
+          {navLinks.map((item) => (
+            <Link key={item.name} href={item.href}>{item.name}</Link>
+          ))}
+          {navLinks.map((item) => (
+            <Link key={item.href} href={item.href} onClick={closeMenu}>{item.name}</Link>
+          ))}
+        </nav>
+      );
+    }
+  `;
+  const findings = scanSource(source, "Navigation.tsx");
+
+  assert.equal(findings.some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
+  assert.equal(findings.some((finding) => finding.ruleId === "CDOM_2_1_1_KEYBOARD"), false);
 });
 
 test("flags framework template click handlers without keyboard support", () => {
