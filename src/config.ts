@@ -114,8 +114,8 @@ const componentPresetMappings: Record<ComponentPreset, Record<string, ComponentM
   },
   "ant-design": {
     Button: { importSource: "antd", role: "button", nameProps: ["aria-label"], childLabelProps: ["children"], disabledProps: ["disabled"] },
-    Input: { importSource: "antd", role: "textbox", nameProps: ["aria-label", "placeholder", "label"], valueProps: ["value", "defaultValue"], disabledProps: ["disabled"] },
-    TextArea: { importSource: "antd", role: "textbox", nameProps: ["aria-label", "placeholder", "label"], valueProps: ["value", "defaultValue"], disabledProps: ["disabled"] },
+    Input: { importSource: "antd", role: "textbox", nameProps: ["aria-label", "label"], valueProps: ["value", "defaultValue"], disabledProps: ["disabled"] },
+    TextArea: { importSource: "antd", role: "textbox", nameProps: ["aria-label", "label"], valueProps: ["value", "defaultValue"], disabledProps: ["disabled"] },
     Checkbox: { importSource: "antd", role: "checkbox", nameProps: ["aria-label", "label"], childLabelProps: ["children"], valueProps: ["value"], disabledProps: ["disabled"] },
     Radio: { importSource: "antd", role: "radio", nameProps: ["aria-label", "label"], childLabelProps: ["children"], valueProps: ["value"], disabledProps: ["disabled"] },
     Switch: { importSource: "antd", role: "switch", nameProps: ["aria-label", "label"], disabledProps: ["disabled"] }

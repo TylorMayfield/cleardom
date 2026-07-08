@@ -239,7 +239,10 @@ test("report writes shareable markdown, html, and json scan reports", async () =
   assert.match(markdown.stdout, /Wrote ClearDOM markdown report/);
   assert.match(await fs.readFile(markdownPath, "utf8"), /# ClearDOM Scan Report/);
   assert.match(html.stdout, /Wrote ClearDOM html report/);
-  assert.match(await fs.readFile(htmlPath, "utf8"), /<!doctype html>/);
+  const htmlReport = await fs.readFile(htmlPath, "utf8");
+  assert.match(htmlReport, /<!doctype html>/);
+  assert.match(htmlReport, /id="finding-search"/);
+  assert.match(htmlReport, /id="severity-filter"/);
   assert.equal(JSON.parse(json.stdout).activeFindings.length > 0, true);
 });
 

@@ -35,6 +35,10 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
     "test": "pnpm build && node --test dist/**/*.test.js",
+    "test:fast": "pnpm build && node scripts/run-tests.mjs fast",
+    "test:runtime": "pnpm build && node scripts/run-tests.mjs runtime",
+    "scan:src": "pnpm build && node dist/cli.js scan src --fail-on none",
+    "docs:check": "pnpm build && node scripts/check-docs.mjs",
     "start": "pnpm build && node dist/cli.js",
     "benchmark": "pnpm build && node scripts/benchmark.mjs",
     "prepack": "pnpm build"

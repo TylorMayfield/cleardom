@@ -145,7 +145,7 @@ export function recommendedConfig(detection: StackDetection): ScanConfig {
     components: {
       IconButton: { role: "button", nameProps: ["aria-label", "label", "title"], disabledProps: ["disabled", "isDisabled"] },
       Button: { role: "button", asProp: "as", nameProps: ["aria-label", "label"], childLabelProps: ["children"], disabledProps: ["disabled", "isDisabled"] },
-      TextInput: { role: "textbox", nameProps: ["aria-label", "label", "placeholder"], valueProps: ["value", "defaultValue"], disabledProps: ["disabled", "isDisabled"] },
+      TextInput: { role: "textbox", nameProps: ["aria-label", "label"], valueProps: ["value", "defaultValue"], disabledProps: ["disabled", "isDisabled"] },
       Field: { wrapper: true, labelProps: ["label"] }
     },
     rules: {

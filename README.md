@@ -40,9 +40,15 @@ npx cleardom@latest review . --dry-run
 ```sh
 pnpm install
 pnpm build
+pnpm scan:src
 pnpm start -- scan examples/react-app
+pnpm test:fast
+pnpm test:runtime
 pnpm test
+pnpm docs:check
 ```
+
+Use `pnpm scan:src` for ClearDOM's own source-health check. The examples include intentionally broken fixtures for rule coverage, and generated WCAG benchmark reports are skipped during ordinary recursive scans unless you target that reports directory directly.
 
 ## WCAG benchmark
 
@@ -86,7 +92,7 @@ cleardom standards
 cleardom fix [path] [--preview] [--apply] [--plan --format text|json|markdown] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
 ```
 
-`doctor` checks browser availability, ClearDOM config, GitHub token context, include/exclude patterns, baseline setup, semantic mode, runtime URL readiness, and native simulator readiness when enabled. `browser install` adds a managed Chrome for runtime scans when the system has no usable browser. `report` writes shareable local scan reports outside benchmark mode. `fix` is an agent-assisted remediation workflow; `fix --preview` shows safe mechanical diffs, `fix --apply` applies only safe transforms, and `fix --plan` groups work by rule/file/owner. Use `suppress` to baseline selected accepted findings, then `baseline update` and `baseline prune` to refresh or remove stale adoption debt.
+`doctor` checks browser availability, ClearDOM config, GitHub token context, include/exclude patterns, baseline setup, semantic mode, runtime URL readiness, and native simulator readiness when enabled. `browser install` adds a managed Chrome for runtime scans when the system has no usable browser. `report` writes shareable local scan reports outside benchmark mode with grouped findings and client-side filters for severity, confidence, and search. `fix` is an agent-assisted remediation workflow; `fix --preview` shows safe mechanical diffs, `fix --apply` applies only safe transforms, and `fix --plan` groups work by rule/file/owner. Use `suppress` to baseline selected accepted findings, then `baseline update` and `baseline prune` to refresh or remove stale adoption debt.
 
 ## Product onboarding
 

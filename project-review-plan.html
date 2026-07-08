@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClearDOM Project Review Plan</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18202f;
+      --muted: #5b6472;
+      --line: #d8dee8;
+      --panel: #ffffff;
+      --soft: #f4f7fa;
+      --good: #176b52;
+      --warn: #9a5b08;
+      --risk: #a23434;
+      --focus: #285d9f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      line-height: 1.55;
+    }
+
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 36px 0 56px;
+    }
+
+    header {
+      padding: 28px 0 20px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 26px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.2;
+      margin: 0;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      max-width: 760px;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      font-size: 1rem;
+      margin-bottom: 6px;
+    }
+
+    p {
+      margin: 8px 0 0;
+    }
+
+    a {
+      color: var(--focus);
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: #e9eef5;
+      font-size: 0.92em;
+    }
+
+    .deck {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 20px 0 0;
+    }
+
+    .metric,
+    section,
+    .item,
+    .work-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .metric {
+      padding: 14px;
+      min-height: 94px;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 1.5rem;
+    }
+
+    section {
+      padding: 20px;
+      margin: 16px 0;
+    }
+
+    .lead {
+      color: var(--muted);
+      max-width: 820px;
+      font-size: 1rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .item {
+      padding: 14px;
+      background: var(--soft);
+    }
+
+    .item p {
+      color: var(--muted);
+    }
+
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 8px;
+      margin-bottom: 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      border: 1px solid currentColor;
+    }
+
+    .good {
+      color: var(--good);
+    }
+
+    .warn {
+      color: var(--warn);
+    }
+
+    .risk {
+      color: var(--risk);
+    }
+
+    .work-list {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .work-card {
+      padding: 14px;
+    }
+
+    .work-card ol,
+    .work-card ul {
+      padding-left: 20px;
+      margin: 10px 0 0;
+    }
+
+    li + li {
+      margin-top: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      text-align: left;
+      vertical-align: top;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    th {
+      background: #edf2f7;
+      font-size: 0.86rem;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .evidence {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    @media (max-width: 820px) {
+      .deck,
+      .grid,
+      .work-list {
+        grid-template-columns: 1fr;
+      }
+
+      main {
+        width: min(100% - 22px, 1120px);
+        padding-top: 20px;
+      }
+
+      h1 {
+        font-size: 1.75rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>ClearDOM Project Review Plan</h1>
+      <p class="lead">Review date: July 8, 2026. ClearDOM is in a strong early-product shape: the core scanner, CLI, runtime checks, rules, fixtures, and release packaging all build and test cleanly. The next work should focus on reducing adoption friction and tightening the product edges that can confuse a first-time user.</p>
+      <div class="deck" aria-label="Review snapshot">
+        <div class="metric"><span>Test suite</span><strong>160 passing</strong><span>0 failures, about 70s</span></div>
+        <div class="metric"><span>Product source scan</span><strong>100/100</strong><span>67 source files, 0 findings</span></div>
+        <div class="metric"><span>Rule catalog</span><strong>80+ rules</strong><span>Static, runtime, native, AAA guidance</span></div>
+        <div class="metric"><span>Main risk</span><strong>Signal clarity</strong><span>Fixtures and reports can swamp default scans</span></div>
+      </div>
+    </header>
+
+    <section>
+      <h2>What Is Working</h2>
+      <div class="grid">
+        <article class="item">
+          <span class="tag good">Strong</span>
+          <h3>Core scanner architecture is coherent</h3>
+          <p><code>src/scanner.ts</code> has a clear flow: resolve config, collect files, parse semantic or lightweight source, run rules, add runtime findings, apply suppressions and baseline, score, then format. That is the right backbone for a CLI scanner.</p>
+        </article>
+        <article class="item">
+          <span class="tag good">Strong</span>
+          <h3>Framework coverage is unusually broad</h3>
+          <p>Adapters cover JSX/TSX, HTML, Vue, Svelte, Astro, Angular templates, and MDX. Fixtures also exercise Next.js, React Native, monorepos, framework matrices, and design-system mappings.</p>
+        </article>
+        <article class="item">
+          <span class="tag good">Strong</span>
+          <h3>The adoption story is thoughtful</h3>
+          <p><code>init</code>, <code>doctor</code>, baselines, suppressions, PR review, SARIF, GitHub inline comments, and <code>fix</code> prompts make this feel like a product instead of just a rules library.</p>
+        </article>
+        <article class="item">
+          <span class="tag good">Strong</span>
+          <h3>Tests cover real product behavior</h3>
+          <p>The suite exercises CLI commands, source adapters, runtime interactions, rule behavior, GitHub review helpers, standards selection, benchmarks, and fixtures. This is a good safety net for continued iteration.</p>
+        </article>
+        <article class="item">
+          <span class="tag good">Strong</span>
+          <h3>WCAG positioning is credible</h3>
+          <p>The benchmark fixture and WCAG documentation give the project a defensible standards story. The split between automated, needs-review, and manual-guidance rules is exactly the right honesty.</p>
+        </article>
+        <article class="item">
+          <span class="tag good">Strong</span>
+          <h3>Runtime checks add real differentiation</h3>
+          <p>Chromium-backed checks for contrast, focus visibility, target size, reflow, skip links, text spacing, hover/focus content, keyboard traps, and focus obstruction cover issues static source scans cannot see.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>What Is Not Working Yet</h2>
+      <div class="grid">
+        <article class="item">
+          <span class="tag risk">High impact</span>
+          <h3>Default project scans are too noisy in this repo</h3>
+          <p><code>node dist/cli.js scan . --format json</code> found 390 findings and a 5/100 score because it scans intentional broken examples and generated benchmark reports. <code>node dist/cli.js scan src</code> is clean. The product needs a root config or documented dev command that separates source health from fixture health.</p>
+        </article>
+        <article class="item">
+          <span class="tag warn">Maintainability</span>
+          <h3>CLI responsibilities are concentrating</h3>
+          <p><code>src/cli.ts</code> is about 1,112 lines and owns command routing, argument parsing, config initialization, install flows, baseline commands, browser commands, native commands, and help text. It works, but adding commands will keep getting more brittle.</p>
+        </article>
+        <article class="item">
+          <span class="tag warn">Maintainability</span>
+          <h3>HTML report rendering is duplicated</h3>
+          <p><code>src/format.ts</code> and <code>src/report.ts</code> both implement similar ClearDOM scan report HTML. That invites drift between <code>scan --format html</code> and <code>report --format html</code>.</p>
+        </article>
+        <article class="item">
+          <span class="tag warn">Product</span>
+          <h3>First-run guidance can still overwhelm</h3>
+          <p>The README is comprehensive, but it presents a lot of commands and configuration at once. A first-time user needs a smaller happy path: local scan, changed-file scan, baseline, PR review, runtime checks.</p>
+        </article>
+        <article class="item">
+          <span class="tag warn">Signal quality</span>
+          <h3>Manual-guidance rules need careful defaults</h3>
+          <p>The catalog includes many AAA and contextual risk rules. That breadth is useful, but if enabled too eagerly it can make ClearDOM feel noisy. The UI and CLI should keep confidence, detection mode, and next action very visible.</p>
+        </article>
+        <article class="item">
+          <span class="tag warn">Verification</span>
+          <h3>Runtime tests are valuable but slow</h3>
+          <p>The full suite passed, but runtime interaction tests dominate wall time. As more runtime checks land, the project will need a split between fast unit checks and slower browser integration checks.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Priority Plan</h2>
+      <div class="work-list">
+        <article class="work-card">
+          <h3>Next 1-2 Weeks</h3>
+          <ol>
+            <li>Add a root <code>cleardom.config.json</code> or dev script that scans <code>src</code> by default and excludes generated benchmark reports.</li>
+            <li>Split <code>src/cli.ts</code> command handlers into focused modules: scan, init, install, review, baseline, fix, browser, native.</li>
+            <li>Unify the duplicated HTML report builder so <code>scan --format html</code> and <code>report --format html</code> share one renderer.</li>
+            <li>Add <code>pnpm test:fast</code> and <code>pnpm test:runtime</code> scripts so local development does not always require the full browser suite.</li>
+          </ol>
+        </article>
+        <article class="work-card">
+          <h3>Next 3-6 Weeks</h3>
+          <ol>
+            <li>Improve first-run output: show the top 3 findings, explain why anything was skipped, and offer one exact next command.</li>
+            <li>Make rule docs generated from the rule catalog so README anchors, <code>explain</code>, SARIF metadata, and docs cannot drift.</li>
+            <li>Expand safe mechanical fixes for high-confidence static rules: missing decorative image alt, native roles, positive tabindex, simple missing labels.</li>
+            <li>Add fixture-level expectations for intentional example failures so noisy fixtures are tested without being confused with repo health.</li>
+          </ol>
+        </article>
+        <article class="work-card">
+          <h3>Next 6-10 Weeks</h3>
+          <ol>
+            <li>Ship a clearer report experience: grouped findings by route/file/rule, severity filters, confidence filters, and copyable remediation steps.</li>
+            <li>Add more runtime route ergonomics: clearer crawl diagnostics, route budgets, auth failure hints, and Storybook story grouping.</li>
+            <li>Review component preset semantics, especially whether placeholder-like props should count as names for design-system text inputs.</li>
+            <li>Publish a small public benchmark summary that compares ClearDOM, Axe, and pa11y without requiring users to run the benchmark locally.</li>
+          </ol>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Concrete Backlog</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Priority</th>
+            <th>Work Item</th>
+            <th>Why It Matters</th>
+            <th>Acceptance Check</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>P0</td>
+            <td>Create a repo-local scan config or <code>scan:src</code> script.</td>
+            <td>Prevents intentional fixtures and generated reports from making ClearDOM look broken when run against itself.</td>
+            <td><code>pnpm start -- scan .</code> or the documented dev command reports product-source health without fixture noise.</td>
+          </tr>
+          <tr>
+            <td>P0</td>
+            <td>Ignore generated benchmark report artifacts during scans.</td>
+            <td>Generated HTML/Markdown reports under <code>examples/wcag-benchmark/reports</code> created many self-scan findings.</td>
+            <td>Full-repo scan no longer includes <code>examples/wcag-benchmark/reports/*</code> unless explicitly targeted.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Extract CLI parsing and command handlers.</td>
+            <td>Reduces regression risk as commands keep growing.</td>
+            <td><code>src/cli.ts</code> becomes a thin router; existing CLI tests still pass unchanged.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Consolidate report HTML.</td>
+            <td>Keeps scan HTML and shareable report HTML visually and semantically aligned.</td>
+            <td>One renderer serves both paths; tests cover both commands.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Split test scripts by speed and dependency.</td>
+            <td>Shortens local feedback while preserving browser coverage.</td>
+            <td><code>pnpm test:fast</code> runs source/CLI/rule tests; <code>pnpm test:runtime</code> runs Chromium tests.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Generate command and rule docs from source metadata.</td>
+            <td>The README is large and likely to drift as commands and rule metadata evolve.</td>
+            <td>A docs generation check fails when command help, README command list, and rule catalog diverge.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Audit design-system placeholder semantics.</td>
+            <td>Current mappings can treat placeholder-like props as labels for custom text inputs. That may hide real label debt.</td>
+            <td>Explicit tests decide the intended behavior for <code>TextInput placeholder="Email"</code> with no label prop.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Improve HTML report interaction.</td>
+            <td>Reports are useful, but larger scans need filtering and grouping to stay readable.</td>
+            <td>Reports support grouped navigation and filters without losing static accessibility.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Evidence Checked</h2>
+      <p class="evidence">Commands run: <code>pnpm test</code>, <code>node dist/cli.js scan src --format json --fail-on none</code>, <code>node dist/cli.js scan . --format json --fail-on none</code>, <code>git status --short</code>, source reads across <code>src/cli.ts</code>, <code>src/scanner.ts</code>, <code>src/runtime.ts</code>, <code>src/github.ts</code>, <code>src/config.ts</code>, <code>src/report.ts</code>, <code>src/format.ts</code>, <code>src/project.ts</code>, and rule utilities.</p>
+      <p class="evidence">Current git worktree was clean before this review artifact was created.</p>
+    </section>
+  </main>
+</body>
+</html>

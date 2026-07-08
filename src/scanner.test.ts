@@ -130,6 +130,21 @@ test("uses design-system component mappings for textbox labels", () => {
   assert.equal(scanSource('<TextInput label="Email" placeholder="Email" />', "Form.tsx", options).some((finding) => finding.ruleId === "CDOM_3_3_2_PLACEHOLDER_LABEL"), false);
 });
 
+test("placeholder-like component props do not satisfy textbox labels", () => {
+  const options = {
+    components: {
+      TextInput: { role: "textbox" as const, nameProps: ["label", "placeholder"] }
+    }
+  };
+  const placeholderOnly = scanSource('<TextInput placeholder="Email" />', "Form.tsx", options);
+  const labelled = scanSource('<TextInput label="Email" placeholder="Email" />', "Form.tsx", options);
+
+  assert.equal(placeholderOnly.some((finding) => finding.ruleId === "CDOM_3_3_2_PLACEHOLDER_LABEL"), true);
+  assert.equal(placeholderOnly.some((finding) => finding.ruleId === "CDOM_4_1_2_FORM_LABEL"), true);
+  assert.equal(labelled.some((finding) => finding.ruleId === "CDOM_3_3_2_PLACEHOLDER_LABEL"), false);
+  assert.equal(labelled.some((finding) => finding.ruleId === "CDOM_4_1_2_FORM_LABEL"), false);
+});
+
 test("flags image alt, anchor href, keyboard, and heading order issues", () => {
   const source = `
     <main>
@@ -574,6 +589,24 @@ test("component mappings honor import source, polymorphic props, disabled props,
   assert.equal(mapped.some((finding) => finding.excerpt.includes("<Field label=\"Email\"")), false);
   assert.equal(mapped.some((finding) => finding.excerpt.includes("<SearchField value=\"query\"")), false);
   assert.equal(mapped.some((finding) => finding.excerpt.includes("OtherButton")), false);
+});
+
+test("recursive scans skip generated benchmark reports unless targeted directly", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cleardom-"));
+  const sourceDir = path.join(directory, "src");
+  const reportsDir = path.join(directory, "examples", "wcag-benchmark", "reports");
+  await fs.mkdir(sourceDir, { recursive: true });
+  await fs.mkdir(reportsDir, { recursive: true });
+  await fs.writeFile(path.join(sourceDir, "App.tsx"), '<button aria-label="Close" />', "utf8");
+  await fs.writeFile(path.join(reportsDir, "benchmark-report.html"), "<button />", "utf8");
+
+  const recursive = await scanPath(directory);
+  const targeted = await scanPath(reportsDir);
+
+  assert.equal(recursive.checkedFiles, 1);
+  assert.equal(recursive.findings.length, 0);
+  assert.equal(targeted.checkedFiles, 1);
+  assert.equal(targeted.findings.some((finding) => finding.file.endsWith("benchmark-report.html")), true);
 });
 
 const presetFixtures: Array<{ preset: import("./types.js").ComponentPreset; source: string; missingExcerpt: string; acceptedExcerpt: string }> = [

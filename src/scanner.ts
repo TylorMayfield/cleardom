@@ -213,7 +213,7 @@ export function shouldFail(result: ScanResult, failOn: ResolvedScanOptions["fail
   return result.activeFindings.some((finding) => finding.severity === "critical" || finding.severity === "warning");
 }
 
-async function collectFiles(targetPath: string, options: ResolvedScanOptions): Promise<string[]> {
+async function collectFiles(targetPath: string, options: ResolvedScanOptions, scanRoot = path.resolve(targetPath)): Promise<string[]> {
   const stat = await fs.stat(targetPath);
   if (stat.isFile()) {
     return shouldScanFile(targetPath, options) ? [targetPath] : [];
@@ -225,8 +225,8 @@ async function collectFiles(targetPath: string, options: ResolvedScanOptions): P
   for (const entry of entries) {
     const fullPath = path.join(targetPath, entry.name);
     if (entry.isDirectory()) {
-      if (!ignoredDirectories.has(entry.name) && !isExcluded(fullPath, options)) {
-        files.push(...await collectFiles(fullPath, options));
+      if (!ignoredDirectories.has(entry.name) && !isGeneratedOutputDirectory(fullPath, scanRoot) && !isExcluded(fullPath, options)) {
+        files.push(...await collectFiles(fullPath, options, scanRoot));
       }
       continue;
     }
@@ -237,6 +237,13 @@ async function collectFiles(targetPath: string, options: ResolvedScanOptions): P
   }
 
   return files.sort();
+}
+
+function isGeneratedOutputDirectory(directory: string, scanRoot: string): boolean {
+  const resolvedDirectory = path.resolve(directory);
+  if (resolvedDirectory === path.resolve(scanRoot)) return false;
+  const normalized = resolvedDirectory.replace(/\\/g, "/");
+  return normalized.endsWith("/examples/wcag-benchmark/reports") || normalized.includes("/examples/wcag-benchmark/reports/");
 }
 
 async function discoverRuntimeRoutes(root: string, options: ResolvedScanOptions): Promise<{ routes: string[]; diagnostics: RuntimeDiagnostic[] }> {

@@ -127,7 +127,7 @@ export function staticAttributeValue(element: JsxElement, context: RuleContext, 
 }
 
 export function hasFormLabel(element: JsxElement, context: RuleContext): boolean {
-  for (const prop of componentNameProps(element, context)) {
+  for (const prop of componentFormLabelProps(element, context)) {
     const value = staticAttributeValue(element, context, prop);
     if (value?.trim()) return true;
   }
@@ -192,6 +192,10 @@ function componentNameProps(element: JsxElement, context: RuleContext): string[]
     ...(mapping?.labelProps ?? []),
     ...(mapping?.childLabelProps ?? [])
   ];
+}
+
+function componentFormLabelProps(element: JsxElement, context: RuleContext): string[] {
+  return componentNameProps(element, context).filter((prop) => !/placeholder/i.test(prop));
 }
 
 function componentVisibleLabelProps(element: JsxElement, context: RuleContext): string[] {

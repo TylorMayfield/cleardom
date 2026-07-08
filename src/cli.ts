@@ -6,6 +6,8 @@ import { promisify } from "node:util";
 import { detectAgents, installAgents, parseAgentId } from "./agents.js";
 import { mergeBaselineFindings, pruneBaselineFindings, readBaseline, writeBaseline, writeBaselineFile } from "./baseline.js";
 import { installManagedBrowser } from "./browser.js";
+import { help } from "./cli-help.js";
+import { parseBaselinePolicy, parseCommentMode, parseComponentPreset, parseFormat, parseReportFormat, parseRuleOption, parseSemanticMode, parseSeverity, requireValue } from "./cli-options.js";
 import { resolveScanOptions } from "./config.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
 import { formatAgentFixPrompt } from "./fix.js";
@@ -18,7 +20,7 @@ import { formatReport, type ReportFormat } from "./report.js";
 import { findRule, normalizeRuleId, rules, summarizeRule } from "./rules/index.js";
 import { scanPath, scanUrl, shouldFail } from "./scanner.js";
 import { standards } from "./standards.js";
-import type { ComponentPreset, FailOn, Finding, OutputFormat, PrBaselinePolicy, PrCommentMode, RuleOption, ScanConfig, ScanOptions, SemanticMode, Severity } from "./types.js";
+import type { FailOn, Finding, OutputFormat, ScanConfig, ScanOptions } from "./types.js";
 
 const args = process.argv.slice(2).filter((arg, index) => index !== 0 || arg !== "--");
 const command = args[0] ?? "scan";
@@ -817,84 +819,6 @@ function parseFailOn(value: string): FailOn {
     return value;
   }
   throw new Error("--fail-on must be one of: none, critical, warning, findings, regression");
-}
-
-function parseFormat(value: string): OutputFormat {
-  if (value === "text" || value === "json" || value === "sarif" || value === "html") return value;
-  throw new Error("--format must be one of: text, json, sarif, html");
-}
-
-function parseReportFormat(value: string): ReportFormat {
-  if (value === "html" || value === "markdown" || value === "json") return value;
-  throw new Error("--format must be one of: html, markdown, json");
-}
-
-function parseSemanticMode(value: string): SemanticMode {
-  if (value === "auto" || value === "off" || value === "required") return value;
-  throw new Error("--semantic must be one of: auto, off, required");
-}
-
-function parseSeverity(value: string): Severity {
-  if (value === "critical" || value === "warning" || value === "info") return value;
-  throw new Error("--severity-threshold must be one of: critical, warning, info");
-}
-
-function parseCommentMode(value: string): PrCommentMode {
-  if (value === "off" || value === "summary" || value === "inline" || value === "both") return value;
-  throw new Error("--comment-mode must be one of: off, summary, inline, both");
-}
-
-function parseBaselinePolicy(value: string): PrBaselinePolicy {
-  if (value === "new" || value === "all") return value;
-  throw new Error("--baseline-policy must be one of: new, all");
-}
-
-function parseComponentPreset(value: string): ComponentPreset {
-  if (value === "radix" || value === "mui" || value === "react-aria" || value === "react-native" || value === "chakra" || value === "ant-design" || value === "headless-ui" || value === "mantine" || value === "react-bootstrap") return value;
-  throw new Error("--component-preset must be one of: radix, mui, react-aria, react-native, chakra, ant-design, headless-ui, mantine, react-bootstrap");
-}
-
-function parseRuleOption(value: string): { id: string; option: RuleOption } {
-  const [id, option] = value.split("=");
-  if (!id || !option) {
-    throw new Error("--rule must look like CDOM_4_1_2_UNNAMED_CONTROL=off or CDOM_4_1_2_UNNAMED_CONTROL=warning");
-  }
-  if (option === "off" || option === "critical" || option === "warning" || option === "info") {
-    return { id, option };
-  }
-  throw new Error("--rule supports off, critical, warning, or info");
-}
-
-function requireValue(values: string[], index: number, flag: string): string {
-  const value = values[index + 1];
-  if (!value || value.startsWith("--")) {
-    throw new Error(`${flag} requires a value`);
-  }
-  return value;
-}
-
-function help(): void {
-  console.log(`ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
-
-Usage:
-  cleardom [path|url] [--diff] [--format text|json|sarif|html]
-  cleardom install [--yes] [--agents] [--github-actions] [--agent codex|claude|cursor]
-  cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]
-  cleardom scan [path|url] [--diff] [--format text|json|sarif|html] [--include-rules] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
-  cleardom ci [path] [--format text|json|sarif|html] [--include-rules] [--baseline cleardom-baseline.json]
-  cleardom doctor [path] [--config cleardom.config.json] [--runtime-url http://localhost:3000]
-  cleardom report [path|url] [--format html|markdown|json] [--output cleardom-report.html]
-  cleardom review [path] [--dry-run] [--max-comments 20] [--severity-threshold critical|warning|info] [--comment-mode off|summary|inline|both] [--changed-files-only] [--baseline-policy new|all] [--status-check-name "ClearDOM PR review"] [--upload-sarif]
-  cleardom suppress [path] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1] [--baseline cleardom-baseline.json]
-  cleardom baseline update|prune [path] [--baseline cleardom-baseline.json]
-  cleardom browser install
-  cleardom native scan [path] [--format text|json|sarif|html] [--include-rules]
-  cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
-  cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
-  cleardom rules
-  cleardom standards
-  cleardom fix [path] [--preview] [--apply] [--plan --format text|json|markdown] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
-`);
 }
 
 async function diffIncludes(target: string, options: ScanOptions): Promise<string[]> {
