@@ -127,13 +127,14 @@ function explain(ruleId: string): void {
   }
 }
 
-function parseScanArgs(values: string[]): { target: string; format?: OutputFormat; writeBaseline?: string; diff: boolean; includeRules: boolean; options: ScanOptions } {
+function parseScanArgs(values: string[]): { target: string; format?: OutputFormat; writeBaseline?: string; diff: boolean; includeRules: boolean; scoreOnly: boolean; options: ScanOptions } {
   const options: ScanOptions = {};
   let target = ".";
   let format: OutputFormat | undefined;
   let writeBaselinePath: string | undefined;
   let diff = false;
   let includeRules = false;
+  let scoreOnly = false;
 
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
@@ -145,6 +146,11 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
 
     if (value === "--include-rules") {
       includeRules = true;
+      continue;
+    }
+
+    if (value === "--score") {
+      scoreOnly = true;
       continue;
     }
 
@@ -225,7 +231,7 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
     }
   }
 
-  return { target, format, writeBaseline: writeBaselinePath, diff, includeRules, options };
+  return { target, format, writeBaseline: writeBaselinePath, diff, includeRules, scoreOnly, options };
 }
 
 async function installCommand(values: string[]): Promise<void> {
@@ -374,7 +380,7 @@ async function runScan(command: "scan" | "ci", values: string[]): Promise<void> 
   if (parsed.writeBaseline) {
     await writeBaseline(parsed.writeBaseline, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
   }
-  console.log(formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose, parsed.includeRules));
+  console.log(await formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose, parsed.includeRules, parsed.scoreOnly));
   process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
 }
 
@@ -773,7 +779,7 @@ async function nativeCommand(values: string[]): Promise<void> {
   const resolvedOptions = await resolveScanOptions({ ...parsed.options, native: { ...parsed.options.native, enabled: true } });
   const staticResult = await scanPath(parsed.target, resolvedOptions);
   const result = await runNativeScan(parsed.target, resolvedOptions, staticResult);
-  console.log(formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose, parsed.includeRules));
+  console.log(await formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose, parsed.includeRules, parsed.scoreOnly));
   process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
 }
 
@@ -884,15 +890,20 @@ async function pathExists(value: string): Promise<boolean> {
   }
 }
 
-function formatScan(result: Awaited<ReturnType<typeof scanPath>>, format: OutputFormat, verbose: boolean, includeRules = false): string {
+async function formatScan(result: Awaited<ReturnType<typeof scanPath>>, format: OutputFormat, verbose: boolean, includeRules = false, scoreOnly = false): Promise<string> {
+  if (scoreOnly) return String(result.score);
   if (format === "json") return formatScanJson(result, { includeRules });
   if (format === "sarif") return formatSarif(result);
-  return formatScanResult(result, verbose);
+  return formatScanResult(result, verbose, await packageVersion());
 }
 
 async function printVersion(): Promise<void> {
+  console.log(await packageVersion());
+}
+
+async function packageVersion(): Promise<string> {
   const packageJson = JSON.parse(await fs.readFile(new URL("../package.json", import.meta.url), "utf8")) as { version?: string };
-  console.log(packageJson.version ?? "unknown");
+  return packageJson.version ?? "unknown";
 }
 
 async function initConfig(values: string[]): Promise<void> {

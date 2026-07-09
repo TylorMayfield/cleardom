@@ -1,10 +1,10 @@
 export const helpText = `ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
 
 Usage:
-  cleardom [path|url] [--diff] [--format text|json|sarif|html]
+  cleardom [path|url] [--diff] [--score] [--format text|json|sarif|html]
   cleardom install [--yes] [--agents] [--github-actions] [--agent codex|claude|cursor]
   cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]
-  cleardom scan [path|url] [--diff] [--format text|json|sarif|html] [--include-rules] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
+  cleardom scan [path|url] [--diff] [--score] [--format text|json|sarif|html] [--include-rules] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
   cleardom ci [path] [--format text|json|sarif|html] [--include-rules] [--baseline cleardom-baseline.json]
   cleardom doctor [path] [--config cleardom.config.json] [--runtime-url http://localhost:3000]
   cleardom report [path|url] [--format html|markdown|json] [--output cleardom-report.html]

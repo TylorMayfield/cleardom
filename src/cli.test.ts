@@ -14,16 +14,19 @@ test("scan prints text output", async () => {
   const fixture = await createFixture('<button aria-label="Close"><X /></button>');
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
-  assert.match(result.stdout, /ClearDOM score:/);
-  assert.match(result.stdout, /Checked 1 file/);
+  assert.match(result.stdout, /ClearDOM v0\.2\.3/);
+  assert.match(result.stdout, /✓ Scan complete/);
+  assert.match(result.stdout, /Score: 100\/100 \(Excellent\)/);
+  assert.match(result.stdout, /0 findings across 1 file/);
 });
 
 test("default command scans the current project path", async () => {
   const fixture = await createFixture('<button aria-label="Close"><X /></button>');
   const result = await execFileAsync(process.execPath, [cliPath, fixture]);
 
-  assert.match(result.stdout, /ClearDOM score:/);
-  assert.match(result.stdout, /Checked 1 file/);
+  assert.match(result.stdout, /ClearDOM v0\.2\.3/);
+  assert.match(result.stdout, /Score: 100\/100 \(Excellent\)/);
+  assert.match(result.stdout, /0 findings across 1 file/);
 });
 
 test("help flags print usage without scanning", async () => {
@@ -32,7 +35,7 @@ test("help flags print usage without scanning", async () => {
 
     assert.match(result.stdout, /Usage:/);
     assert.match(result.stdout, /cleardom \[path\|url\]/);
-    assert.doesNotMatch(result.stdout, /ClearDOM score:/);
+    assert.doesNotMatch(result.stdout, /Score:/);
   }
 });
 
@@ -40,7 +43,7 @@ test("version flags print package version without scanning", async () => {
   for (const flag of ["--version", "-v"]) {
     const result = await execFileAsync(process.execPath, [cliPath, flag]);
 
-    assert.equal(result.stdout.trim(), "0.2.2");
+    assert.equal(result.stdout.trim(), "0.2.3");
     assert.doesNotMatch(result.stdout, /ClearDOM score:/);
   }
 });
@@ -49,14 +52,26 @@ test("scan text output leads with fixes and keeps details behind verbose", async
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
+  assert.match(result.stdout, /ClearDOM v0\.2\.3/);
+  assert.match(result.stdout, /Detected:/);
+  assert.match(result.stdout, /✓ Scan complete/);
+  assert.match(result.stdout, /Score: 95\/100 \(Excellent\)/);
+  assert.match(result.stdout, /Detection: 1 automated, 0 needs review, 0 manual guidance/);
+  assert.match(result.stdout, /Top findings/);
   assert.match(result.stdout, /Fix: Add visible text, aria-label, aria-labelledby/);
-  assert.match(result.stdout, /Learn: cleardom explain CDOM_4_1_2_UNNAMED_CONTROL \| https:\/\/github\.com\/cleardom\/cleardom#cdom_4_1_2_unnamed_control/);
-  assert.match(result.stdout, /ClearDOM score:/);
-  assert.match(result.stdout, /cleardom explain CDOM_4_1_2_UNNAMED_CONTROL/);
-  assert.match(result.stdout, /cleardom rules/);
+  assert.doesNotMatch(result.stdout, /Learn: cleardom explain CDOM_4_1_2_UNNAMED_CONTROL/);
+  assert.match(result.stdout, /cleardom fix \. --plan --rule CDOM_4_1_2_UNNAMED_CONTROL/);
+  assert.match(result.stdout, /cleardom review \. --dry-run/);
   assert.match(result.stdout, /cleardom scan \. --write-baseline cleardom-baseline\.json/);
   assert.doesNotMatch(result.stdout, /Score breakdown/);
   assert.doesNotMatch(result.stdout, /pnpm start --/);
+});
+
+test("scan --score prints only the numeric score", async () => {
+  const fixture = await createFixture("<button />");
+  const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--score"]);
+
+  assert.equal(result.stdout.trim(), "95");
 });
 
 test("scan --verbose includes scan details and score breakdown", async () => {
@@ -381,6 +396,21 @@ test("init detects the project stack and prints onboarding next steps", async ()
   assert.equal(config.native?.enabled, false);
   assert.equal(Array.isArray(config.ownership), true);
   assert.equal(config.suppressionPolicy?.requireApprovedBy, false);
+});
+
+test("init detects Next App Router projects without package metadata", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.mkdir(path.join(directory, "app"), { recursive: true });
+  await fs.writeFile(path.join(directory, "app", "layout.tsx"), "export default function Layout({ children }) { return <html><body>{children}</body></html>; }", "utf8");
+  await fs.writeFile(path.join(directory, "app", "page.tsx"), "export default function Page() { return <main />; }", "utf8");
+
+  const doctor = await execFileAsync(process.execPath, [cliPath, "doctor", directory]);
+  const init = await execFileAsync(process.execPath, [cliPath, "init", "--dry-run", "--target", directory]);
+  const config = JSON.parse(init.stdout) as { include: string[] };
+
+  assert.match(doctor.stdout, /Project stack: Detected Next\.js, React/);
+  assert.match(doctor.stdout, /Detected from: .*app\/layout\.tsx/);
+  assert.equal(config.include.includes("app/**/*.{js,jsx,ts,tsx,mdx}"), true);
 });
 
 test("init keeps root HTML files in scope for vanilla web projects", async () => {

@@ -9,11 +9,13 @@ export type StackDetection = {
   hasTests: boolean;
   hasStorybook: boolean;
   hasRuntimeApp: boolean;
+  detectedFrom: string[];
   summary: string;
 };
 
 export async function detectProjectStack(rootDir: string): Promise<StackDetection> {
-  const packageJson = await readPackageJson(rootDir);
+  const packageJsonResult = await readNearestPackageJson(rootDir);
+  const packageJson = packageJsonResult.packageJson;
   const dependencies = new Set(Object.keys({
     ...(packageJson?.dependencies ?? {}),
     ...(packageJson?.devDependencies ?? {}),
@@ -21,20 +23,30 @@ export async function detectProjectStack(rootDir: string): Promise<StackDetectio
   }));
   const files = await topLevelEntries(rootDir);
   const frameworks = new Set<string>();
+  const detectedFrom = new Set<string>();
 
-  if (dependencies.has("next") || files.has("next.config.js") || files.has("next.config.mjs") || files.has("next.config.ts")) frameworks.add("Next.js");
+  if (packageJsonResult.path) detectedFrom.add(relativeSignal(rootDir, packageJsonResult.path));
+  if (dependencies.has("next") || hasNextConfig(files) || await hasNextAppRouter(rootDir) || files.has("pages")) {
+    frameworks.add("Next.js");
+    if (hasNextConfig(files)) detectedFrom.add("next.config.*");
+    if (await hasNextAppRouter(rootDir)) detectedFrom.add("app/layout.tsx");
+    if (files.has("pages")) detectedFrom.add("pages/");
+  }
   if (dependencies.has("@remix-run/react")) frameworks.add("Remix");
   if (dependencies.has("gatsby")) frameworks.add("Gatsby");
-  if (dependencies.has("vite") || files.has("vite.config.js") || files.has("vite.config.ts")) frameworks.add(dependencies.has("vue") ? "Vite Vue" : "Vite");
-  if (dependencies.has("react") || dependencies.has("preact")) frameworks.add("React");
-  if (dependencies.has("vue")) frameworks.add("Vue");
-  if (dependencies.has("svelte") || dependencies.has("@sveltejs/kit")) frameworks.add("Svelte");
-  if (dependencies.has("astro")) frameworks.add("Astro");
-  if (dependencies.has("@angular/core") || files.has("angular.json")) frameworks.add("Angular");
+  if (dependencies.has("vite") || hasViteConfig(files)) frameworks.add(dependencies.has("vue") ? "Vite Vue" : "Vite");
+  if (dependencies.has("react") || dependencies.has("preact") || await containsMatchingFile(rootDir, /\.(jsx|tsx)$/)) frameworks.add("React");
+  if (dependencies.has("vue") || await containsMatchingFile(rootDir, /\.vue$/)) frameworks.add("Vue");
+  if (dependencies.has("svelte") || dependencies.has("@sveltejs/kit") || await containsMatchingFile(rootDir, /\.svelte$/)) frameworks.add("Svelte");
+  if (dependencies.has("astro") || await containsMatchingFile(rootDir, /\.astro$/)) frameworks.add("Astro");
+  if (dependencies.has("@angular/core") || files.has("angular.json") || await containsMatchingFile(rootDir, /\.component\.html$/)) frameworks.add("Angular");
   if (dependencies.has("solid-js")) frameworks.add("Solid");
   if (dependencies.has("react-native")) frameworks.add("React Native");
   if (dependencies.has("expo")) frameworks.add("Expo");
-  if (frameworks.size === 0 && (files.has("src") || files.has("app") || files.has("components"))) frameworks.add("JavaScript/TypeScript");
+  if (frameworks.size === 0 && (files.has("src") || files.has("app") || files.has("components"))) {
+    frameworks.add("JavaScript/TypeScript");
+    detectedFrom.add("source directories");
+  }
 
   const uiLibraries: ComponentPreset[] = [];
   if (hasAnyDependency(dependencies, ["@radix-ui/react-dialog", "@radix-ui/react-slot", "@radix-ui/themes"])) uiLibraries.push("radix");
@@ -64,6 +76,7 @@ export async function detectProjectStack(rootDir: string): Promise<StackDetectio
     hasTests,
     hasStorybook,
     hasRuntimeApp,
+    detectedFrom: [...detectedFrom],
     summary: [...frameworks].join(", ") || "generic source project"
   };
 }
@@ -162,6 +175,18 @@ async function readPackageJson(rootDir: string): Promise<{ dependencies?: Record
   }
 }
 
+async function readNearestPackageJson(rootDir: string): Promise<{ packageJson?: { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; peerDependencies?: Record<string, string> }; path?: string }> {
+  let current = path.resolve(rootDir);
+  while (true) {
+    const candidate = path.join(current, "package.json");
+    const packageJson = await readPackageJson(current);
+    if (packageJson) return { packageJson, path: candidate };
+    const parent = path.dirname(current);
+    if (parent === current) return {};
+    current = parent;
+  }
+}
+
 async function topLevelEntries(rootDir: string): Promise<Set<string>> {
   try {
     return new Set(await fs.readdir(rootDir));
@@ -189,6 +214,39 @@ async function containsMatchingFile(rootDir: string, pattern: RegExp, depth = 0)
 
 function hasAnyDependency(dependencies: Set<string>, names: string[]): boolean {
   return names.some((name) => dependencies.has(name));
+}
+
+function hasNextConfig(files: Set<string>): boolean {
+  return files.has("next.config.js") || files.has("next.config.mjs") || files.has("next.config.ts");
+}
+
+function hasViteConfig(files: Set<string>): boolean {
+  return files.has("vite.config.js") || files.has("vite.config.mjs") || files.has("vite.config.ts");
+}
+
+async function hasNextAppRouter(rootDir: string): Promise<boolean> {
+  return await exists(path.join(rootDir, "app", "layout.tsx"))
+    || await exists(path.join(rootDir, "app", "layout.jsx"))
+    || await exists(path.join(rootDir, "app", "layout.ts"))
+    || await exists(path.join(rootDir, "app", "layout.js"))
+    || await exists(path.join(rootDir, "app", "page.tsx"))
+    || await exists(path.join(rootDir, "app", "page.jsx"))
+    || await exists(path.join(rootDir, "app", "page.ts"))
+    || await exists(path.join(rootDir, "app", "page.js"));
+}
+
+async function exists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function relativeSignal(rootDir: string, filePath: string): string {
+  const relative = path.relative(rootDir, filePath).replace(/\\/g, "/");
+  return relative && !relative.startsWith("..") ? relative : `nearest ${path.basename(filePath)}`;
 }
 
 function unique<T>(values: T[]): T[] {

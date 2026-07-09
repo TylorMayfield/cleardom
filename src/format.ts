@@ -11,7 +11,9 @@ const severityLabels: Record<Severity, string> = {
 
 const categories: RuleCategory[] = ["names-and-roles", "forms", "keyboard", "structure", "readability", "react-native"];
 
-export function formatScanResult(result: ScanResult, verbose = false): string {
+export function formatScanResult(result: ScanResult, verbose = false, version = "unknown"): string {
+  if (!verbose) return formatCompactScanResult(result, version);
+
   const lines = [
     `ClearDOM score: ${result.score}/100 - ${issueSummary(result)}`,
     `Checked ${result.checkedFiles} ${pluralize("file", result.checkedFiles)} against ${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}`,
@@ -95,6 +97,64 @@ export function formatScanResult(result: ScanResult, verbose = false): string {
   lines.push("  cleardom rules");
   if (result.activeFindings.length > 0 && !result.baseline) {
     lines.push("  cleardom scan . --write-baseline cleardom-baseline.json");
+  }
+
+  return lines.join("\n");
+}
+
+function formatCompactScanResult(result: ScanResult, version: string): string {
+  const lines = [
+    `ClearDOM v${version}`,
+    `Detected: ${detectedLabel(result)}`,
+    "Running source checks..."
+  ];
+
+  if (result.runtimePages.length > 0 || result.runtimeDiagnostics.some((diagnostic) => diagnostic.url)) {
+    lines.push("Running runtime checks...");
+  }
+  if (result.baseline) {
+    lines.push("Comparing baseline...");
+  }
+
+  lines.push("", "✓ Scan complete", "");
+  lines.push(`Score: ${result.score}/100 (${scoreLabel(result.score)})`);
+  lines.push(`${issueSummary(result)} across ${result.checkedFiles} ${pluralize("file", result.checkedFiles)} against ${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}`);
+
+  const modeCounts = detectionModeCounts(result.activeFindings);
+  if (result.activeFindings.length > 0) {
+    lines.push(`Detection: ${modeCounts.automated} automated, ${modeCounts.needsReview} needs review, ${modeCounts.manualGuidance} manual guidance`);
+  }
+
+  const findings = [...result.activeFindings].sort(compareFindingPriority).slice(0, 5);
+  if (findings.length > 0) {
+    lines.push("", "Top findings");
+    for (const finding of findings) {
+      const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
+      lines.push(`  ${severitySymbol(finding.severity)} ${finding.ruleId} ${formatFindingLocation(finding)}`);
+      lines.push(`    ${finding.message}`);
+      if (rule?.guidance) lines.push(`    Fix: ${rule.guidance}`);
+    }
+    if (result.activeFindings.length > findings.length) {
+      lines.push(`  Showing ${findings.length} of ${result.activeFindings.length}. Run with --verbose for every finding.`);
+    }
+  } else {
+    lines.push("", "No high-confidence accessibility or readability issues found.");
+  }
+
+  lines.push("", "Next:");
+  const topFinding = topPriorityFinding(result.activeFindings);
+  if (topFinding) {
+    lines.push(`  cleardom fix . --plan --rule ${topFinding.ruleId}`);
+    lines.push("  cleardom review . --dry-run");
+  }
+  if (result.activeFindings.length > 0 && !result.baseline) {
+    lines.push("  cleardom scan . --write-baseline cleardom-baseline.json");
+  }
+  if (result.runtimePages.length === 0 && result.runtimeDiagnostics.length === 0) {
+    lines.push("  Optional runtime checks: cleardom scan . --runtime-url http://localhost:3000");
+  }
+  if (result.activeFindings.length === 0) {
+    lines.push("  cleardom install");
   }
 
   return lines.join("\n");
@@ -214,6 +274,51 @@ function pluralize(word: string, count: number): string {
   return count === 1 ? word : `${word}s`;
 }
 
+function scoreLabel(score: number): string {
+  if (score >= 95) return "Excellent";
+  if (score >= 85) return "Great";
+  if (score >= 70) return "Needs work";
+  return "At risk";
+}
+
+function severitySymbol(severity: Severity): string {
+  if (severity === "critical") return "critical";
+  if (severity === "warning") return "warning";
+  return "info";
+}
+
+function detectedLabel(result: ScanResult): string {
+  const labels = new Set<string>();
+  if (result.semanticAnalysis.adapter === "typescript") labels.add("TypeScript");
+  for (const finding of result.findings) {
+    if (finding.platforms?.some((platform) => platform.startsWith("react-native"))) labels.add("React Native");
+    if (finding.source === "runtime") labels.add("Web runtime");
+  }
+  for (const finding of result.findings) {
+    const extension = path.extname(finding.file).toLowerCase();
+    if (extension === ".tsx" || extension === ".jsx") labels.add("JSX/TSX");
+    if ([".html", ".vue", ".svelte", ".astro", ".mdx"].includes(extension)) labels.add(sourceLabel(extension));
+  }
+  return [...labels].join(", ") || (result.semanticAnalysis.adapter === "lightweight" ? "source files" : "project files");
+}
+
+function sourceLabel(extension: string): string {
+  if (extension === ".html") return "HTML";
+  if (extension === ".vue") return "Vue";
+  if (extension === ".svelte") return "Svelte";
+  if (extension === ".astro") return "Astro";
+  if (extension === ".mdx") return "MDX";
+  return extension.slice(1).toUpperCase();
+}
+
+function detectionModeCounts(findings: Finding[]): { automated: number; needsReview: number; manualGuidance: number } {
+  return {
+    automated: findings.filter((finding) => finding.detectionMode === "automated").length,
+    needsReview: findings.filter((finding) => finding.detectionMode === "needs-review").length,
+    manualGuidance: findings.filter((finding) => finding.detectionMode === "manual-guidance").length
+  };
+}
+
 function issueSummary(result: ScanResult): string {
   if (result.activeFindings.length === 0) return "0 findings";
   const parts = [
@@ -254,6 +359,15 @@ function topPriorityFinding(findings: Finding[]): Finding | undefined {
     if (finding) return finding;
   }
   return undefined;
+}
+
+function compareFindingPriority(left: Finding, right: Finding): number {
+  const severityOrder: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
+  return severityOrder[left.severity] - severityOrder[right.severity]
+    || left.file.localeCompare(right.file)
+    || left.line - right.line
+    || left.column - right.column
+    || left.ruleId.localeCompare(right.ruleId);
 }
 
 function sarifLevel(severity: Severity): "error" | "warning" | "note" {

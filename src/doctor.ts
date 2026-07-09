@@ -121,7 +121,8 @@ function projectStackCheck(detection: StackDetection): DoctorCheck {
     return { name: "Project stack", status: "warn", message: "No common app stack detected. Run cleardom init --dry-run to preview a generic config." };
   }
   const manager = detection.packageManagers.length > 0 ? ` Package manager: ${detection.packageManagers.join(", ")}.` : "";
-  return { name: "Project stack", status: "pass", message: `Detected ${detection.summary}.${manager}` };
+  const source = detection.detectedFrom.length > 0 ? ` Detected from: ${detection.detectedFrom.join(", ")}.` : "";
+  return { name: "Project stack", status: "pass", message: `Detected ${detection.summary}.${manager}${source}` };
 }
 
 function setupFlowChecks(options: ResolvedScanOptions, detection: StackDetection): DoctorCheck[] {

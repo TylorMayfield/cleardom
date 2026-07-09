@@ -73,10 +73,10 @@ See `examples/wcag-benchmark/manifest.json` for the WCAG 2.2 A/AA coverage map a
 ## Commands
 
 ```sh
-cleardom [path|url] [--diff] [--format text|json|sarif|html] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom [path|url] [--diff] [--score] [--format text|json|sarif|html] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom install [--yes] [--agents] [--github-actions] [--no-github-actions] [--agent codex|claude|cursor]
 cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]
-cleardom scan [path|url] [--diff] [--format text|json|sarif|html] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
+cleardom scan [path|url] [--diff] [--score] [--format text|json|sarif|html] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom ci [path] [--format text|json|sarif|html] [--baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
 cleardom doctor [path] [--config cleardom.config.json] [--runtime-url http://localhost:3000]
 cleardom report [path|url] [--format html|markdown|json] [--output cleardom-report.html]
