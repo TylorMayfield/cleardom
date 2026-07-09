@@ -1,16 +1,16 @@
 {
   "name": "cleardom",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Developer-first accessibility and readability scanner for React and React Native.",
   "type": "module",
   "license": "MIT",
-  "homepage": "https://github.com/cleardom/cleardom#readme",
+  "homepage": "https://github.com/TylorMayfield/cleardom#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cleardom/cleardom.git"
+    "url": "git+https://github.com/TylorMayfield/cleardom.git"
   },
   "bugs": {
-    "url": "https://github.com/cleardom/cleardom/issues"
+    "url": "https://github.com/TylorMayfield/cleardom/issues"
   },
   "keywords": [
     "accessibility",

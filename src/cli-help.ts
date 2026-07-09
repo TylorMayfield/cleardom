@@ -1,25 +1,38 @@
-export const helpText = `ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
+export const helpText = `ClearDOM finds and fixes accessibility regressions before they ship.
 
 Usage:
-  cleardom [path|url] [--diff] [--score] [--format text|json|sarif|html]
-  cleardom install [--yes] [--agents] [--github-actions] [--agent codex|claude|cursor]
-  cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]
-  cleardom scan [path|url] [--diff] [--score] [--format text|json|sarif|html] [--include-rules] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json]
-  cleardom ci [path] [--format text|json|sarif|html] [--include-rules] [--baseline cleardom-baseline.json]
-  cleardom doctor [path] [--config cleardom.config.json] [--runtime-url http://localhost:3000]
-  cleardom report [path|url] [--format html|markdown|json] [--output cleardom-report.html]
-  cleardom review [path] [--dry-run] [--max-comments 20] [--severity-threshold critical|warning|info] [--comment-mode off|summary|inline|both] [--changed-files-only] [--baseline-policy new|all] [--status-check-name "ClearDOM PR review"] [--upload-sarif]
-  cleardom suppress [path] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1] [--baseline cleardom-baseline.json]
-  cleardom baseline update|prune [path] [--baseline cleardom-baseline.json]
-  cleardom browser install
-  cleardom native scan [path] [--format text|json|sarif|html] [--include-rules]
-  cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
-  cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
-  cleardom rules
-  cleardom standards
-  cleardom fix [path] [--preview] [--apply] [--plan --format text|json|markdown] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
+  cleardom [path|url]                  Run the complete check
+  cleardom check [path|url] [--diff]  Check source and the rendered app
+  cleardom fix [path] [--apply]       Fix findings and verify the result
+  cleardom install                    Add pull-request protection
+
+Common options:
+  --diff                              Check changed files only
+  --source-only                       Skip rendered browser checks
+  --format text|json|sarif|html       Choose output format
+  --verbose                           Show every finding and diagnostic
+
+Run cleardom help --all for compatibility and advanced commands.
 `;
 
-export function help(): void {
-  console.log(helpText);
+export const advancedHelpText = `${helpText}
+Advanced and compatibility commands:
+  cleardom scan [path|url] [options]
+  cleardom ci [path] [options]
+  cleardom review [path] [--dry-run] [--max-comments 20]
+  cleardom init [--dry-run] [--target path] [--create-baseline] [--install-ci]
+  cleardom doctor [path]
+  cleardom report [path|url] [--format html|markdown|json] [--output file]
+  cleardom suppress [path] [--rule rule-id] [--file file] [--limit count]
+  cleardom baseline update|prune [path]
+  cleardom browser install
+  cleardom native scan [path]
+  cleardom agents detect|install|uninstall|upgrade
+  cleardom explain rule-id
+  cleardom rules
+  cleardom standards
+`;
+
+export function help(all = false): void {
+  console.log(all ? advancedHelpText : helpText);
 }

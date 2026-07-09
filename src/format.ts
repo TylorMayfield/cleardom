@@ -11,8 +11,8 @@ const severityLabels: Record<Severity, string> = {
 
 const categories: RuleCategory[] = ["names-and-roles", "forms", "keyboard", "structure", "readability", "react-native"];
 
-export function formatScanResult(result: ScanResult, verbose = false, version = "unknown"): string {
-  if (!verbose) return formatCompactScanResult(result, version);
+export function formatScanResult(result: ScanResult, verbose = false, version = "unknown", target = "."): string {
+  if (!verbose) return formatCompactScanResult(result, version, target);
 
   const lines = [
     `ClearDOM score: ${result.score}/100 - ${issueSummary(result)}`,
@@ -83,8 +83,8 @@ export function formatScanResult(result: ScanResult, verbose = false, version = 
   }
 
   if (result.activeFindings.length > 0) {
-    lines.push("PR reviewer:");
-    lines.push("  cleardom review . --dry-run");
+    lines.push("Keep checking:");
+    lines.push(`  cleardom check ${shellTarget(target)} --diff`);
     lines.push("  cleardom install");
     lines.push("");
   }
@@ -92,17 +92,16 @@ export function formatScanResult(result: ScanResult, verbose = false, version = 
   lines.push("Next:");
   const topFinding = topPriorityFinding(result.activeFindings);
   if (topFinding) {
-    lines.push(`  cleardom explain ${topFinding.ruleId}`);
+    lines.push(`  cleardom fix ${shellTarget(target)} --rule ${topFinding.ruleId}`);
   }
-  lines.push("  cleardom rules");
   if (result.activeFindings.length > 0 && !result.baseline) {
-    lines.push("  cleardom scan . --write-baseline cleardom-baseline.json");
+    lines.push("  cleardom install");
   }
 
   return lines.join("\n");
 }
 
-function formatCompactScanResult(result: ScanResult, version: string): string {
+function formatCompactScanResult(result: ScanResult, version: string, target: string): string {
   const lines = [
     `ClearDOM v${version}`,
     `Detected: ${detectedLabel(result)}`,
@@ -144,20 +143,25 @@ function formatCompactScanResult(result: ScanResult, version: string): string {
   lines.push("", "Next:");
   const topFinding = topPriorityFinding(result.activeFindings);
   if (topFinding) {
-    lines.push(`  cleardom fix . --plan --rule ${topFinding.ruleId}`);
-    lines.push("  cleardom review . --dry-run");
+    lines.push(`  cleardom fix ${shellTarget(target)} --rule ${topFinding.ruleId}`);
+    lines.push(`  cleardom check ${shellTarget(target)} --diff`);
   }
   if (result.activeFindings.length > 0 && !result.baseline) {
-    lines.push("  cleardom scan . --write-baseline cleardom-baseline.json");
+    lines.push("  cleardom install");
   }
   if (result.runtimePages.length === 0 && result.runtimeDiagnostics.length === 0) {
-    lines.push("  Optional runtime checks: cleardom scan . --runtime-url http://localhost:3000");
+    lines.push(`  Rendered checks: cleardom check ${shellTarget(target)}`);
   }
   if (result.activeFindings.length === 0) {
     lines.push("  cleardom install");
   }
 
   return lines.join("\n");
+}
+
+function shellTarget(value: string): string {
+  if (/^[A-Za-z0-9_./:@-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 export function formatScanJson(result: ScanResult, options: { includeRules?: boolean } = {}): string {

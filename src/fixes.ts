@@ -23,6 +23,12 @@ export type FixRunResult = {
   diff: string;
 };
 
+export type FixVerification = {
+  fixed: Finding[];
+  remaining: Finding[];
+  introduced: Finding[];
+};
+
 export type FixPlanGroup = {
   ruleId: string;
   title: string;
@@ -82,6 +88,34 @@ export function formatFixRunResult(result: FixRunResult, apply: boolean): string
     "",
     result.diff || "No safe automatic transforms are available for the matched findings."
   ].join("\n");
+}
+
+export function verifyFixRun(before: Finding[], selected: Finding[], after: Finding[]): FixVerification {
+  const beforeFingerprints = new Set(before.map((finding) => finding.fingerprint));
+  const afterFingerprints = new Set(after.map((finding) => finding.fingerprint));
+  return {
+    fixed: selected.filter((finding) => !afterFingerprints.has(finding.fingerprint)),
+    remaining: selected.filter((finding) => afterFingerprints.has(finding.fingerprint)),
+    introduced: after.filter((finding) => !beforeFingerprints.has(finding.fingerprint))
+  };
+}
+
+export function formatFixVerification(verification: FixVerification): string {
+  const lines = [
+    "ClearDOM verification",
+    "",
+    `Fixed: ${verification.fixed.length}`,
+    `Remaining: ${verification.remaining.length}`,
+    `Introduced: ${verification.introduced.length}`
+  ];
+  if (verification.introduced.length > 0) {
+    lines.push("", "New findings:");
+    for (const finding of verification.introduced.slice(0, 5)) {
+      lines.push(`  ${finding.ruleId} ${finding.file}:${finding.line}:${finding.column}`);
+    }
+  }
+  lines.push("", verification.introduced.length === 0 ? "✓ Applied fixes introduced no new findings." : "Review the new findings before committing these edits.");
+  return lines.join("\n");
 }
 
 export function buildFixPlan(findings: Finding[], rules: RuleSummary[], options: ResolvedScanOptions, target: string): FixPlanGroup[] {

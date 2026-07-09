@@ -7,15 +7,15 @@ It is a CLI-first scanner for React, Next.js, React Native, and web apps. The v0
 ## Quickstart
 
 ```sh
-npx cleardom@latest
+npx cleardom@latest check
+npx cleardom@latest fix --apply
 npx cleardom@latest --diff
 npx cleardom@latest install
-npx cleardom@latest fix
 ```
 
-Run ClearDOM from a project root to print a health score and the issues it found. Use `--diff` while you work to scan changed files only. Run `install` to add the GitHub Actions PR reviewer and coding-agent guidance.
+`check` is the primary command. It detects the project, scans source, starts a detected web app when possible, runs rendered browser checks, and shuts the app down. Use `--diff` while you work to scan changed files only, or `--source-only` when you intentionally do not want browser checks.
 
-Use `fix` to turn the top active finding into a focused coding-agent remediation prompt. ClearDOM does not silently rewrite product code; it gives the agent the finding, rule guidance, code context, and verification command so the agent can edit and re-run the scan.
+`fix --apply` applies only safe mechanical changes and automatically rescans the project. It reports fixed, remaining, and newly introduced findings. Without `--apply`, `fix` produces a focused coding-agent remediation prompt.
 
 Existing projects can adopt gradually: commit a baseline once with `npx cleardom@latest scan . --write-baseline cleardom-baseline.json`, then use `npx cleardom@latest ci .` to fail only on regressions.
 
@@ -73,34 +73,22 @@ See `examples/wcag-benchmark/manifest.json` for the WCAG 2.2 A/AA coverage map a
 ## Commands
 
 ```sh
-cleardom [path|url] [--diff] [--score] [--format text|json|sarif|html] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
-cleardom install [--yes] [--agents] [--github-actions] [--no-github-actions] [--agent codex|claude|cursor]
-cleardom init [--dry-run] [--yes] [--target path] [--create-baseline] [--ci-dry-run] [--install-ci]
-cleardom scan [path|url] [--diff] [--score] [--format text|json|sarif|html] [--standard wcag22-aa] [--semantic auto|off|required] [--runtime-url http://localhost:3000] [--component-preset mui] [--config cleardom.config.json] [--baseline cleardom-baseline.json] [--write-baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
-cleardom ci [path] [--format text|json|sarif|html] [--baseline cleardom-baseline.json] [--fail-on critical|warning|findings|regression]
-cleardom doctor [path] [--config cleardom.config.json] [--runtime-url http://localhost:3000]
-cleardom report [path|url] [--format html|markdown|json] [--output cleardom-report.html]
-cleardom review [path] [--dry-run] [--max-comments 20]
-cleardom suppress [path] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1] [--baseline cleardom-baseline.json]
-cleardom baseline update|prune [path] [--baseline cleardom-baseline.json]
-cleardom browser install
-cleardom native scan [path] [--format text|json|sarif|html]
-cleardom agents detect|install|uninstall|upgrade [--agent codex|claude|cursor]
-cleardom explain CDOM_4_1_2_UNNAMED_CONTROL
-cleardom rules
-cleardom standards
-cleardom fix [path] [--preview] [--apply] [--plan --format text|json|markdown] [--agent codex|claude|cursor] [--rule CDOM_4_1_2_UNNAMED_CONTROL] [--file src/App.tsx] [--limit 1]
+cleardom [path|url]
+cleardom check [path|url] [--diff] [--source-only]
+cleardom fix [path] [--apply] [--rule CDOM_4_1_2_UNNAMED_CONTROL]
+cleardom install
+cleardom help --all
 ```
 
-`doctor` checks browser availability, ClearDOM config, GitHub token context, include/exclude patterns, baseline setup, semantic mode, runtime URL readiness, and native simulator readiness when enabled. `browser install` adds a managed Chrome for runtime scans when the system has no usable browser. `report` writes shareable local scan reports outside benchmark mode with grouped findings and client-side filters for severity, confidence, and search. `fix` is an agent-assisted remediation workflow; `fix --preview` shows safe mechanical diffs, `fix --apply` applies only safe transforms, and `fix --plan` groups work by rule/file/owner. Use `suppress` to baseline selected accepted findings, then `baseline update` and `baseline prune` to refresh or remove stale adoption debt.
+Run `cleardom help --all` for compatibility commands, CI controls, reports, baselines, native scanning, and advanced configuration.
 
 ## Product onboarding
 
-Start like React Doctor: run ClearDOM from the project root, fix changed-file findings while you work, then install the PR reviewer when the local signal looks useful.
+Run the complete check, apply verified fixes, then install the PR reviewer when the local signal looks useful.
 
 ```sh
-npx cleardom@latest
-npx cleardom@latest --diff
+npx cleardom@latest check
+npx cleardom@latest fix --apply
 npx cleardom@latest install
 ```
 
@@ -113,7 +101,7 @@ npx cleardom@latest init
 npx cleardom@latest doctor .
 ```
 
-`doctor` is the setup safety pass, not the first required step. It reports the detected stack and the next useful command for React, Solid, template frameworks, vanilla web, and Expo/React Native projects. For rendered DOM, CSS, and keyboard checks in web apps, start the local app and add `--runtime-url`. For Expo and React Native, simulator-backed checks stay opt-in until `native.appId` or `native.deepLinks` are configured.
+`doctor` is the setup safety pass, not the first required step. It reports the detected stack and the next useful command for React, Solid, template frameworks, vanilla web, and Expo/React Native projects. `check` starts detected web apps automatically; use `--runtime-url` only for a server you already manage. For Expo and React Native, simulator-backed checks stay opt-in until `native.appId` or `native.deepLinks` are configured.
 
 Useful setup variants:
 

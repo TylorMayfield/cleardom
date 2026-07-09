@@ -14,7 +14,7 @@ test("scan prints text output", async () => {
   const fixture = await createFixture('<button aria-label="Close"><X /></button>');
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
-  assert.match(result.stdout, /ClearDOM v0\.2\.3/);
+  assert.match(result.stdout, /ClearDOM v0\.2\.4/);
   assert.match(result.stdout, /✓ Scan complete/);
   assert.match(result.stdout, /Score: 100\/100 \(Excellent\)/);
   assert.match(result.stdout, /0 findings across 1 file/);
@@ -24,7 +24,7 @@ test("default command scans the current project path", async () => {
   const fixture = await createFixture('<button aria-label="Close"><X /></button>');
   const result = await execFileAsync(process.execPath, [cliPath, fixture]);
 
-  assert.match(result.stdout, /ClearDOM v0\.2\.3/);
+  assert.match(result.stdout, /ClearDOM v0\.2\.4/);
   assert.match(result.stdout, /Score: 100\/100 \(Excellent\)/);
   assert.match(result.stdout, /0 findings across 1 file/);
 });
@@ -43,7 +43,7 @@ test("version flags print package version without scanning", async () => {
   for (const flag of ["--version", "-v"]) {
     const result = await execFileAsync(process.execPath, [cliPath, flag]);
 
-    assert.equal(result.stdout.trim(), "0.2.3");
+    assert.equal(result.stdout.trim(), "0.2.4");
     assert.doesNotMatch(result.stdout, /ClearDOM score:/);
   }
 });
@@ -52,7 +52,7 @@ test("scan text output leads with fixes and keeps details behind verbose", async
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
-  assert.match(result.stdout, /ClearDOM v0\.2\.3/);
+  assert.match(result.stdout, /ClearDOM v0\.2\.4/);
   assert.match(result.stdout, /Detected:/);
   assert.match(result.stdout, /✓ Scan complete/);
   assert.match(result.stdout, /Score: 95\/100 \(Excellent\)/);
@@ -60,9 +60,9 @@ test("scan text output leads with fixes and keeps details behind verbose", async
   assert.match(result.stdout, /Top findings/);
   assert.match(result.stdout, /Fix: Add visible text, aria-label, aria-labelledby/);
   assert.doesNotMatch(result.stdout, /Learn: cleardom explain CDOM_4_1_2_UNNAMED_CONTROL/);
-  assert.match(result.stdout, /cleardom fix \. --plan --rule CDOM_4_1_2_UNNAMED_CONTROL/);
-  assert.match(result.stdout, /cleardom review \. --dry-run/);
-  assert.match(result.stdout, /cleardom scan \. --write-baseline cleardom-baseline\.json/);
+  assert.match(result.stdout, /cleardom fix .* --rule CDOM_4_1_2_UNNAMED_CONTROL/);
+  assert.match(result.stdout, /cleardom check .* --diff/);
+  assert.match(result.stdout, /cleardom install/);
   assert.doesNotMatch(result.stdout, /Score breakdown/);
   assert.doesNotMatch(result.stdout, /pnpm start --/);
 });
@@ -122,6 +122,10 @@ test("fix --preview and --apply handle safe mechanical transforms", async () => 
 
   const applied = await execFileAsync(process.execPath, [cliPath, "fix", fixture, "--apply", "--rule", "CDOM_2_4_3_POSITIVE_TABINDEX"]);
   assert.match(applied.stdout, /Applied fixes: 1/);
+  assert.match(applied.stdout, /ClearDOM verification/);
+  assert.match(applied.stdout, /Fixed: 1/);
+  assert.match(applied.stdout, /Introduced: 0/);
+  assert.match(applied.stdout, /introduced no new findings/);
   assert.equal(await fs.readFile(file, "utf8"), '<button tabIndex={0}>Save</button>');
 });
 
@@ -388,9 +392,9 @@ test("init detects the project stack and prints onboarding next steps", async ()
   assert.match(result.stdout, /What changed:/);
   assert.match(result.stdout, /Next steps:/);
   assert.match(result.stdout, /Scaffolded paths:/);
-  assert.match(result.stdout, /Optional runtime checks:/);
-  assert.match(result.stdout, /Optional native checks:/);
-  assert.match(result.stdout, /cleardom scan \. --write-baseline cleardom-baseline\.json/);
+  assert.match(result.stdout, /Run the complete check: cleardom check/);
+  assert.match(result.stdout, /Apply safe fixes and verify: cleardom fix .* --apply/);
+  assert.match(result.stdout, /Install pull-request protection: cleardom install/);
   assert.equal(config.include.includes("app/**/*.{js,jsx,ts,tsx,mdx}"), true);
   assert.equal(config.componentPresets.includes("mui"), true);
   assert.equal(config.native?.enabled, false);

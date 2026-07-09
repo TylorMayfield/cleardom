@@ -6,12 +6,13 @@ import { promisify } from "node:util";
 import { detectAgents, installAgents, parseAgentId } from "./agents.js";
 import { mergeBaselineFindings, pruneBaselineFindings, readBaseline, writeBaseline, writeBaselineFile } from "./baseline.js";
 import { installManagedBrowser } from "./browser.js";
+import { prepareCheck } from "./check.js";
 import { help } from "./cli-help.js";
 import { parseBaselinePolicy, parseCommentMode, parseComponentPreset, parseFormat, parseReportFormat, parseRuleOption, parseSemanticMode, parseSeverity, requireValue } from "./cli-options.js";
 import { resolveScanOptions } from "./config.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
 import { formatAgentFixPrompt } from "./fix.js";
-import { buildFixPlan, formatFixPlan, formatFixRunResult, runSafeFixes } from "./fixes.js";
+import { buildFixPlan, formatFixPlan, formatFixRunResult, formatFixVerification, runSafeFixes, verifyFixRun } from "./fixes.js";
 import { formatRules, formatSarif, formatScanHtml, formatScanJson, formatScanResult, formatStandards } from "./format.js";
 import { githubWorkflow, installGithubActions, runGithubPr } from "./github.js";
 import { runNativeScan } from "./native.js";
@@ -23,18 +24,18 @@ import { standards } from "./standards.js";
 import type { FailOn, Finding, OutputFormat, ScanConfig, ScanOptions } from "./types.js";
 
 const args = process.argv.slice(2).filter((arg, index) => index !== 0 || arg !== "--");
-const command = args[0] ?? "scan";
+const command = args[0] ?? "check";
 const execFileAsync = promisify(execFile);
 
 try {
   if (command === "help" || command === "--help" || command === "-h") {
-    help();
+    help(args.includes("--all"));
   } else if (command === "--version" || command === "-v") {
     await printVersion();
-  } else if (command === "scan" || command === "ci") {
+  } else if (command === "check" || command === "scan" || command === "ci") {
     await runScan(command, args.slice(1));
   } else if (command.startsWith("-") || isPathLikeCommand(command) || await pathExists(command)) {
-    await runScan("scan", args);
+    await runScan("check", args);
   } else if (command === "install") {
     await installCommand(args.slice(1));
   } else if (command === "agents") {
@@ -127,7 +128,7 @@ function explain(ruleId: string): void {
   }
 }
 
-function parseScanArgs(values: string[]): { target: string; format?: OutputFormat; writeBaseline?: string; diff: boolean; includeRules: boolean; scoreOnly: boolean; options: ScanOptions } {
+function parseScanArgs(values: string[]): { target: string; format?: OutputFormat; writeBaseline?: string; diff: boolean; includeRules: boolean; scoreOnly: boolean; sourceOnly: boolean; options: ScanOptions } {
   const options: ScanOptions = {};
   let target = ".";
   let format: OutputFormat | undefined;
@@ -135,6 +136,7 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
   let diff = false;
   let includeRules = false;
   let scoreOnly = false;
+  let sourceOnly = false;
 
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
@@ -161,6 +163,11 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
 
     if (value === "--diff") {
       diff = true;
+      continue;
+    }
+
+    if (value === "--source-only") {
+      sourceOnly = true;
       continue;
     }
 
@@ -231,7 +238,7 @@ function parseScanArgs(values: string[]): { target: string; format?: OutputForma
     }
   }
 
-  return { target, format, writeBaseline: writeBaselinePath, diff, includeRules, scoreOnly, options };
+  return { target, format, writeBaseline: writeBaselinePath, diff, includeRules, scoreOnly, sourceOnly, options };
 }
 
 async function installCommand(values: string[]): Promise<void> {
@@ -366,22 +373,33 @@ function formatAgentDetectionResults(results: Awaited<ReturnType<typeof detectAg
   ].join("\n");
 }
 
-async function runScan(command: "scan" | "ci", values: string[]): Promise<void> {
+async function runScan(command: "check" | "scan" | "ci", values: string[]): Promise<void> {
   const parsed = parseScanArgs(values);
-  const options = command === "ci" ? await ciOptions(parsed.target, parsed.options) : parsed.options;
+  let options = command === "ci" ? await ciOptions(parsed.target, parsed.options) : parsed.options;
   if (parsed.diff) {
     options.include = await diffIncludes(parsed.target, options);
   }
-  const resolvedOptions = await resolveScanOptions(options);
-  const result = isUrlTarget(parsed.target)
-    ? await scanUrl(parsed.target, resolvedOptions)
-    : await scanPath(parsed.target, resolvedOptions);
+  const prepared = command === "check" ? await prepareCheck(parsed.target, options, parsed.sourceOnly) : undefined;
+  if (prepared) options = prepared.options;
+  try {
+    const resolvedOptions = await resolveScanOptions(options);
+    const result = isUrlTarget(parsed.target)
+      ? await scanUrl(parsed.target, resolvedOptions)
+      : await scanPath(parsed.target, resolvedOptions);
 
-  if (parsed.writeBaseline) {
-    await writeBaseline(parsed.writeBaseline, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
+    if (parsed.writeBaseline) {
+      await writeBaseline(parsed.writeBaseline, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
+    }
+    const output = await formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose, parsed.includeRules, parsed.scoreOnly, parsed.target);
+    if (prepared?.messages.length && (parsed.format ?? resolvedOptions.format) === "text" && !parsed.scoreOnly) {
+      console.log(`${prepared.messages.join("\n")}\n\n${output}`);
+    } else {
+      console.log(output);
+    }
+    process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
+  } finally {
+    await prepared?.close();
   }
-  console.log(await formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose, parsed.includeRules, parsed.scoreOnly));
-  process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
 }
 
 async function githubPrCommand(values: string[]): Promise<void> {
@@ -468,6 +486,9 @@ async function githubPrCommand(values: string[]): Promise<void> {
 
 async function fixCommand(values: string[]): Promise<void> {
   const parsed = parseFixArgs(values);
+  if (parsed.verify && !parsed.apply) {
+    throw new Error("--verify requires --apply. `cleardom fix --apply` verifies automatically.");
+  }
   if (parsed.scan.diff) {
     parsed.scan.options.include = await diffIncludes(parsed.scan.target, parsed.scan.options);
   }
@@ -496,7 +517,13 @@ async function fixCommand(values: string[]): Promise<void> {
   }
 
   if (parsed.apply) {
-    console.log(formatFixRunResult(await runSafeFixes(fixPrompt.findings, true), true));
+    const applied = await runSafeFixes(fixPrompt.findings, true);
+    const after = isUrlTarget(parsed.scan.target)
+      ? await scanUrl(parsed.scan.target, resolvedOptions)
+      : await scanPath(parsed.scan.target, resolvedOptions);
+    const verification = verifyFixRun(result.activeFindings, fixPrompt.findings, after.activeFindings);
+    console.log(`${formatFixRunResult(applied, true)}\n\n${formatFixVerification(verification)}`);
+    if (verification.introduced.length > 0) process.exitCode = 1;
     return;
   }
 
@@ -512,6 +539,7 @@ function parseFixArgs(values: string[]): {
   apply: boolean;
   preview: boolean;
   plan: boolean;
+  verify: boolean;
   planFormat: "text" | "json" | "markdown";
 } {
   const scanArgs: string[] = [];
@@ -519,9 +547,11 @@ function parseFixArgs(values: string[]): {
   let agent: ReturnType<typeof parseAgentId> = "codex";
   let file: string | undefined;
   let limit = 1;
+  let limitSet = false;
   let apply = false;
   let preview = false;
   let plan = false;
+  let verify = false;
   let planFormat: "text" | "json" | "markdown" = "text";
 
   for (let index = 0; index < values.length; index += 1) {
@@ -544,6 +574,7 @@ function parseFixArgs(values: string[]): {
       if (!Number.isInteger(limit) || limit < 1) {
         throw new Error("--limit must be a positive integer");
       }
+      limitSet = true;
       index += 1;
       continue;
     }
@@ -555,6 +586,11 @@ function parseFixArgs(values: string[]): {
 
     if (value === "--apply") {
       apply = true;
+      continue;
+    }
+
+    if (value === "--verify") {
+      verify = true;
       continue;
     }
 
@@ -593,6 +629,8 @@ function parseFixArgs(values: string[]): {
     scanArgs.push(value);
   }
 
+  if ((apply || preview) && !limitSet) limit = Number.MAX_SAFE_INTEGER;
+
   return {
     scan: parseScanArgs(scanArgs),
     agent,
@@ -602,6 +640,7 @@ function parseFixArgs(values: string[]): {
     apply,
     preview,
     plan,
+    verify,
     planFormat
   };
 }
@@ -890,11 +929,11 @@ async function pathExists(value: string): Promise<boolean> {
   }
 }
 
-async function formatScan(result: Awaited<ReturnType<typeof scanPath>>, format: OutputFormat, verbose: boolean, includeRules = false, scoreOnly = false): Promise<string> {
+async function formatScan(result: Awaited<ReturnType<typeof scanPath>>, format: OutputFormat, verbose: boolean, includeRules = false, scoreOnly = false, target = "."): Promise<string> {
   if (scoreOnly) return String(result.score);
   if (format === "json") return formatScanJson(result, { includeRules });
   if (format === "sarif") return formatSarif(result);
-  return formatScanResult(result, verbose, await packageVersion());
+  return formatScanResult(result, verbose, await packageVersion(), target);
 }
 
 async function printVersion(): Promise<void> {
@@ -937,7 +976,7 @@ async function initConfig(values: string[]): Promise<void> {
     await writeBaseline(config.baseline ?? "cleardom-baseline.json", resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
     changed.push(`created   ${config.baseline ?? "cleardom-baseline.json"} (${result.findings.length} current findings captured)`);
   } else {
-    next.push(`Create a starting baseline: cleardom scan . --write-baseline ${config.baseline ?? "cleardom-baseline.json"}`);
+    next.push("Run the complete check: cleardom check .");
   }
 
   if (parsed.installCi) {
@@ -949,11 +988,8 @@ async function initConfig(values: string[]): Promise<void> {
     next.push("Preview CI setup: cleardom init --ci-dry-run");
   }
 
-  next.push("Run locally: cleardom scan .");
-  next.push("Gate only new issues in CI: cleardom ci .");
-  next.push("Optional runtime checks: set runtime.baseUrl, then run cleardom browser install if doctor cannot find Chrome");
-  next.push("Optional native checks: set native.enabled, native.appId or native.deepLinks, then run cleardom native scan .");
-  next.push("Optional team routing: add ownership entries and tighten suppressionPolicy when CI is ready");
+  next.push("Apply safe fixes and verify: cleardom fix . --apply");
+  next.push("Install pull-request protection: cleardom install");
 
   console.log(formatInitSummary(rootDir, detection, config, changed, next, parsed.ciDryRun));
 }
