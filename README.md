@@ -4,6 +4,8 @@ ClearDOM finds accessibility, readability, and assistive-tech regressions before
 
 It is a CLI-first scanner for React, Next.js, React Native, and web apps. The v0.2 scanner is dependency-light: TypeScript for development, Node built-ins at runtime, and small in-repo source adapters for JSX, HTML, Vue, Svelte, Astro, Angular templates, and MDX.
 
+Product decisions are guided by [product.MD](product.MD).
+
 ## Quickstart
 
 ```sh
