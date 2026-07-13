@@ -31,7 +31,7 @@ import { collectHoverFocusContentIssues, collectKeyboardTrapIssues } from "./run
 import type { RuntimeIssue } from "./runtime-types.js";
 import { contrastRuntimeRule, focusObscuredRuntimeRule, focusVisibleRuntimeRule, hoverFocusContentRuntimeRule, keyboardTrapRuntimeRule, reflowRuntimeRule, skipLinkRuntimeRule, targetSizeRuntimeRule, textSpacingRuntimeRule } from "./rules/runtime-rules.js";
 import { referencesForStandard, ruleAppliesToStandard } from "./standards.js";
-import type { Finding, ResolvedRuntimeScanConfig, ResolvedScanOptions, RuleDefinition, RuntimeDiagnostic, RuntimePageResult, RuntimeViewport, Severity } from "./types.js";
+import type { Finding, ResolvedRuntimeScanConfig, ResolvedScanOptions, RuleDefinition, RuntimeDiagnostic, RuntimePageResult, RuntimeViewport, ScanProgress, Severity } from "./types.js";
 
 const runtimeRules = [
   contrastRuntimeRule,
@@ -54,7 +54,8 @@ export async function auditRuntimeUrls(
   pages: Array<{ url: string; route: string }>,
   options: ResolvedScanOptions,
   chromePath?: string,
-  browser?: puppeteer.Browser
+  browser?: puppeteer.Browser,
+  onProgress?: (progress: ScanProgress) => void
 ): Promise<{ findings: Finding[]; diagnostics: RuntimeDiagnostic[]; pages: RuntimePageResult[] }> {
   const browserResolution = await resolveBrowserExecutable(options, chromePath);
   const executablePath = browserResolution.executablePath;
@@ -75,6 +76,8 @@ export async function auditRuntimeUrls(
     const pageResults: RuntimePageResult[] = [];
     const findings: Finding[] = [];
 
+    const total = pages.length * options.runtime.viewports.length;
+    let completed = 0;
     for (const target of pages) {
       for (const viewport of options.runtime.viewports) {
         const page = await activeBrowser.newPage();
@@ -83,6 +86,8 @@ export async function auditRuntimeUrls(
           diagnostics.push(...result.diagnostics);
           pageResults.push({ url: target.url, route: target.route, viewport, status: result.status, findings: result.findings.length });
           findings.push(...result.findings);
+          completed += 1;
+          onProgress?.({ phase: "runtime-page", completed, total, route: target.route, viewport });
         } finally {
           await page.close().catch(() => undefined);
         }
@@ -248,7 +253,18 @@ async function collectBaseRuntimeIssues(
 
   for (const collector of collectors) {
     try {
-      issues.push(...(await collector()).map((issue) => ({ ...issue, interactionStep: interactionStep ?? issue.interactionStep })));
+      const collected = await collector();
+      issues.push(...collected.map((issue) => ({ ...issue, interactionStep: interactionStep ?? issue.interactionStep })));
+      if (collected.length === 25) {
+        diagnostics.push({
+          url,
+          route,
+          viewport: viewport.name,
+          stage: "collector",
+          severity: "warning",
+          message: `${collected[0]?.ruleId ?? "Runtime collector"} reached the 25-finding limit; additional issues may exist.`
+        });
+      }
     } catch (error) {
       diagnostics.push(runtimeDiagnostic("collector", url, route, viewport, error, "warning"));
     }

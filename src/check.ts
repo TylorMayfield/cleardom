@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import { resolveBrowserExecutable } from "./browser.js";
+import { createInterface } from "node:readline/promises";
+import { installManagedBrowser, resolveBrowserExecutable, type BrowserResolution } from "./browser.js";
 import { resolveScanOptions } from "./config.js";
 import { detectProjectStack } from "./project.js";
 import type { ScanOptions } from "./types.js";
@@ -18,26 +19,38 @@ type RuntimeProcess = {
   output: () => string;
 };
 
-export async function prepareCheck(target: string, options: ScanOptions, sourceOnly = false): Promise<PreparedCheck> {
-  if (sourceOnly || /^https?:\/\//i.test(target)) {
-    return idle(options, sourceOnly ? "Source-only check requested; rendered checks were skipped." : undefined);
-  }
+export type PrepareCheckDependencies = {
+  resolveBrowserExecutable?: (options: Awaited<ReturnType<typeof resolveScanOptions>>) => Promise<BrowserResolution>;
+  installManagedBrowser?: (rootDir: string) => Promise<string>;
+  confirmBrowserInstall?: () => Promise<boolean>;
+  isInteractive?: () => boolean;
+};
 
-  const resolved = await resolveScanOptions(options);
-  if (resolved.runtime.baseUrl || resolved.runtimeUrl) {
-    return idle(options, `Using configured runtime at ${resolved.runtime.baseUrl ?? resolved.runtimeUrl}.`);
+export async function prepareCheck(
+  target: string,
+  options: ScanOptions,
+  sourceOnly = false,
+  dependencies: PrepareCheckDependencies = {}
+): Promise<PreparedCheck> {
+  if (sourceOnly || /^https?:\/\//i.test(target)) {
+    return idle(sourceOnlyOptions(options), sourceOnly ? "Source-only check requested; rendered checks were skipped." : undefined);
   }
 
   const targetPath = path.resolve(target);
   const root = await projectRoot(targetPath);
+  const resolved = await resolveScanOptions(options, root);
+  if (resolved.runtime.baseUrl || resolved.runtimeUrl) {
+    return idle(options, `Using configured runtime at ${resolved.runtime.baseUrl ?? resolved.runtimeUrl}.`);
+  }
+
   const detection = await detectProjectStack(root);
   if (!detection.hasRuntimeApp) {
     return idle(options, "No runnable web app was detected; completed source checks only.");
   }
 
-  const browser = await resolveBrowserExecutable(resolved);
-  if (!browser.executablePath) {
-    return idle(options, "Chromium is unavailable; completed source checks only. Run `cleardom browser install` to enable rendered checks.");
+  const browser = await ensureBrowser(resolved, dependencies);
+  if (!browser.resolution.executablePath) {
+    return idle(options, browser.message);
   }
 
   const command = await runtimeCommand(root);
@@ -50,7 +63,11 @@ export async function prepareCheck(target: string, options: ScanOptions, sourceO
     const url = await waitForRuntime(running, 30_000);
     return {
       options: { ...options, runtimeUrl: url, runtime: { ...options.runtime, baseUrl: url } },
-      messages: [`Started ${running.command}.`, `Running source and rendered checks at ${url}.`],
+      messages: [
+        ...(browser.message.startsWith("Installed managed Chromium") ? [browser.message] : []),
+        `Started ${running.command}.`,
+        `Running source and rendered checks at ${url}.`
+      ],
       close: () => stopRuntimeProcess(running.child)
     };
   } catch (error) {
@@ -61,8 +78,71 @@ export async function prepareCheck(target: string, options: ScanOptions, sourceO
   }
 }
 
+async function ensureBrowser(
+  options: Awaited<ReturnType<typeof resolveScanOptions>>,
+  dependencies: PrepareCheckDependencies
+): Promise<{ resolution: BrowserResolution; message: string }> {
+  const resolve = dependencies.resolveBrowserExecutable ?? resolveBrowserExecutable;
+  const initial = await resolve(options);
+  if (initial.executablePath) return { resolution: initial, message: initial.message };
+
+  const interactive = dependencies.isInteractive?.() ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  if (!interactive) {
+    return {
+      resolution: initial,
+      message: "Chromium is unavailable; completed source checks only. Non-interactive runs do not download browsers. Run `cleardom browser install` to enable rendered checks."
+    };
+  }
+
+  const accepted = await (dependencies.confirmBrowserInstall ?? confirmBrowserInstall)();
+  if (!accepted) {
+    return {
+      resolution: initial,
+      message: "Chromium is unavailable; completed source checks only. Managed browser installation was declined. Run `cleardom browser install` to enable rendered checks."
+    };
+  }
+
+  try {
+    const installed = await (dependencies.installManagedBrowser ?? installManagedBrowser)(options.rootDir);
+    const resolved = await resolve(options);
+    if (resolved.executablePath) {
+      return {
+        resolution: resolved,
+        message: `Installed managed Chromium at ${installed}.`
+      };
+    }
+    return {
+      resolution: resolved,
+      message: "Chromium installation completed but ClearDOM could not locate the executable. Completed source checks only. Run `cleardom browser install` to retry."
+    };
+  } catch (error) {
+    return {
+      resolution: initial,
+      message: `Chromium is unavailable; completed source checks only. Managed browser installation failed: ${error instanceof Error ? error.message : String(error)}. Run \`cleardom browser install\` to retry.`
+    };
+  }
+}
+
+async function confirmBrowserInstall(): Promise<boolean> {
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await prompt.question("ClearDOM needs Chromium for rendered checks. Install a managed browser for this project now? [y/N] ");
+    return /^(?:y|yes)$/i.test(answer.trim());
+  } finally {
+    prompt.close();
+  }
+}
+
 function idle(options: ScanOptions, message?: string): PreparedCheck {
   return { options, messages: message ? [message] : [], close: async () => undefined };
+}
+
+function sourceOnlyOptions(options: ScanOptions): ScanOptions {
+  return {
+    ...options,
+    runtimeUrl: "",
+    runtime: { ...options.runtime, baseUrl: "" }
+  };
 }
 
 async function projectRoot(target: string): Promise<string> {
@@ -159,16 +239,14 @@ async function isReady(url: string): Promise<boolean> {
 async function stopRuntimeProcess(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.killed) return;
   try {
-    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
-    else child.kill("SIGTERM");
+    child.kill("SIGTERM");
   } catch {
     return;
   }
   await Promise.race([new Promise<void>((resolve) => child.once("exit", () => resolve())), delay(1_000)]);
   if (child.exitCode === null) {
     try {
-      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
-      else child.kill("SIGKILL");
+      child.kill("SIGKILL");
     } catch {
       // The process exited between the status check and signal.
     }

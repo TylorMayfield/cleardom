@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { resolveScanOptions } from "./config.js";
 import { auditRuntimeUrl, auditRuntimeUrls } from "./runtime.js";
 import { scanPath } from "./scanner.js";
+import type { ScanProgress } from "./types.js";
 
 const chromePath = process.env.CHROME_PATH
   ?? process.env.PUPPETEER_EXECUTABLE_PATH
@@ -156,7 +157,8 @@ test("runtime config applies routes, headers, storage, waits, viewports, and scr
       },
       rules: runtimeRulesExcept("CDOM_1_4_3_CONTRAST")
     });
-    const result = await auditRuntimeUrls([{ url: `${server.url}/settings`, route: "/settings" }], options, chromePath);
+    const progress: ScanProgress[] = [];
+    const result = await auditRuntimeUrls([{ url: `${server.url}/settings`, route: "/settings" }], options, chromePath, undefined, (event) => progress.push(event));
     const finding = result.findings.find((candidate) => candidate.ruleId === "CDOM_1_4_3_CONTRAST");
 
     assert.ok(finding);
@@ -166,6 +168,8 @@ test("runtime config applies routes, headers, storage, waits, viewports, and scr
     assert.match(finding.runtime?.screenshot ?? "", /^data:image\/png;base64,/);
     assert.equal(result.diagnostics.length, 0);
     assert.equal(result.pages[0]?.status, 200);
+    assert.deepEqual(progress.map((event) => event.phase), ["runtime-page"]);
+    assert.equal(progress[0]?.phase === "runtime-page" ? progress[0].completed : 0, 1);
   } finally {
     await server.close();
   }

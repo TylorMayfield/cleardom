@@ -12,6 +12,8 @@ export type FixAction = {
 export type FixEdit = {
   file: string;
   line: number;
+  start: number;
+  end: number;
   before: string;
   after: string;
   description: string;
@@ -21,6 +23,13 @@ export type FixRunResult = {
   actions: FixAction[];
   applied: number;
   diff: string;
+  error?: string;
+};
+
+export type FixEditApplication = {
+  applied: number;
+  diff: string;
+  error?: string;
 };
 
 export type FixVerification = {
@@ -41,11 +50,11 @@ export type FixPlanGroup = {
 };
 
 export async function planFixActions(findings: Finding[]): Promise<FixAction[]> {
-  const byFile = new Map<string, string[]>();
+  const byFile = new Map<string, string>();
   for (const finding of findings) {
     if (/^https?:\/\//i.test(finding.file)) continue;
     if (!byFile.has(finding.file)) {
-      byFile.set(finding.file, (await fs.readFile(finding.file, "utf8")).split(/\r?\n/));
+      byFile.set(finding.file, await fs.readFile(finding.file, "utf8"));
     }
   }
 
@@ -53,22 +62,76 @@ export async function planFixActions(findings: Finding[]): Promise<FixAction[]> 
     if (/^https?:\/\//i.test(finding.file)) {
       return skipped(finding, "Runtime and URL findings need guided remediation.");
     }
-    const lines = byFile.get(finding.file);
-    const line = lines?.[finding.line - 1];
-    if (line === undefined) return skipped(finding, "Could not read the source line for this finding.");
-    const edit = safeEditForFinding(finding, line);
-    if (edit) return { finding, outcome: "auto-fixable", reason: edit.description, edit };
+    const source = byFile.get(finding.file);
+    const range = source === undefined ? undefined : sourceLineRange(source, finding.line);
+    if (!range) return skipped(finding, "Could not read the source line for this finding.");
+    const candidate = safeEditForFinding(finding, range.text);
+    if (candidate) {
+      return {
+        finding,
+        outcome: "auto-fixable",
+        reason: candidate.description,
+        edit: {
+          file: finding.file,
+          line: finding.line,
+          start: range.start,
+          end: range.end,
+          before: range.text,
+          after: candidate.after,
+          description: candidate.description
+        }
+      };
+    }
     if (finding.fixKind === "manual-review") return { finding, outcome: "manual-review", reason: "This rule needs human review." };
     return { finding, outcome: "guided", reason: "No safe mechanical transform matched this source shape." };
   });
 }
 
 export async function runSafeFixes(findings: Finding[], apply: boolean): Promise<FixRunResult> {
-  const actions = await planFixActions(findings);
+  let actions = await planFixActions(findings);
   const edits = actions.flatMap((action) => action.edit ? [action.edit] : []);
-  const diff = formatUnifiedDiff(edits);
-  if (apply) await applyEdits(edits);
-  return { actions, applied: apply ? edits.length : 0, diff };
+  const application = await applyFixEdits(edits, apply);
+  const error = application.error;
+  if (error) {
+    actions = actions.map((action) => action.edit
+      ? { ...action, outcome: "skipped", reason: error, edit: undefined }
+      : action);
+  }
+  return { actions, ...application };
+}
+
+export async function applyFixEdits(edits: FixEdit[], apply: boolean): Promise<FixEditApplication> {
+  if (edits.length === 0) return { applied: 0, diff: "" };
+
+  const byFile = new Map<string, FixEdit[]>();
+  for (const edit of edits) byFile.set(edit.file, [...(byFile.get(edit.file) ?? []), edit]);
+
+  const originals = new Map<string, string>();
+  for (const [file, fileEdits] of byFile) {
+    const source = await fs.readFile(file, "utf8");
+    originals.set(file, source);
+    const overlap = overlappingEdit(fileEdits);
+    if (overlap) return { applied: 0, diff: "", error: `Fix batch was not applied because edits overlap in ${file} at line ${overlap.line}.` };
+    const stale = fileEdits.find((edit) => source.slice(edit.start, edit.end) !== edit.before);
+    if (stale) return { applied: 0, diff: "", error: `Fix batch was not applied because ${file}:${stale.line} changed after the fix plan was created.` };
+  }
+
+  const rendered = new Map<string, string>();
+  for (const [file, fileEdits] of byFile) {
+    let output = originals.get(file) ?? "";
+    for (const edit of [...fileEdits].sort((left, right) => right.start - left.start)) {
+      output = `${output.slice(0, edit.start)}${edit.after}${output.slice(edit.end)}`;
+    }
+    rendered.set(file, output);
+  }
+
+  if (apply) {
+    for (const [file, output] of rendered) {
+      await fs.writeFile(file, output, "utf8");
+    }
+  }
+
+  return { applied: apply ? edits.length : 0, diff: formatUnifiedDiff(edits) };
 }
 
 export function formatFixRunResult(result: FixRunResult, apply: boolean): string {
@@ -76,7 +139,7 @@ export function formatFixRunResult(result: FixRunResult, apply: boolean): string
   const guided = result.actions.filter((action) => action.outcome === "guided").length;
   const manual = result.actions.filter((action) => action.outcome === "manual-review").length;
   const skipped = result.actions.filter((action) => action.outcome === "skipped").length;
-  return [
+  const lines = [
     apply ? "ClearDOM automatic fixes" : "ClearDOM fix preview",
     "",
     `Matched findings: ${result.actions.length}`,
@@ -84,10 +147,11 @@ export function formatFixRunResult(result: FixRunResult, apply: boolean): string
     `Applied fixes: ${result.applied}`,
     `Guided fixes: ${guided}`,
     `Manual review: ${manual}`,
-    `Skipped: ${skipped}`,
-    "",
-    result.diff || "No safe automatic transforms are available for the matched findings."
-  ].join("\n");
+    `Skipped: ${skipped}`
+  ];
+  if (result.error) lines.push(`Batch status: ${result.error}`);
+  lines.push("", result.diff || "No safe automatic transforms are available for the matched findings.");
+  return lines.join("\n");
 }
 
 export function verifyFixRun(before: Finding[], selected: Finding[], after: Finding[]): FixVerification {
@@ -174,38 +238,40 @@ export function formatFixPlan(plan: FixPlanGroup[], format: "text" | "json" | "m
   return lines.join("\n").trimEnd() || "ClearDOM fix plan\n\nNo matching findings.";
 }
 
-function safeEditForFinding(finding: Finding, line: string): FixEdit | undefined {
+type SafeEditCandidate = Pick<FixEdit, "after" | "description">;
+
+function safeEditForFinding(finding: Finding, line: string): SafeEditCandidate | undefined {
   if (finding.ruleId === "CDOM_2_4_3_POSITIVE_TABINDEX") {
     const after = line
       .replace(/\btabIndex=\{[1-9]\d*\}/, "tabIndex={0}")
       .replace(/\btabIndex=["'][1-9]\d*["']/, 'tabIndex="0"')
       .replace(/\btabindex=["'][1-9]\d*["']/, 'tabindex="0"');
-    return after === line ? undefined : edit(finding, line, after, "Replace positive tab index with 0.");
+    return after === line ? undefined : candidate(after, "Replace positive tab index with 0.");
   }
 
   if (finding.ruleId === "CDOM_4_1_2_NATIVE_ROLE" && /\<(Pressable|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback)\b/.test(line) && !/\baccessibilityRole=/.test(line)) {
     const after = line.replace(/\<(Pressable|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback)\b/, '<$1 accessibilityRole="button"');
-    return edit(finding, line, after, "Add button role to React Native touch control.");
+    return candidate(after, "Add button role to React Native touch control.");
   }
 
   if (finding.ruleId === "CDOM_1_1_1_IMAGE_ALT" && /\<img\b/i.test(line) && !/\balt=/.test(line) && (/\baria-hidden=["']true["']/.test(line) || /\brole=["'](?:presentation|none)["']/.test(line))) {
     const after = line.replace(/\<img\b/i, '<img alt=""');
-    return edit(finding, line, after, "Mark decorative image with empty alt text.");
+    return candidate(after, "Mark decorative image with empty alt text.");
   }
 
   if ((finding.ruleId === "CDOM_3_3_2_PLACEHOLDER_LABEL" || finding.ruleId === "CDOM_4_1_2_FORM_LABEL") && !/\baria-label=/.test(line)) {
     const placeholder = line.match(/\bplaceholder=["']([^"']+)["']/)?.[1];
     if (placeholder?.trim()) {
       const after = line.replace(/\bplaceholder=(["'][^"']+["'])/, `placeholder=$1 aria-label="${escapeAttribute(placeholder)}"`);
-      return edit(finding, line, after, "Add aria-label from a static placeholder. Prefer a visible label when possible.");
+      return candidate(after, "Add aria-label from a static placeholder. Prefer a visible label when possible.");
     }
   }
 
   return undefined;
 }
 
-function edit(finding: Finding, before: string, after: string, description: string): FixEdit {
-  return { file: finding.file, line: finding.line, before, after, description };
+function candidate(after: string, description: string): SafeEditCandidate {
+  return { after, description };
 }
 
 function skipped(finding: Finding, reason: string): FixAction {
@@ -213,7 +279,7 @@ function skipped(finding: Finding, reason: string): FixAction {
 }
 
 function formatUnifiedDiff(edits: FixEdit[]): string {
-  return edits.map((edit) => {
+  return [...edits].sort((left, right) => left.file.localeCompare(right.file) || left.start - right.start).map((edit) => {
     const file = edit.file.replace(/\\/g, "/");
     return [
       `--- ${file}`,
@@ -225,16 +291,25 @@ function formatUnifiedDiff(edits: FixEdit[]): string {
   }).join("\n");
 }
 
-async function applyEdits(edits: FixEdit[]): Promise<void> {
-  const byFile = new Map<string, FixEdit[]>();
-  for (const edit of edits) byFile.set(edit.file, [...(byFile.get(edit.file) ?? []), edit]);
-  for (const [file, fileEdits] of byFile) {
-    const lines = (await fs.readFile(file, "utf8")).split(/\r?\n/);
-    for (const edit of fileEdits.sort((left, right) => left.line - right.line)) {
-      if (lines[edit.line - 1] === edit.before) lines[edit.line - 1] = edit.after;
-    }
-    await fs.writeFile(file, lines.join("\n"), "utf8");
+function overlappingEdit(edits: FixEdit[]): FixEdit | undefined {
+  const sorted = [...edits].sort((left, right) => left.start - right.start || left.end - right.end);
+  for (let index = 1; index < sorted.length; index += 1) {
+    if (sorted[index].start < sorted[index - 1].end) return sorted[index];
   }
+  return undefined;
+}
+
+function sourceLineRange(source: string, line: number): { start: number; end: number; text: string } | undefined {
+  if (line < 1) return undefined;
+  let start = 0;
+  for (let current = 1; current < line; current += 1) {
+    const newline = source.indexOf("\n", start);
+    if (newline === -1) return undefined;
+    start = newline + 1;
+  }
+  const newline = source.indexOf("\n", start);
+  const end = newline === -1 ? source.length : (source[newline - 1] === "\r" ? newline - 1 : newline);
+  return { start, end, text: source.slice(start, end) };
 }
 
 function estimatedRisk(fixKind: FixKind): "low" | "medium" | "high" {

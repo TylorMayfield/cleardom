@@ -10,11 +10,12 @@ import { createSemanticProject, isSemanticSourceFile, parseSemanticSource } from
 import { parseSource, supportedExtensions } from "./source-adapters.js";
 import { findStandard, referencesForStandard, resolveStandardId, ruleAppliesToStandard } from "./standards.js";
 import { applySuppressions } from "./suppressions.js";
-import type { DetectionMode, Finding, FindingImpact, FindingSource, FixKind, JsxAttribute, JsxElement, ResolvedScanOptions, RuleDefinition, RuntimeDiagnostic, RuntimePageResult, ScanOptions, ScanResult, ScoreBreakdown, Severity } from "./types.js";
+import type { DetectionMode, Finding, FindingImpact, FindingSource, FixKind, JsxAttribute, JsxElement, ResolvedScanOptions, RuleDefinition, RuntimeDiagnostic, RuntimePageResult, ScanOptions, ScanProgress, ScanResult, ScoreBreakdown, Severity } from "./types.js";
 
 const ignoredDirectories = new Set([".git", ".cleardom", "node_modules", "dist", "build", ".next", "coverage"]);
 
-export async function scanPath(targetPath: string, options: ScanOptions = {}): Promise<ScanResult> {
+export async function scanPath(targetPath: string, options: ScanOptions = {}, onProgress?: (progress: ScanProgress) => void): Promise<ScanResult> {
+  const startedAt = Date.now();
   const resolvedOptions = await resolveScanOptions(options);
   const root = path.resolve(targetPath);
   const files = await collectFiles(root, resolvedOptions);
@@ -24,11 +25,15 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}): P
   const runtimeDiagnostics: RuntimeDiagnostic[] = [];
   let runtimePages: RuntimePageResult[] = [];
 
+  onProgress?.({ phase: "source", files: files.length });
+
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
     sources.set(file, source);
     findings.push(...scanSourceWithElements(source, file, semanticProject.elementsByFile.get(file) ?? parseSource(source, file), resolvedOptions));
   }
+  const sourceFinishedAt = Date.now();
+  let runtimeMs = 0;
 
   const runtimeBaseUrl = resolvedOptions.runtime.baseUrl ?? resolvedOptions.runtimeUrl;
   if (runtimeBaseUrl) {
@@ -43,10 +48,12 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}): P
       ...runtimeTargets(runtimeBaseUrl, mergeRoutes(initialRoutes, crawled.routes)),
       ...runtimeTargets(resolvedOptions.runtime.stories.baseUrl || runtimeBaseUrl, stories.routes)
     ];
-    const runtime = await auditRuntimeUrls(targets, resolvedOptions);
+    onProgress?.({ phase: "runtime-start", pages: targets.length, viewports: resolvedOptions.runtime.viewports.length });
+    const runtime = await auditRuntimeUrls(targets, resolvedOptions, undefined, undefined, onProgress);
     runtimeDiagnostics.push(...runtime.diagnostics);
     runtimePages = runtime.pages;
     findings.push(...runtime.findings);
+    runtimeMs = Date.now() - sourceFinishedAt;
   }
 
   const suppressionResult = applySuppressions(findings, sources, resolvedOptions);
@@ -71,6 +78,7 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}): P
     semanticDiagnostics: semanticProject.diagnostics,
     runtimeDiagnostics,
     runtimePages,
+    timings: { totalMs: Date.now() - startedAt, sourceMs: sourceFinishedAt - startedAt, runtimeMs },
     baseline
   };
 }
@@ -94,7 +102,8 @@ async function discoverStoryRoutes(options: ResolvedScanOptions): Promise<{ rout
   }
 }
 
-export async function scanUrl(url: string, options: ScanOptions = {}, chromePath?: string): Promise<ScanResult> {
+export async function scanUrl(url: string, options: ScanOptions = {}, chromePath?: string, onProgress?: (progress: ScanProgress) => void): Promise<ScanResult> {
+  const startedAt = Date.now();
   const resolvedOptions = await resolveScanOptions(options);
   const browserResolution = await resolveBrowserExecutable(resolvedOptions, chromePath);
   const executablePath = browserResolution.executablePath;
@@ -117,6 +126,8 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
       resolvedOptions.runtime.baseUrl ?? url,
       resolvedOptions.runtime.routes.length > 0 ? resolvedOptions.runtime.routes : [runtimeRouteFromUrl(url)]
     );
+
+    onProgress?.({ phase: "source", files: targets.length });
 
     for (const target of targets) {
       const page = await browser.newPage();
@@ -141,10 +152,13 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
         await page.close().catch(() => undefined);
       }
     }
+    const sourceFinishedAt = Date.now();
 
-    const runtime = await auditRuntimeUrls(targets, resolvedOptions, executablePath, browser);
+    onProgress?.({ phase: "runtime-start", pages: targets.length, viewports: resolvedOptions.runtime.viewports.length });
+    const runtime = await auditRuntimeUrls(targets, resolvedOptions, executablePath, browser, onProgress);
     runtimeDiagnostics.push(...runtime.diagnostics);
     findings.push(...runtime.findings);
+    const runtimeMs = Date.now() - sourceFinishedAt;
 
     const suppressionResult = applySuppressions(findings, sources, resolvedOptions);
     const baseline = await readBaseline(resolvedOptions.baseline, resolvedOptions.rootDir);
@@ -178,6 +192,7 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
       }],
       runtimeDiagnostics,
       runtimePages: runtime.pages,
+      timings: { totalMs: Date.now() - startedAt, sourceMs: sourceFinishedAt - startedAt, runtimeMs },
       baseline
     };
   } finally {

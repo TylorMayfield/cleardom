@@ -382,23 +382,45 @@ async function runScan(command: "check" | "scan" | "ci", values: string[]): Prom
   const prepared = command === "check" ? await prepareCheck(parsed.target, options, parsed.sourceOnly) : undefined;
   if (prepared) options = prepared.options;
   try {
-    const resolvedOptions = await resolveScanOptions(options);
+    const resolvedOptions = await resolveOptionsForTarget(options, parsed.target);
+    const outputFormat = parsed.format ?? resolvedOptions.format;
+    const showProgress = outputFormat === "text" && !parsed.scoreOnly;
+    if (showProgress && prepared?.messages.length) console.log(prepared.messages.join("\n"));
     const result = isUrlTarget(parsed.target)
-      ? await scanUrl(parsed.target, resolvedOptions)
-      : await scanPath(parsed.target, resolvedOptions);
+      ? await scanUrl(parsed.target, resolvedOptions, undefined, showProgress ? printScanProgress : undefined)
+      : await scanPath(parsed.target, resolvedOptions, showProgress ? printScanProgress : undefined);
 
     if (parsed.writeBaseline) {
       await writeBaseline(parsed.writeBaseline, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
     }
     const output = await formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose, parsed.includeRules, parsed.scoreOnly, parsed.target);
-    if (prepared?.messages.length && (parsed.format ?? resolvedOptions.format) === "text" && !parsed.scoreOnly) {
-      console.log(`${prepared.messages.join("\n")}\n\n${output}`);
-    } else {
-      console.log(output);
-    }
+    console.log(output);
     process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
   } finally {
     await prepared?.close();
+  }
+}
+
+function printScanProgress(progress: import("./types.js").ScanProgress): void {
+  if (progress.phase === "source") {
+    console.log(`Running source checks (${progress.files} ${progress.files === 1 ? "file" : "files"})...`);
+  } else if (progress.phase === "runtime-start") {
+    const runs = progress.pages * progress.viewports;
+    console.log(`Running rendered checks (${progress.pages} ${progress.pages === 1 ? "route" : "routes"}, ${progress.viewports} ${progress.viewports === 1 ? "viewport" : "viewports"}, ${runs} page ${runs === 1 ? "run" : "runs"})...`);
+  } else {
+    const viewport = progress.viewport.name ?? `${progress.viewport.width}x${progress.viewport.height}`;
+    console.log(`  [${progress.completed}/${progress.total}] ${progress.route} · ${viewport}`);
+  }
+}
+
+async function resolveOptionsForTarget(options: ScanOptions, target: string) {
+  if (options.configPath || isUrlTarget(target)) return await resolveScanOptions(options);
+  const resolved = path.resolve(target);
+  try {
+    const stat = await fs.stat(resolved);
+    return await resolveScanOptions(options, stat.isDirectory() ? resolved : path.dirname(resolved));
+  } catch {
+    return await resolveScanOptions(options);
   }
 }
 
@@ -493,41 +515,51 @@ async function fixCommand(values: string[]): Promise<void> {
     parsed.scan.options.include = await diffIncludes(parsed.scan.target, parsed.scan.options);
   }
 
-  const resolvedOptions = await resolveScanOptions({ ...parsed.scan.options, failOn: "none" });
-  const result = isUrlTarget(parsed.scan.target)
-    ? await scanUrl(parsed.scan.target, resolvedOptions)
-    : await scanPath(parsed.scan.target, resolvedOptions);
-  const fixPrompt = await formatAgentFixPrompt(result, resolvedOptions, {
-    target: parsed.scan.target,
-    agent: parsed.agent,
-    ruleIds: parsed.ruleIds,
-    file: parsed.file,
-    limit: parsed.limit
-  });
+  let resolvedOptions = await resolveOptionsForTarget({ ...parsed.scan.options, failOn: "none" }, parsed.scan.target);
+  const prepared = parsed.apply && !isUrlTarget(parsed.scan.target)
+    ? await prepareCheck(parsed.scan.target, resolvedOptions, parsed.scan.sourceOnly)
+    : undefined;
+  if (prepared) resolvedOptions = await resolveOptionsForTarget(prepared.options, parsed.scan.target);
 
-  if (parsed.plan) {
-    const plan = buildFixPlan(fixPrompt.findings, result.rules, resolvedOptions, parsed.scan.target);
-    console.log(formatFixPlan(plan, parsed.planFormat));
-    return;
-  }
-
-  if (parsed.preview) {
-    console.log(formatFixRunResult(await runSafeFixes(fixPrompt.findings, false), false));
-    return;
-  }
-
-  if (parsed.apply) {
-    const applied = await runSafeFixes(fixPrompt.findings, true);
-    const after = isUrlTarget(parsed.scan.target)
+  try {
+    const result = isUrlTarget(parsed.scan.target)
       ? await scanUrl(parsed.scan.target, resolvedOptions)
       : await scanPath(parsed.scan.target, resolvedOptions);
-    const verification = verifyFixRun(result.activeFindings, fixPrompt.findings, after.activeFindings);
-    console.log(`${formatFixRunResult(applied, true)}\n\n${formatFixVerification(verification)}`);
-    if (verification.introduced.length > 0) process.exitCode = 1;
-    return;
-  }
+    const fixPrompt = await formatAgentFixPrompt(result, resolvedOptions, {
+      target: parsed.scan.target,
+      agent: parsed.agent,
+      ruleIds: parsed.ruleIds,
+      file: parsed.file,
+      limit: parsed.limit
+    });
 
-  console.log(fixPrompt.prompt);
+    if (parsed.plan) {
+      const plan = buildFixPlan(fixPrompt.findings, result.rules, resolvedOptions, parsed.scan.target);
+      console.log(formatFixPlan(plan, parsed.planFormat));
+      return;
+    }
+
+    if (parsed.preview) {
+      console.log(formatFixRunResult(await runSafeFixes(fixPrompt.findings, false), false));
+      return;
+    }
+
+    if (parsed.apply) {
+      const applied = await runSafeFixes(fixPrompt.findings, true);
+      const after = isUrlTarget(parsed.scan.target)
+        ? await scanUrl(parsed.scan.target, resolvedOptions)
+        : await scanPath(parsed.scan.target, resolvedOptions);
+      const verification = verifyFixRun(result.activeFindings, fixPrompt.findings, after.activeFindings);
+      const preparation = prepared?.messages.length ? `${prepared.messages.join("\n")}\n\n` : "";
+      console.log(`${preparation}${formatFixRunResult(applied, true)}\n\n${formatFixVerification(verification)}`);
+      if (verification.introduced.length > 0) process.exitCode = 1;
+      return;
+    }
+
+    console.log(fixPrompt.prompt);
+  } finally {
+    await prepared?.close();
+  }
 }
 
 function parseFixArgs(values: string[]): {
@@ -933,7 +965,7 @@ async function formatScan(result: Awaited<ReturnType<typeof scanPath>>, format: 
   if (scoreOnly) return String(result.score);
   if (format === "json") return formatScanJson(result, { includeRules });
   if (format === "sarif") return formatSarif(result);
-  return formatScanResult(result, verbose, await packageVersion(), target);
+  return formatScanResult(result, verbose, await packageVersion(), target, Boolean(process.stdout.isTTY && !process.env.NO_COLOR));
 }
 
 async function printVersion(): Promise<void> {

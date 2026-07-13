@@ -529,6 +529,7 @@ export type ScanResult = {
   semanticDiagnostics: SemanticDiagnostic[];
   runtimeDiagnostics: RuntimeDiagnostic[];
   runtimePages: RuntimePageResult[];
+  timings?: { totalMs: number; sourceMs: number; runtimeMs: number };
   baseline?: BaselineFile;
 };
 
@@ -548,6 +549,11 @@ export type RuntimePageResult = {
   status?: number;
   findings: number;
 };
+
+export type ScanProgress =
+  | { phase: "source"; files: number }
+  | { phase: "runtime-start"; pages: number; viewports: number }
+  | { phase: "runtime-page"; completed: number; total: number; route: string; viewport: RuntimeViewport };
 
 export type ComparisonResult = {
   base: ScanResult;

@@ -11,8 +11,8 @@ const severityLabels: Record<Severity, string> = {
 
 const categories: RuleCategory[] = ["names-and-roles", "forms", "keyboard", "structure", "readability", "react-native"];
 
-export function formatScanResult(result: ScanResult, verbose = false, version = "unknown", target = "."): string {
-  if (!verbose) return formatCompactScanResult(result, version, target);
+export function formatScanResult(result: ScanResult, verbose = false, version = "unknown", target = ".", color = false): string {
+  if (!verbose) return formatCompactScanResult(result, version, target, color);
 
   const lines = [
     `ClearDOM score: ${result.score}/100 - ${issueSummary(result)}`,
@@ -101,62 +101,122 @@ export function formatScanResult(result: ScanResult, verbose = false, version = 
   return lines.join("\n");
 }
 
-function formatCompactScanResult(result: ScanResult, version: string, target: string): string {
+function formatCompactScanResult(result: ScanResult, version: string, target: string, color = false): string {
   const lines = [
     `ClearDOM v${version}`,
-    `Detected: ${detectedLabel(result)}`,
-    "Running source checks..."
+    `Detected: ${detectedLabel(result)}`
   ];
 
-  if (result.runtimePages.length > 0 || result.runtimeDiagnostics.some((diagnostic) => diagnostic.url)) {
-    lines.push("Running runtime checks...");
-  }
-  if (result.baseline) {
-    lines.push("Comparing baseline...");
-  }
-
-  lines.push("", "✓ Scan complete", "");
-  lines.push(`Score: ${result.score}/100 (${scoreLabel(result.score)})`);
+  lines.push("", terminalStyle("✓ Scan complete", "green", color), "");
+  const failedRuntimeRuns = runtimeFailedRuns(result);
+  const partial = failedRuntimeRuns > 0 ? `, partial — ${failedRuntimeRuns} rendered page ${pluralize("run", failedRuntimeRuns)} failed` : "";
+  lines.push(`Score: ${result.score}/100 (${scoreLabel(result.score)}${partial})`);
   lines.push(`${issueSummary(result)} across ${result.checkedFiles} ${pluralize("file", result.checkedFiles)} against ${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}`);
+
+  if (result.runtimePages.length > 0) {
+    const routes = new Set(result.runtimePages.map((page) => page.route)).size;
+    const viewports = new Set(result.runtimePages.map((page) => page.viewport.name ?? `${page.viewport.width}x${page.viewport.height}`)).size;
+    const passed = Math.max(0, result.runtimePages.length - failedRuntimeRuns);
+    const runtimeFindings = result.activeFindings.filter((finding) => finding.source === "runtime").length;
+    lines.push(`Rendered: ${routes} ${pluralize("route", routes)} · ${viewports} ${pluralize("viewport", viewports)} · ${result.runtimePages.length} page ${pluralize("run", result.runtimePages.length)}`);
+    lines.push(`Runtime results: ${passed} passed · ${failedRuntimeRuns} failed · ${runtimeFindings} ${pluralize("finding", runtimeFindings)}`);
+  }
 
   const modeCounts = detectionModeCounts(result.activeFindings);
   if (result.activeFindings.length > 0) {
     lines.push(`Detection: ${modeCounts.automated} automated, ${modeCounts.needsReview} needs review, ${modeCounts.manualGuidance} manual guidance`);
   }
 
-  const findings = [...result.activeFindings].sort(compareFindingPriority).slice(0, 5);
-  if (findings.length > 0) {
+  const findingGroups = groupTerminalFindings(result.activeFindings).sort((left, right) => compareFindingPriority(left.finding, right.finding));
+  const shownGroups = findingGroups.slice(0, 5);
+  if (shownGroups.length > 0) {
     lines.push("", "Top findings");
-    for (const finding of findings) {
+    for (const { finding, occurrences } of shownGroups) {
       const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
-      lines.push(`  ${severitySymbol(finding.severity)} ${finding.ruleId} ${formatFindingLocation(finding)}`);
+      lines.push(`  ${terminalStyle(severitySymbol(finding.severity), finding.severity === "critical" ? "red" : finding.severity === "warning" ? "yellow" : "dim", color)} ${finding.title}`);
+      lines.push(`    ${formatFindingLocation(finding)}`);
       lines.push(`    ${finding.message}`);
+      if (occurrences.length > 1 && finding.runtime) {
+        const viewports = occurrences.map((item) => item.runtime?.viewport.name ?? `${item.runtime?.viewport.width}x${item.runtime?.viewport.height}`);
+        lines.push(`    Seen in ${[...new Set(viewports)].join(", ")} (${occurrences.length} occurrences)`);
+      }
       if (rule?.guidance) lines.push(`    Fix: ${rule.guidance}`);
+      lines.push(`    Rule: ${finding.ruleId}`);
     }
-    if (result.activeFindings.length > findings.length) {
-      lines.push(`  Showing ${findings.length} of ${result.activeFindings.length}. Run with --verbose for every finding.`);
+    if (findingGroups.length > shownGroups.length) {
+      lines.push(`  Showing ${shownGroups.length} of ${findingGroups.length} finding groups. Run with --verbose for every finding.`);
     }
   } else {
     lines.push("", "No high-confidence accessibility or readability issues found.");
   }
 
+  if (result.runtimeDiagnostics.length > 0) {
+    lines.push("", "Runtime warnings");
+    for (const diagnostic of result.runtimeDiagnostics.slice(0, 3)) {
+      const location = [diagnostic.route, diagnostic.viewport].filter(Boolean).join(" · ");
+      lines.push(`  ${diagnostic.severity === "error" ? "FAIL" : "WARN"} ${diagnostic.stage}${location ? ` · ${location}` : ""}`);
+      lines.push(`    ${diagnostic.message}`);
+    }
+    if (result.runtimeDiagnostics.length > 3) lines.push(`  ${result.runtimeDiagnostics.length - 3} more runtime diagnostics; run with --verbose or use --format html.`);
+  }
+
+  if (result.timings) {
+    lines.push("", `Completed in ${formatDuration(result.timings.totalMs)}`);
+    if (result.timings.runtimeMs > 0) lines.push(`  Source ${formatDuration(result.timings.sourceMs)} · Runtime ${formatDuration(result.timings.runtimeMs)}`);
+  }
+
   lines.push("", "Next:");
   const topFinding = topPriorityFinding(result.activeFindings);
   if (topFinding) {
-    lines.push(`  cleardom fix ${shellTarget(target)} --rule ${topFinding.ruleId}`);
+    const rule = result.rules.find((candidate) => candidate.id === topFinding.ruleId);
+    if (rule?.remediation?.safeAutofix) lines.push(`  cleardom fix ${shellTarget(target)} --rule ${topFinding.ruleId} --apply`);
     lines.push(`  cleardom check ${shellTarget(target)} --diff`);
   }
-  if (result.activeFindings.length > 0 && !result.baseline) {
-    lines.push("  cleardom install");
-  }
   if (result.runtimePages.length === 0 && result.runtimeDiagnostics.length === 0) {
-    lines.push(`  Rendered checks: cleardom check ${shellTarget(target)}`);
+    lines.push(`  Enable rendered checks: cleardom check ${shellTarget(target)}`);
   }
-  if (result.activeFindings.length === 0) {
-    lines.push("  cleardom install");
+  if (result.runtimeDiagnostics.some((diagnostic) => /Chromium|browser install/i.test(diagnostic.message))) {
+    lines.push("  cleardom browser install");
   }
 
   return lines.join("\n");
+}
+
+function terminalStyle(value: string, style: "red" | "yellow" | "green" | "dim", enabled: boolean): string {
+  if (!enabled) return value;
+  const code = style === "red" ? 31 : style === "yellow" ? 33 : style === "green" ? 32 : 2;
+  return `\u001b[${code}m${value}\u001b[0m`;
+}
+
+function groupTerminalFindings(findings: Finding[]): Array<{ finding: Finding; occurrences: Finding[] }> {
+  const groups = new Map<string, { finding: Finding; occurrences: Finding[] }>();
+  for (const finding of findings) {
+    const key = finding.runtime
+      ? [finding.ruleId, finding.runtime.route, finding.runtime.selector, finding.message].join("\n")
+      : finding.fingerprint;
+    const group = groups.get(key);
+    if (group) group.occurrences.push(finding);
+    else groups.set(key, { finding, occurrences: [finding] });
+  }
+  return [...groups.values()];
+}
+
+function runtimeFailedRuns(result: ScanResult): number {
+  const failedPages = result.runtimePages.filter((page) => {
+    if (page.status === undefined || page.status >= 400) return true;
+    return result.runtimeDiagnostics.some((diagnostic) => diagnostic.severity === "error"
+      && diagnostic.route === page.route
+      && (!diagnostic.viewport || diagnostic.viewport === (page.viewport.name ?? `${page.viewport.width}x${page.viewport.height}`)));
+  });
+  const unmatchedErrors = result.runtimeDiagnostics.filter((diagnostic) => diagnostic.severity === "error"
+    && !failedPages.some((page) => diagnostic.route === page.route
+      && (!diagnostic.viewport || diagnostic.viewport === (page.viewport.name ?? `${page.viewport.width}x${page.viewport.height}`))));
+  return failedPages.length + unmatchedErrors.length;
+}
+
+function formatDuration(milliseconds: number): string {
+  if (milliseconds < 1000) return `${milliseconds}ms`;
+  return `${(milliseconds / 1000).toFixed(1)}s`;
 }
 
 function shellTarget(value: string): string {

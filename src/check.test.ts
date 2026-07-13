@@ -36,6 +36,77 @@ test("check starts a detected dev server, discovers its URL, and stops it", asyn
 
 test("source-only check does not start a runtime", async () => {
   const prepared = await prepareCheck(".", {}, true);
-  assert.equal(prepared.options.runtimeUrl, undefined);
+  assert.equal(prepared.options.runtimeUrl, "");
+  assert.equal(prepared.options.runtime?.baseUrl, "");
   assert.match(prepared.messages[0] ?? "", /Source-only/);
 });
+
+test("check installs a managed browser after interactive approval", async () => {
+  const root = await runtimeFixture();
+  let browserLookups = 0;
+  let installedAt = "";
+  const prepared = await prepareCheck(root, {}, false, {
+    isInteractive: () => true,
+    confirmBrowserInstall: async () => true,
+    installManagedBrowser: async (directory) => {
+      installedAt = directory;
+      return `${directory}/.cleardom/browser/chrome`;
+    },
+    resolveBrowserExecutable: async () => {
+      browserLookups += 1;
+      return browserLookups === 1
+        ? { source: "missing", message: "missing" }
+        : { executablePath: process.execPath, source: "managed", message: "managed" };
+    }
+  });
+
+  try {
+    assert.equal(installedAt, root);
+    assert.equal(browserLookups, 2);
+    assert.match(prepared.messages.join("\n"), /Installed managed Chromium/);
+    assert.match(prepared.messages.join("\n"), /Running source and rendered checks/);
+  } finally {
+    await prepared.close();
+  }
+});
+
+test("check keeps source-only fallback when browser installation is declined, unavailable, or fails", async () => {
+  const root = await runtimeFixture();
+  const missingBrowser = async () => ({ source: "missing" as const, message: "missing" });
+
+  const declined = await prepareCheck(root, {}, false, {
+    isInteractive: () => true,
+    confirmBrowserInstall: async () => false,
+    resolveBrowserExecutable: missingBrowser
+  });
+  assert.match(declined.messages.join("\n"), /installation was declined/);
+
+  const nonInteractive = await prepareCheck(root, {}, false, {
+    isInteractive: () => false,
+    resolveBrowserExecutable: missingBrowser
+  });
+  assert.match(nonInteractive.messages.join("\n"), /Non-interactive runs do not download browsers/);
+
+  const failed = await prepareCheck(root, {}, false, {
+    isInteractive: () => true,
+    confirmBrowserInstall: async () => true,
+    installManagedBrowser: async () => { throw new Error("network unavailable"); },
+    resolveBrowserExecutable: missingBrowser
+  });
+  assert.match(failed.messages.join("\n"), /installation failed: network unavailable/);
+});
+
+async function runtimeFixture(): Promise<string> {
+  const root = await fs.mkdtemp(path.join(tmpdir(), "cleardom-check-"));
+  await fs.writeFile(path.join(root, "package.json"), JSON.stringify({
+    scripts: { dev: "node server.mjs" },
+    dependencies: { vite: "latest", react: "latest" }
+  }), "utf8");
+  await fs.writeFile(path.join(root, "server.mjs"), [
+    'import http from "node:http";',
+    'const server = http.createServer((_request, response) => response.end("ok"));',
+    'server.listen(0, "127.0.0.1", () => console.log(`http://localhost:${server.address().port}`));'
+  ].join("\n"), "utf8");
+  await fs.writeFile(path.join(root, "App.tsx"), "export const App = () => <button>Save</button>;", "utf8");
+  return root;
+}

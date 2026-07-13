@@ -15,6 +15,7 @@ test("scan prints text output", async () => {
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
   assert.match(result.stdout, /ClearDOM v0\.2\.4/);
+  assert.ok(result.stdout.indexOf("Running source checks") < result.stdout.indexOf("✓ Scan complete"));
   assert.match(result.stdout, /✓ Scan complete/);
   assert.match(result.stdout, /Score: 100\/100 \(Excellent\)/);
   assert.match(result.stdout, /0 findings across 1 file/);
@@ -62,7 +63,7 @@ test("scan text output leads with fixes and keeps details behind verbose", async
   assert.doesNotMatch(result.stdout, /Learn: cleardom explain CDOM_4_1_2_UNNAMED_CONTROL/);
   assert.match(result.stdout, /cleardom fix .* --rule CDOM_4_1_2_UNNAMED_CONTROL/);
   assert.match(result.stdout, /cleardom check .* --diff/);
-  assert.match(result.stdout, /cleardom install/);
+  assert.doesNotMatch(result.stdout, /cleardom install/);
   assert.doesNotMatch(result.stdout, /Score breakdown/);
   assert.doesNotMatch(result.stdout, /pnpm start --/);
 });
