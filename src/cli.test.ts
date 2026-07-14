@@ -15,7 +15,8 @@ test("scan prints text output", async () => {
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
   assert.match(result.stdout, /ClearDOM v0\.2\.4/);
-  assert.ok(result.stdout.indexOf("Running source checks") < result.stdout.indexOf("✓ Scan complete"));
+  assert.match(result.stderr, /Running source checks/);
+  assert.doesNotMatch(result.stdout, /Running source checks/);
   assert.match(result.stdout, /✓ Scan complete/);
   assert.match(result.stdout, /Score: 100\/100 \(Excellent\)/);
   assert.match(result.stdout, /0 findings across 1 file/);

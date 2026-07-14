@@ -16,6 +16,7 @@ import { buildFixPlan, formatFixPlan, formatFixRunResult, formatFixVerification,
 import { formatRules, formatSarif, formatScanHtml, formatScanJson, formatScanResult, formatStandards } from "./format.js";
 import { githubWorkflow, installGithubActions, runGithubPr } from "./github.js";
 import { runNativeScan } from "./native.js";
+import { createScanProgressReporter } from "./progress.js";
 import { detectProjectStack, recommendedConfig, type StackDetection } from "./project.js";
 import { formatReport, type ReportFormat } from "./report.js";
 import { findRule, normalizeRuleId, rules, summarizeRule } from "./rules/index.js";
@@ -381,14 +382,16 @@ async function runScan(command: "check" | "scan" | "ci", values: string[]): Prom
   }
   const prepared = command === "check" ? await prepareCheck(parsed.target, options, parsed.sourceOnly) : undefined;
   if (prepared) options = prepared.options;
+  let progressReporter: ReturnType<typeof createScanProgressReporter> | undefined;
   try {
     const resolvedOptions = await resolveOptionsForTarget(options, parsed.target);
     const outputFormat = parsed.format ?? resolvedOptions.format;
     const showProgress = outputFormat === "text" && !parsed.scoreOnly;
-    if (showProgress && prepared?.messages.length) console.log(prepared.messages.join("\n"));
+    progressReporter = showProgress ? createScanProgressReporter() : undefined;
+    if (showProgress && prepared?.messages.length) process.stderr.write(`${prepared.messages.join("\n")}\n`);
     const result = isUrlTarget(parsed.target)
-      ? await scanUrl(parsed.target, resolvedOptions, undefined, showProgress ? printScanProgress : undefined)
-      : await scanPath(parsed.target, resolvedOptions, showProgress ? printScanProgress : undefined);
+      ? await scanUrl(parsed.target, resolvedOptions, undefined, progressReporter?.report)
+      : await scanPath(parsed.target, resolvedOptions, progressReporter?.report);
 
     if (parsed.writeBaseline) {
       await writeBaseline(parsed.writeBaseline, resolvedOptions.rootDir, resolvedOptions.standard, result.findings);
@@ -397,19 +400,8 @@ async function runScan(command: "check" | "scan" | "ci", values: string[]): Prom
     console.log(output);
     process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
   } finally {
+    progressReporter?.finish();
     await prepared?.close();
-  }
-}
-
-function printScanProgress(progress: import("./types.js").ScanProgress): void {
-  if (progress.phase === "source") {
-    console.log(`Running source checks (${progress.files} ${progress.files === 1 ? "file" : "files"})...`);
-  } else if (progress.phase === "runtime-start") {
-    const runs = progress.pages * progress.viewports;
-    console.log(`Running rendered checks (${progress.pages} ${progress.pages === 1 ? "route" : "routes"}, ${progress.viewports} ${progress.viewports === 1 ? "viewport" : "viewports"}, ${runs} page ${runs === 1 ? "run" : "runs"})...`);
-  } else {
-    const viewport = progress.viewport.name ?? `${progress.viewport.width}x${progress.viewport.height}`;
-    console.log(`  [${progress.completed}/${progress.total}] ${progress.route} · ${viewport}`);
   }
 }
 

@@ -219,6 +219,7 @@ test("scanPath discovers safe framework runtime routes", { skip: chromePath === 
     });
 
     assert.equal(result.runtimePages.some((page) => page.route === "/settings" && page.status === 200), true);
+    assert.equal(result.runtimePages.length, 1);
   } finally {
     if (previousChromePath === undefined) {
       delete process.env.CHROME_PATH;

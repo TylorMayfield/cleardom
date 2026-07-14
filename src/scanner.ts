@@ -37,6 +37,7 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}, on
 
   const runtimeBaseUrl = resolvedOptions.runtime.baseUrl ?? resolvedOptions.runtimeUrl;
   if (runtimeBaseUrl) {
+    onProgress?.({ phase: "runtime-discovery" });
     const discovered = await discoverRuntimeRoutes(root, resolvedOptions);
     runtimeDiagnostics.push(...discovered.diagnostics);
     const initialRoutes = mergeRoutes(resolvedOptions.runtime.routes, discovered.routes);
@@ -44,10 +45,11 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}, on
     runtimeDiagnostics.push(...crawled.diagnostics);
     const stories = await discoverStoryRoutes(resolvedOptions);
     runtimeDiagnostics.push(...stories.diagnostics);
-    const targets = [
+    const targets = uniqueRuntimeTargets([
       ...runtimeTargets(runtimeBaseUrl, mergeRoutes(initialRoutes, crawled.routes)),
-      ...runtimeTargets(resolvedOptions.runtime.stories.baseUrl || runtimeBaseUrl, stories.routes)
-    ];
+      ...(stories.routes.length > 0 ? runtimeTargets(resolvedOptions.runtime.stories.baseUrl || runtimeBaseUrl, stories.routes) : [])
+    ]);
+    onProgress?.({ phase: "runtime-browser" });
     onProgress?.({ phase: "runtime-start", pages: targets.length, viewports: resolvedOptions.runtime.viewports.length });
     const runtime = await auditRuntimeUrls(targets, resolvedOptions, undefined, undefined, onProgress);
     runtimeDiagnostics.push(...runtime.diagnostics);
@@ -105,6 +107,7 @@ async function discoverStoryRoutes(options: ResolvedScanOptions): Promise<{ rout
 export async function scanUrl(url: string, options: ScanOptions = {}, chromePath?: string, onProgress?: (progress: ScanProgress) => void): Promise<ScanResult> {
   const startedAt = Date.now();
   const resolvedOptions = await resolveScanOptions(options);
+  onProgress?.({ phase: "runtime-browser" });
   const browserResolution = await resolveBrowserExecutable(resolvedOptions, chromePath);
   const executablePath = browserResolution.executablePath;
   
@@ -354,11 +357,20 @@ function isRuntimeRouteExcluded(route: string, options: ResolvedScanOptions): bo
 }
 
 function runtimeTargets(baseUrl: string, routes: string[]): Array<{ url: string; route: string }> {
-  const normalizedRoutes = routes.length > 0 ? routes.map(normalizeRoute) : ["/"];
+  const normalizedRoutes = routes.map(normalizeRoute);
   return normalizedRoutes.map((route) => ({
     route,
     url: new URL(route, ensureTrailingSlash(baseUrl)).toString()
   }));
+}
+
+function uniqueRuntimeTargets(targets: Array<{ url: string; route: string }>): Array<{ url: string; route: string }> {
+  const unique = new Map<string, { url: string; route: string }>();
+  for (const target of targets) {
+    const normalized = { url: new URL(target.url).toString(), route: normalizeRoute(target.route) };
+    unique.set(`${normalized.url}\n${normalized.route}`, normalized);
+  }
+  return [...unique.values()];
 }
 
 function runtimeRouteFromUrl(url: string): string {

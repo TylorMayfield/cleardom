@@ -22,13 +22,55 @@ test("compact output summarizes runtime coverage, groups viewports, and exposes 
 
   const output = formatScanResult(result, false, "test", ".");
 
-  assert.match(output, /Score: 90\/100 \(Great, partial — 1 rendered page run failed\)/);
+  assert.match(output, /⚠ Scan incomplete — 1 rendered page run failed/);
+  assert.doesNotMatch(output, /✓ Scan complete/);
+  assert.match(output, /Score: 90\/100 \(Great, provisional — runtime coverage incomplete\)/);
   assert.match(output, /Rendered: 1 route · 2 viewports · 2 page runs/);
-  assert.match(output, /Runtime results: 1 passed · 1 failed · 2 findings/);
+  assert.match(output, /Page runs: 1 completed · 1 failed/);
+  assert.match(output, /Runtime findings: 2/);
   assert.equal(output.match(/Low contrast text/g)?.length, 1);
   assert.match(output, /Seen in mobile, desktop \(2 occurrences\)/);
-  assert.match(output, /Runtime warnings[\s\S]*FAIL navigation · \/settings · desktop/);
+  assert.match(output, /Runtime diagnostics[\s\S]*FAIL navigation · \/settings · desktop/);
   assert.match(output, /Failed to load settings: 500/);
+  assert.match(output, /\/settings · mobile · \.price/);
+  assert.match(output, /Inspect rendered issue: \/settings · mobile · \.price/);
+  assert.match(output, /cleardom check \. --runtime-url http:\/\/localhost/);
+  assert.doesNotMatch(output, /cleardom fix/);
+});
+
+test("verbose output groups rendered findings and expands runtime diagnostics", () => {
+  const mobile = runtimeFinding("mobile", 360, "runtime-mobile");
+  const desktop = runtimeFinding("desktop", 1280, "runtime-desktop");
+  const result = scanResult([mobile, desktop]);
+  result.runtimePages = [
+    { url: "http://localhost/settings", route: "/settings", viewport: mobile.runtime!.viewport, status: 200, findings: 1 },
+    { url: "http://localhost/settings", route: "/settings", viewport: desktop.runtime!.viewport, status: 500, findings: 0 }
+  ];
+  result.runtimeDiagnostics = ["desktop", "mobile"].map((viewport) => ({
+    url: "http://localhost/settings",
+    route: "/settings",
+    viewport,
+    stage: "navigation" as const,
+    severity: "error" as const,
+    message: "Failed to load settings: 500"
+  }));
+
+  const output = formatScanResult(result, true, "test", ".");
+
+  assert.equal(output.match(/Low contrast text/g)?.length, 1);
+  assert.match(output, /Runtime diagnostics[\s\S]*\/settings · desktop, mobile/);
+  assert.equal(output.match(/Failed to load settings: 500/g)?.length, 1);
+  assert.match(output, /Remedy: Verify the route and server response/);
+  assert.equal(output.match(/\nNext:/g)?.length, 1);
+});
+
+test("source-only next actions are unique and route runtime setup through doctor", () => {
+  const result = scanResult([]);
+  const output = formatScanResult(result, false, "test", "fixture");
+
+  assert.match(output, /Configure rendered checks: cleardom doctor fixture/);
+  assert.doesNotMatch(output, /Enable rendered checks/);
+  assert.equal(output.match(/cleardom doctor fixture/g)?.length, 1);
 });
 
 test("terminal colors are opt-in and do not contaminate redirected output", () => {

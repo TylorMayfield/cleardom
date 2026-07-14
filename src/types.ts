@@ -552,6 +552,8 @@ export type RuntimePageResult = {
 
 export type ScanProgress =
   | { phase: "source"; files: number }
+  | { phase: "runtime-discovery" }
+  | { phase: "runtime-browser" }
   | { phase: "runtime-start"; pages: number; viewports: number }
   | { phase: "runtime-page"; completed: number; total: number; route: string; viewport: RuntimeViewport };
 
