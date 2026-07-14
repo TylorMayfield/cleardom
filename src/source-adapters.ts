@@ -11,7 +11,7 @@ export type SourceAdapter = {
   supportTier: SourceAdapterSupportTier;
   supportSummary: string;
   extensions: string[];
-  parse: (source: string, filePath: string) => JsxElement[];
+  parse: (source: string, filePath: string, importSourceText?: string) => JsxElement[];
 };
 
 export const sourceAdapters: SourceAdapter[] = [
@@ -35,41 +35,41 @@ export const sourceAdapters: SourceAdapter[] = [
     id: "vue",
     label: "Vue",
     supportTier: "template",
-    supportSummary: "Single-file component template extraction with common Vue binding and event aliases.",
+    supportSummary: "Single-file component template extraction with component import origins plus common Vue binding and event aliases.",
     extensions: [".vue"],
-    parse: (source) => parseJsx(prepareVueSource(source))
+    parse: (source) => parseJsx(prepareVueSource(source), source)
   },
   {
     id: "svelte",
     label: "Svelte",
     supportTier: "template",
-    supportSummary: "Markup parsing with script stripping and common Svelte binding and event aliases.",
+    supportSummary: "Markup parsing with component import origins, script stripping, and common Svelte binding and event aliases.",
     extensions: [".svelte"],
-    parse: (source) => parseJsx(prepareSvelteSource(source))
+    parse: (source) => parseJsx(prepareSvelteSource(source), source)
   },
   {
     id: "astro",
     label: "Astro",
     supportTier: "template",
-    supportSummary: "Astro frontmatter stripping with static template parsing.",
+    supportSummary: "Astro frontmatter import origins with static template parsing.",
     extensions: [".astro"],
-    parse: (source) => parseJsx(prepareAstroSource(source))
+    parse: (source) => parseJsx(prepareAstroSource(source), source)
   },
   {
     id: "angular",
     label: "Angular templates",
     supportTier: "template",
-    supportSummary: "Angular component template parsing with property and event binding aliases.",
+    supportSummary: "Angular component template parsing with adjacent component import origins plus property and event binding aliases.",
     extensions: [".component.html", ".ng.html"],
-    parse: (source) => parseJsx(prepareAngularSource(source))
+    parse: (source, _filePath, importSourceText = source) => parseJsx(prepareAngularSource(source), importSourceText)
   },
   {
     id: "mdx",
     label: "MDX",
     supportTier: "content",
-    supportSummary: "Authored markup parsing with imports and fenced code examples ignored.",
+    supportSummary: "Authored markup parsing with component import origins while fenced code examples are ignored.",
     extensions: [".mdx"],
-    parse: (source) => parseJsx(prepareMdxSource(source))
+    parse: (source) => parseJsx(prepareMdxSource(source), source)
   }
 ];
 
@@ -77,11 +77,14 @@ export const supportedExtensions = new Set(sourceAdapters.flatMap((adapter) => a
 
 export function adapterForFile(filePath: string): SourceAdapter | undefined {
   const normalized = normalizePath(filePath);
-  return sourceAdapters.find((adapter) => adapter.extensions.some((extension) => normalized.endsWith(extension)));
+  return sourceAdapters
+    .flatMap((adapter) => adapter.extensions.map((extension) => ({ adapter, extension })))
+    .filter(({ extension }) => normalized.endsWith(extension))
+    .sort((left, right) => right.extension.length - left.extension.length)[0]?.adapter;
 }
 
-export function parseSource(source: string, filePath: string): JsxElement[] {
-  return (adapterForFile(filePath) ?? sourceAdapters[0]).parse(source, filePath);
+export function parseSource(source: string, filePath: string, importSourceText = source): JsxElement[] {
+  return (adapterForFile(filePath) ?? sourceAdapters[0]).parse(source, filePath, importSourceText);
 }
 
 function prepareHtmlLikeSource(source: string): string {

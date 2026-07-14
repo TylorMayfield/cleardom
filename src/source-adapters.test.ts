@@ -1,6 +1,6 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseSource, sourceAdapters } from "./source-adapters.js";
+import { adapterForFile, parseSource, sourceAdapters } from "./source-adapters.js";
 
 test("source adapters expose documented support tiers", () => {
   assert.deepEqual(
@@ -57,6 +57,20 @@ const decorative = "<button></button>";
   assert.equal(clickable?.attributes.some((attribute) => attribute.name === "onClick"), true);
 });
 
+test("template adapters preserve design-system component import origins", () => {
+  const fixtures = [
+    { file: "Checkout.vue", source: '<script setup>import { IconButton as CloseButton } from "@acme/ui";</script><template><close-button /></template>', tag: "close-button" },
+    { file: "Checkout.svelte", source: '<script>import CloseButton from "@acme/ui";</script><CloseButton />', tag: "CloseButton" },
+    { file: "Checkout.astro", source: '---\nimport { CloseButton } from "@acme/ui";\n---\n<CloseButton />', tag: "CloseButton" },
+    { file: "Checkout.mdx", source: 'import { CloseButton } from "@acme/ui";\n\n<CloseButton />', tag: "CloseButton" }
+  ];
+
+  for (const fixture of fixtures) {
+    const element = parseSource(fixture.source, fixture.file).find((candidate) => candidate.tagName === fixture.tag);
+    assert.equal(element?.importSource, "@acme/ui", `${fixture.file} should retain its component import source`);
+  }
+});
+
 test("Svelte adapter strips module code and normalizes actions", () => {
   const elements = parseSource(`
 <script lang="ts">
@@ -77,6 +91,7 @@ test("Svelte adapter strips module code and normalizes actions", () => {
 });
 
 test("Angular adapter maps property and event bindings to rule-friendly aliases", () => {
+  assert.equal(adapterForFile("checkout.component.html")?.id, "angular");
   const elements = parseSource(`
 <main>
   <button [attr.aria-label]="'Close cart'"></button>
@@ -89,6 +104,16 @@ test("Angular adapter maps property and event bindings to rule-friendly aliases"
 
   assert.equal(button?.attributes.some((attribute) => attribute.name === "aria-label"), true);
   assert.deepEqual(div?.attributes.map((attribute) => attribute.name), ["onClick", "tabindex", "onKeyDown"]);
+});
+
+test("Angular adapter accepts adjacent component imports for design-system provenance", () => {
+  const elements = parseSource(
+    '<acme-icon-button aria-label="Close"></acme-icon-button>',
+    "checkout.component.html",
+    'import { AcmeIconButton } from "@acme/ui";'
+  );
+
+  assert.equal(elements[0]?.importSource, "@acme/ui");
 });
 
 test("MDX adapter ignores imports and fenced examples while keeping authored markup", () => {

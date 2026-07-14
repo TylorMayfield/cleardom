@@ -101,6 +101,46 @@ test("fix prints an agent remediation prompt with finding context", async () => 
   assert.match(result.stdout, /npx cleardom@latest scan .* --fail-on none/);
 });
 
+test("fix --json emits a structured agent remediation contract", async () => {
+  const fixture = await createFixture("<button />");
+  const result = await execFileAsync(process.execPath, [cliPath, "fix", fixture, "--json"]);
+  const task = JSON.parse(result.stdout) as {
+    schemaVersion: number;
+    kind: string;
+    verificationCommand: string;
+    findings: Array<{ ruleId: string; file: string; guidance?: string }>;
+    outcome: { source: { completedFiles: number } };
+  };
+
+  assert.equal(task.schemaVersion, 1);
+  assert.equal(task.kind, "cleardom-agent-remediation");
+  assert.match(task.verificationCommand, /cleardom@latest scan/);
+  assert.equal(task.findings[0]?.ruleId, "CDOM_4_1_2_UNNAMED_CONTROL");
+  assert.equal(typeof task.findings[0]?.guidance, "string");
+  assert.equal(task.outcome.source.completedFiles, 1);
+});
+
+test("fix --apply --json emits structured verification", async () => {
+  const fixture = await createFixture('<input placeholder="Email" />');
+  const result = await execFileAsync(process.execPath, [cliPath, "fix", fixture, "--apply", "--json", "--rule", "CDOM_3_3_2_PLACEHOLDER_LABEL", "--rule", "CDOM_4_1_2_FORM_LABEL", "--limit", "2", "--source-only"]);
+  const verification = JSON.parse(result.stdout) as {
+    schemaVersion: number;
+    kind: string;
+    applied: { edits: number };
+    verification: { fixed: string[]; introduced: string[] };
+    before: { findings: { safeAutoFix: number } };
+    after: { findings: { safeAutoFix: number } };
+  };
+
+  assert.equal(verification.schemaVersion, 1);
+  assert.equal(verification.kind, "cleardom-fix-verification");
+  assert.equal(verification.applied.edits, 1);
+  assert.equal(verification.verification.fixed.length, 2);
+  assert.equal(verification.verification.introduced.length, 0);
+  assert.equal(verification.before.findings.safeAutoFix >= 2, true);
+  assert.equal(verification.after.findings.safeAutoFix, 0);
+});
+
 test("fix --apply does not rewrite product code without explicit transforms", async () => {
   const fixture = await createFixture("<button />");
   const file = path.join(fixture, "Fixture.tsx");
@@ -270,7 +310,7 @@ test("report writes shareable markdown, html, and json scan reports", async () =
 test("scan --json includes score and findings without the rule catalog by default", async () => {
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture, "--json"]);
-  const json = JSON.parse(result.stdout) as { score: number; checkedFiles: number; findings: unknown[]; activeFindings: unknown[]; scoreBreakdown: { semanticClarity: number }; rules?: unknown[]; standard: { id: string }; semanticAnalysis: { adapter: string }; semanticDiagnostics: unknown[] };
+  const json = JSON.parse(result.stdout) as { score: number; checkedFiles: number; findings: unknown[]; activeFindings: unknown[]; scoreBreakdown: { semanticClarity: number }; rules?: unknown[]; standard: { id: string }; semanticAnalysis: { adapter: string }; semanticDiagnostics: unknown[]; outcome: { source: { completedFiles: number }; runtime: { requested: boolean }; findings: { automated: number } } };
 
   assert.equal(json.checkedFiles, 1);
   assert.equal(json.standard.id, "wcag22-aa");
@@ -280,6 +320,9 @@ test("scan --json includes score and findings without the rule catalog by defaul
   assert.equal(typeof json.scoreBreakdown.semanticClarity, "number");
   assert.equal(json.findings.length > 0, true);
   assert.equal(json.activeFindings.length > 0, true);
+  assert.equal(json.outcome.source.completedFiles, 1);
+  assert.equal(json.outcome.runtime.requested, false);
+  assert.equal(json.outcome.findings.automated > 0, true);
   assert.equal("rules" in json, false);
 });
 

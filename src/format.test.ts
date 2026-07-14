@@ -128,6 +128,7 @@ function scanResult(findings: Finding[]): ScanResult {
     semanticDiagnostics: [],
     runtimeDiagnostics: [],
     runtimePages: [],
+    outcome: { source: { requestedFiles: 1, completedFiles: 1, semanticFiles: 0, fallbackFiles: 1 }, runtime: { requested: false, attemptedPages: 0, completedPages: 0, failedPages: 0 }, native: { requested: false, capturedStates: 0, findings: 0 }, findings: { automated: 0, needsReview: findings.length, manualGuidance: 0, safeAutoFix: 0, guidedFix: findings.length, manualReview: 0, suppressed: 0, baselined: 0, regressions: findings.length } },
     standard: { id: "wcag22-aa", label: "WCAG 2.2 Level AA", version: "wcag22", status: "recommendation", level: "aa", recommended: true, note: "" }
   };
 }

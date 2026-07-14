@@ -11,7 +11,7 @@ import { help } from "./cli-help.js";
 import { parseBaselinePolicy, parseCommentMode, parseComponentPreset, parseFormat, parseReportFormat, parseRuleOption, parseSemanticMode, parseSeverity, requireValue } from "./cli-options.js";
 import { resolveScanOptions } from "./config.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
-import { formatAgentFixPrompt } from "./fix.js";
+import { formatAgentFixJson, formatAgentFixPrompt } from "./fix.js";
 import { buildFixPlan, formatFixPlan, formatFixRunResult, formatFixVerification, runSafeFixes, verifyFixRun } from "./fixes.js";
 import { formatRules, formatSarif, formatScanHtml, formatScanJson, formatScanResult, formatStandards } from "./format.js";
 import { githubWorkflow, installGithubActions, runGithubPr } from "./github.js";
@@ -542,9 +542,46 @@ async function fixCommand(values: string[]): Promise<void> {
         ? await scanUrl(parsed.scan.target, resolvedOptions)
         : await scanPath(parsed.scan.target, resolvedOptions);
       const verification = verifyFixRun(result.activeFindings, fixPrompt.findings, after.activeFindings);
+      if (parsed.scan.format === "json") {
+        console.log(JSON.stringify({
+          schemaVersion: 1,
+          kind: "cleardom-fix-verification",
+          target: parsed.scan.target,
+          applied: {
+            edits: applied.applied,
+            error: applied.error,
+            actions: applied.actions.map((action) => ({
+              ruleId: action.finding.ruleId,
+              fingerprint: action.finding.fingerprint,
+              outcome: action.outcome,
+              reason: action.reason
+            }))
+          },
+          verification: {
+            fixed: verification.fixed.map((finding) => finding.fingerprint),
+            remaining: verification.remaining.map((finding) => finding.fingerprint),
+            introduced: verification.introduced.map((finding) => finding.fingerprint)
+          },
+          before: result.outcome,
+          after: after.outcome
+        }, null, 2));
+        if (verification.introduced.length > 0) process.exitCode = 1;
+        return;
+      }
       const preparation = prepared?.messages.length ? `${prepared.messages.join("\n")}\n\n` : "";
       console.log(`${preparation}${formatFixRunResult(applied, true)}\n\n${formatFixVerification(verification)}`);
       if (verification.introduced.length > 0) process.exitCode = 1;
+      return;
+    }
+
+    if (parsed.scan.format === "json") {
+      console.log(formatAgentFixJson(result, resolvedOptions, {
+        target: parsed.scan.target,
+        agent: parsed.agent,
+        ruleIds: parsed.ruleIds,
+        file: parsed.file,
+        limit: parsed.limit
+      }, fixPrompt));
       return;
     }
 

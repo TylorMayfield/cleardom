@@ -120,6 +120,7 @@ export function formatPullRequestSummary(result: ScanResult, options: ResolvedSc
     `Status check: **${shouldFail(result, options.failOn) ? "failing" : "passing"}**`,
     `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"} against **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
     `Semantic analysis: **${result.semanticAnalysis.adapter === "typescript" ? "TypeScript Program" : "lightweight fallback"}**`,
+    `Coverage: **${outcomeCoverage(result)}**`,
     "",
     "| Result | Count |",
     "| --- | ---: |",
@@ -158,6 +159,7 @@ export function formatPullRequestComparisonSummary(comparison: ComparisonResult,
     `Status check: **${comparison.newFindings.length > 0 ? "failing" : "passing"}** - pull requests fail only on new findings.`,
     `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"} against **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
     `Semantic analysis: **${result.semanticAnalysis.adapter === "typescript" ? "TypeScript Program" : "lightweight fallback"}**`,
+    `Coverage: **${outcomeCoverage(result)}**`,
     "",
     "| Delta | Count |",
     "| --- | ---: |",
@@ -192,6 +194,13 @@ export function formatPullRequestComparisonSummary(comparison: ComparisonResult,
 
   lines.push("", "<sub>ClearDOM updates this comment on each run. Use `cleardom explain <rule-id>` for rule docs and fix examples.</sub>");
   return lines.join("\n");
+}
+
+function outcomeCoverage(result: ScanResult): string {
+  const parts = [`source ${result.outcome.source.completedFiles}/${result.outcome.source.requestedFiles}`];
+  if (result.outcome.runtime.requested) parts.push(`rendered ${result.outcome.runtime.completedPages}/${result.outcome.runtime.attemptedPages}`);
+  if (result.outcome.native.requested) parts.push(`native states ${result.outcome.native.capturedStates}`);
+  return parts.join(" · ");
 }
 
 export function githubWorkflow(): string {

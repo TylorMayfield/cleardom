@@ -224,12 +224,20 @@ function componentWrapperLabels(element: JsxElement, context: RuleContext): stri
 }
 
 function componentMapping(element: JsxElement, context: RuleContext): ComponentMapping | undefined {
-  const mapping = context.options.components[element.tagName] ?? context.options.components[element.tagName.split(".").at(-1) ?? element.tagName];
+  const componentName = element.tagName.split(".").at(-1) ?? element.tagName;
+  const normalizedName = normalizeComponentName(componentName);
+  const mapping = context.options.components[element.tagName]
+    ?? context.options.components[componentName]
+    ?? Object.entries(context.options.components).find(([name]) => normalizeComponentName(name) === normalizedName)?.[1];
   if (!mapping) return undefined;
   const sources = typeof mapping.importSource === "string" ? [mapping.importSource] : mapping.importSource;
   if (!sources || sources.length === 0) return mapping;
   if (!element.importSource) return mapping;
   return element.importSource && sources.includes(element.importSource) ? mapping : undefined;
+}
+
+function normalizeComponentName(value: string): string {
+  return value.replace(/[-_:]/g, "").toLowerCase();
 }
 
 function attributeWithAliases(element: JsxElement, context: RuleContext, name: string) {

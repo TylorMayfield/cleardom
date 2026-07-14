@@ -529,8 +529,40 @@ export type ScanResult = {
   semanticDiagnostics: SemanticDiagnostic[];
   runtimeDiagnostics: RuntimeDiagnostic[];
   runtimePages: RuntimePageResult[];
+  outcome: ScanOutcome;
   timings?: { totalMs: number; sourceMs: number; runtimeMs: number };
   baseline?: BaselineFile;
+};
+
+export type ScanOutcome = {
+  source: {
+    requestedFiles: number;
+    completedFiles: number;
+    semanticFiles: number;
+    fallbackFiles: number;
+  };
+  runtime: {
+    requested: boolean;
+    attemptedPages: number;
+    completedPages: number;
+    failedPages: number;
+  };
+  native: {
+    requested: boolean;
+    capturedStates: number;
+    findings: number;
+  };
+  findings: {
+    automated: number;
+    needsReview: number;
+    manualGuidance: number;
+    safeAutoFix: number;
+    guidedFix: number;
+    manualReview: number;
+    suppressed: number;
+    baselined: number;
+    regressions: number;
+  };
 };
 
 export type RuntimeDiagnostic = {

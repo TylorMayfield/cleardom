@@ -10,7 +10,7 @@ import { createSemanticProject, isSemanticSourceFile, parseSemanticSource } from
 import { parseSource, supportedExtensions } from "./source-adapters.js";
 import { findStandard, referencesForStandard, resolveStandardId, ruleAppliesToStandard } from "./standards.js";
 import { applySuppressions } from "./suppressions.js";
-import type { DetectionMode, Finding, FindingImpact, FindingSource, FixKind, JsxAttribute, JsxElement, ResolvedScanOptions, RuleDefinition, RuntimeDiagnostic, RuntimePageResult, ScanOptions, ScanProgress, ScanResult, ScoreBreakdown, Severity } from "./types.js";
+import type { DetectionMode, Finding, FindingImpact, FindingSource, FixKind, JsxAttribute, JsxElement, ResolvedScanOptions, RuleDefinition, RuntimeDiagnostic, RuntimePageResult, ScanOptions, ScanOutcome, ScanProgress, ScanResult, ScoreBreakdown, SemanticAnalysisSummary, Severity, SuppressedFinding } from "./types.js";
 
 const ignoredDirectories = new Set([".git", ".cleardom", "node_modules", "dist", "build", ".next", "coverage"]);
 
@@ -30,7 +30,8 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}, on
   for (const file of files) {
     const source = await fs.readFile(file, "utf8");
     sources.set(file, source);
-    findings.push(...scanSourceWithElements(source, file, semanticProject.elementsByFile.get(file) ?? parseSource(source, file), resolvedOptions));
+    const importSourceText = await adjacentTemplateImportSource(file, source);
+    findings.push(...scanSourceWithElements(source, file, semanticProject.elementsByFile.get(file) ?? parseSource(source, file, importSourceText), resolvedOptions));
   }
   const sourceFinishedAt = Date.now();
   let runtimeMs = 0;
@@ -80,9 +81,20 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}, on
     semanticDiagnostics: semanticProject.diagnostics,
     runtimeDiagnostics,
     runtimePages,
+    outcome: buildScanOutcome(files.length, semanticProject.analysis, marked.activeFindings, marked.baselineFindings, suppressionResult.suppressedFindings, marked.regressions, Boolean(runtimeBaseUrl), runtimePages, runtimeDiagnostics),
     timings: { totalMs: Date.now() - startedAt, sourceMs: sourceFinishedAt - startedAt, runtimeMs },
     baseline
   };
+}
+
+async function adjacentTemplateImportSource(file: string, source: string): Promise<string> {
+  if (!/\.component\.html$/i.test(file)) return source;
+  const componentFile = file.replace(/\.html$/i, ".ts");
+  try {
+    return `${await fs.readFile(componentFile, "utf8")}\n${source}`;
+  } catch {
+    return source;
+  }
 }
 
 async function discoverStoryRoutes(options: ResolvedScanOptions): Promise<{ routes: string[]; diagnostics: RuntimeDiagnostic[] }> {
@@ -195,6 +207,12 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
       }],
       runtimeDiagnostics,
       runtimePages: runtime.pages,
+      outcome: buildScanOutcome(targets.length, {
+        mode: resolvedOptions.semantic,
+        adapter: "lightweight",
+        filesAnalyzed: 0,
+        filesFallback: targets.length
+      }, marked.activeFindings, marked.baselineFindings, suppressionResult.suppressedFindings, marked.regressions, true, runtime.pages, runtimeDiagnostics),
       timings: { totalMs: Date.now() - startedAt, sourceMs: sourceFinishedAt - startedAt, runtimeMs },
       baseline
     };
@@ -357,6 +375,9 @@ function isRuntimeRouteExcluded(route: string, options: ResolvedScanOptions): bo
 }
 
 function runtimeTargets(baseUrl: string, routes: string[]): Array<{ url: string; route: string }> {
+  if (new URL(baseUrl).protocol === "file:") {
+    return [{ url: new URL(baseUrl).toString(), route: "/" }];
+  }
   const normalizedRoutes = routes.map(normalizeRoute);
   return normalizedRoutes.map((route) => ({
     route,
@@ -623,6 +644,55 @@ function summarizeFindings(marked: ReturnType<typeof markBaselineFindings>, supp
     critical: marked.activeFindings.filter((finding) => finding.severity === "critical").length,
     warning: marked.activeFindings.filter((finding) => finding.severity === "warning").length,
     info: marked.activeFindings.filter((finding) => finding.severity === "info").length
+  };
+}
+
+function buildScanOutcome(
+  checkedFiles: number,
+  semantic: SemanticAnalysisSummary,
+  activeFindings: Finding[],
+  baselineFindings: Finding[],
+  suppressedFindings: SuppressedFinding[],
+  regressions: Finding[],
+  runtimeRequested: boolean,
+  runtimePages: RuntimePageResult[],
+  runtimeDiagnostics: RuntimeDiagnostic[]
+): ScanOutcome {
+  const failedPageKeys = new Set(runtimeDiagnostics
+    .filter((diagnostic) => diagnostic.severity === "error" && Boolean(diagnostic.url))
+    .map((diagnostic) => `${diagnostic.url}\0${diagnostic.route ?? "/"}\0${diagnostic.viewport ?? ""}`));
+  const pageFailed = (page: RuntimePageResult): boolean => failedPageKeys.has(`${page.url}\0${page.route}\0${page.viewport.name ?? ""}`)
+    || failedPageKeys.has(`${page.url}\0${page.route}\0`);
+
+  return {
+    source: {
+      requestedFiles: checkedFiles,
+      completedFiles: checkedFiles,
+      semanticFiles: semantic.filesAnalyzed,
+      fallbackFiles: semantic.filesFallback
+    },
+    runtime: {
+      requested: runtimeRequested,
+      attemptedPages: runtimePages.length,
+      completedPages: runtimePages.filter((page) => !pageFailed(page)).length,
+      failedPages: runtimePages.filter(pageFailed).length
+    },
+    native: {
+      requested: false,
+      capturedStates: 0,
+      findings: 0
+    },
+    findings: {
+      automated: activeFindings.filter((finding) => finding.detectionMode === "automated").length,
+      needsReview: activeFindings.filter((finding) => finding.detectionMode === "needs-review").length,
+      manualGuidance: activeFindings.filter((finding) => finding.detectionMode === "manual-guidance").length,
+      safeAutoFix: activeFindings.filter((finding) => finding.fixKind === "safe-auto-fix").length,
+      guidedFix: activeFindings.filter((finding) => finding.fixKind === "guided-fix").length,
+      manualReview: activeFindings.filter((finding) => finding.fixKind === "manual-review").length,
+      suppressed: suppressedFindings.length,
+      baselined: baselineFindings.length,
+      regressions: regressions.length
+    }
   };
 }
 

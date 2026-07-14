@@ -1,6 +1,7 @@
 import * as assert from "node:assert/strict";
 import * as path from "node:path";
 import { test } from "node:test";
+import { detectProjectStack } from "./project.js";
 import { scanPath } from "./scanner.js";
 
 const fixturesRoot = path.resolve("examples/scenario-fixtures");
@@ -48,6 +49,20 @@ test("React Native fixture catches native label and role issues", async () => {
   assert.equal(ruleIds.has("CDOM_3_3_2_PLACEHOLDER_LABEL"), true);
   assert.equal(ruleIds.has("CDOM_4_1_2_NATIVE_ROLE"), true);
   assert.equal(result.findings.some((finding) => finding.excerpt.includes("TouchableOpacity")), false);
+});
+
+test("Electron fixture is detected and scans renderer source with web rules", async () => {
+  const root = path.join(fixturesRoot, "electron-app");
+  const detection = await detectProjectStack(root);
+  const result = await scanPath(root, { configPath: path.join(root, "cleardom.config.json") });
+  const ruleIds = new Set(result.findings.map((finding) => finding.ruleId));
+
+  assert.equal(detection.hasElectron, true);
+  assert.equal(detection.frameworks.includes("Electron"), true);
+  assert.equal(result.checkedFiles, 1);
+  assert.equal(ruleIds.has("CDOM_4_1_2_UNNAMED_CONTROL"), true);
+  assert.equal(ruleIds.has("CDOM_3_3_2_PLACEHOLDER_LABEL"), true);
+  assert.equal(ruleIds.has("CDOM_4_1_2_FORM_LABEL"), true);
 });
 
 test("monorepo fixture scans package sources while ignoring specs and build output", async () => {

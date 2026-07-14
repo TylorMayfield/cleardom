@@ -174,7 +174,8 @@ async function auditRuntimePage(
   try {
     const response = await page.goto(url, { waitUntil: options.runtime.waitUntil, timeout: options.runtime.timeoutMs });
     status = response?.status();
-    if (!response || !response.ok()) {
+    const localFile = new URL(url).protocol === "file:";
+    if ((!response && !localFile) || (response && !response.ok())) {
       diagnostics.push({
         url,
         route,

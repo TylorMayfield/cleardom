@@ -1,0 +1,9 @@
+{
+  "name": "cleardom-electron-fixture",
+  "private": true,
+  "main": "electron/main.js",
+  "dependencies": {
+    "electron": "latest",
+    "react": "latest"
+  }
+}

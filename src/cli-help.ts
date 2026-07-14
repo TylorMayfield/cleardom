@@ -3,7 +3,7 @@ export const helpText = `ClearDOM finds and fixes accessibility regressions befo
 Usage:
   cleardom [path|url]                  Run the complete check
   cleardom check [path|url] [--diff]  Check source and the rendered app
-  cleardom fix [path] [--apply]       Fix findings and verify the result
+  cleardom fix [path] [--apply|--json] Fix findings, emit an agent task, or verify
   cleardom install                    Add pull-request protection
 
 Common options:

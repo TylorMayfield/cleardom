@@ -3,7 +3,8 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
-import { applyFixEdits, type FixEdit } from "./fixes.js";
+import { applyFixEdits, runSafeFixes, verifyFixRun, type FixEdit } from "./fixes.js";
+import { scanSource } from "./scanner.js";
 
 test("source-range edits preview and apply the exact same multi-edit result", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "cleardom-fixes-"));
@@ -47,4 +48,31 @@ test("stale or overlapping edits reject the entire batch before writing", async 
   ], true);
   assert.match(overlap.error ?? "", /edits overlap/);
   assert.equal(await readFile(first, "utf8"), "first");
+});
+
+test("one placeholder autofix resolves duplicate label findings without overlapping edits", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cleardom-fixes-"));
+  const file = path.join(directory, "Form.tsx");
+  const source = 'export const Form = () => <input placeholder="Email" />;';
+  await writeFile(file, source, "utf8");
+  const findings = scanSource(source, file).filter((finding) => finding.ruleId === "CDOM_3_3_2_PLACEHOLDER_LABEL" || finding.ruleId === "CDOM_4_1_2_FORM_LABEL");
+
+  assert.equal(findings.length, 2);
+  const applied = await runSafeFixes(findings, true);
+  assert.equal(applied.error, undefined);
+  assert.equal(applied.applied, 1);
+  assert.match(await readFile(file, "utf8"), /placeholder="Email" aria-label="Email"/);
+});
+
+test("verification keeps an unchanged rule stable when another fix changes its target attributes", () => {
+  const before = scanSource('<input placeholder="Email" />', "/tmp/Form.tsx");
+  const after = scanSource('<input placeholder="Email" aria-label="Email" />', "/tmp/Form.tsx");
+  const autocompleteBefore = before.find((finding) => finding.ruleId === "CDOM_1_3_5_AUTOCOMPLETE");
+  const autocompleteAfter = after.find((finding) => finding.ruleId === "CDOM_1_3_5_AUTOCOMPLETE");
+  assert.ok(autocompleteBefore);
+  assert.ok(autocompleteAfter);
+  assert.notEqual(autocompleteBefore.fingerprint, autocompleteAfter.fingerprint);
+
+  const verification = verifyFixRun(before, before.filter((finding) => finding.ruleId !== "CDOM_1_3_5_AUTOCOMPLETE"), after);
+  assert.equal(verification.introduced.some((finding) => finding.ruleId === "CDOM_1_3_5_AUTOCOMPLETE"), false);
 });

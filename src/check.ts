@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
+import { pathToFileURL } from "node:url";
 import { installManagedBrowser, resolveBrowserExecutable, type BrowserResolution } from "./browser.js";
 import { resolveScanOptions } from "./config.js";
 import { detectProjectStack } from "./project.js";
@@ -53,6 +54,21 @@ export async function prepareCheck(
     return idle(options, browser.message);
   }
 
+  if (detection.hasElectron) {
+    const renderer = await electronRendererUrl(root);
+    if (renderer) {
+      return {
+        options: { ...options, runtimeUrl: renderer, runtime: { ...options.runtime, baseUrl: renderer, routes: ["/"] } },
+        messages: [
+          ...(browser.message.startsWith("Installed managed Chromium") ? [browser.message] : []),
+          `Detected Electron renderer at ${renderer}.`,
+          "Running source and rendered checks against the Electron renderer."
+        ],
+        close: async () => undefined
+      };
+    }
+  }
+
   const command = await runtimeCommand(root);
   if (!command) {
     return idle(options, "No dev or Storybook script was found; completed source checks only.");
@@ -76,6 +92,64 @@ export async function prepareCheck(
     const suffix = detail ? ` Last output: ${detail.slice(-500)}` : "";
     return idle(options, `${error instanceof Error ? error.message : String(error)} Completed source checks only.${suffix}`);
   }
+}
+
+async function electronRendererUrl(root: string): Promise<string | undefined> {
+  const packageJson = await readPackageJson(root);
+  const entryCandidates = [
+    packageJson?.main,
+    "main.js",
+    "main.cjs",
+    "main.mjs",
+    "src/main.js",
+    "src/main.ts",
+    "electron/main.js",
+    "electron/main.ts",
+    "src/main/index.js",
+    "src/main/index.ts"
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const entry of [...new Set(entryCandidates)]) {
+    const entryPath = path.resolve(root, entry);
+    let source: string;
+    try {
+      source = await fs.readFile(entryPath, "utf8");
+    } catch {
+      continue;
+    }
+    for (const match of source.matchAll(/\.loadFile\(\s*["'`]([^"'`$]+)["'`]\s*[,)]/g)) {
+      const rendererPath = await firstExistingPath([
+        path.resolve(root, match[1]),
+        path.resolve(path.dirname(entryPath), match[1])
+      ]);
+      if (rendererPath) return pathToFileURL(rendererPath).toString();
+    }
+  }
+
+  const rendererPath = await firstExistingPath([
+    path.join(root, "out", "renderer", "index.html"),
+    path.join(root, "dist", "renderer", "index.html")
+  ]);
+  return rendererPath ? pathToFileURL(rendererPath).toString() : undefined;
+}
+
+async function readPackageJson(root: string): Promise<{ main?: string } | undefined> {
+  try {
+    return JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8")) as { main?: string };
+  } catch {
+    return undefined;
+  }
+}
+
+async function firstExistingPath(candidates: string[]): Promise<string | undefined> {
+  for (const candidate of candidates) {
+    try {
+      if ((await fs.stat(candidate)).isFile()) return candidate;
+    } catch {
+      // Try the next conventional Electron renderer location.
+    }
+  }
+  return undefined;
 }
 
 async function ensureBrowser(

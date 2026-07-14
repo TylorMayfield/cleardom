@@ -2,7 +2,7 @@
 
 ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
 
-It is a CLI-first scanner for React, Next.js, React Native, and web apps. The v0.2 scanner is dependency-light: TypeScript for development, Node built-ins at runtime, and small in-repo source adapters for JSX, HTML, Vue, Svelte, Astro, Angular templates, and MDX.
+It is a CLI-first scanner for React, Next.js, Electron, React Native, and web apps. The v0.2 scanner is dependency-light: TypeScript for development, Node built-ins at runtime, and small in-repo source adapters for JSX, HTML, Vue, Svelte, Astro, Angular templates, and MDX.
 
 Product decisions are guided by [product.MD](product.MD).
 
@@ -94,7 +94,7 @@ npx cleardom@latest fix --apply
 npx cleardom@latest install
 ```
 
-ClearDOM detects common app stacks and UI libraries from `package.json` and project files. React, Next.js, Vite React, Solid, React Native, and Expo projects get JSX/TSX semantic source scanning and component presets automatically. Vue, Svelte, Astro, and Angular projects use template source adapters. Vanilla JavaScript web projects can scan HTML and authored source without a config file.
+ClearDOM detects common app stacks and UI libraries from `package.json` and project files. React, Next.js, Vite React, Solid, Electron renderer, React Native, and Expo projects get JSX/TSX semantic source scanning and component presets automatically. Vue, Svelte, Astro, and Angular projects use template source adapters. Vanilla JavaScript web projects can scan HTML and authored source without a config file.
 
 Use `init` when you want a committed project config, baseline, runtime browser settings, native simulator settings, ownership routing, or suppression policy:
 
@@ -103,7 +103,7 @@ npx cleardom@latest init
 npx cleardom@latest doctor .
 ```
 
-`doctor` is the setup safety pass, not the first required step. It reports the detected stack and the next useful command for React, Solid, template frameworks, vanilla web, and Expo/React Native projects. `check` starts detected web apps automatically; use `--runtime-url` only for a server you already manage. For Expo and React Native, simulator-backed checks stay opt-in until `native.appId` or `native.deepLinks` are configured.
+`doctor` is the setup safety pass, not the first required step. It reports the detected stack and the next useful command for React, Solid, Electron, template frameworks, vanilla web, and Expo/React Native projects. `check` starts detected web apps automatically; use `--runtime-url` only for a server you already manage. For Expo and React Native, simulator-backed checks stay opt-in until `native.appId` or `native.deepLinks` are configured.
 
 Useful setup variants:
 
@@ -188,7 +188,16 @@ Create `cleardom.config.json` in the project root:
     "platforms": ["ios"],
     "appId": "",
     "deepLinks": [],
-    "screens": [],
+    "screens": [
+      {
+        "name": "settings-form",
+        "deepLink": "acme://settings",
+        "actions": [
+          { "press": "label=\"Edit profile\"" },
+          { "fill": "@e2", "text": "Ada Lovelace" }
+        ]
+      }
+    ],
     "maxDurationMinutes": 20
   },
   "ownership": [],
@@ -241,16 +250,20 @@ ClearDOM documents framework support in tiers:
 | Tier | Adapters | Support |
 | --- | --- | --- |
 | Full source semantics | JSX/TSX | React, Next.js, Remix, Gatsby, Vite React, Preact, Solid-style JSX, React Native, and Expo get TypeScript Program-backed static resolution when `--semantic auto` can initialize. |
-| Template source adapters | HTML, Vue, Svelte, Astro, Angular templates | Static parsing extracts HTML-like markup and common binding/event aliases. Pair with `--runtime-url` for rendered DOM and CSS checks. |
-| Content adapter | MDX | Authored markup is scanned while imports and fenced examples are ignored. |
+| Template source adapters | HTML, Vue, Svelte, Astro, Angular templates | Static parsing extracts HTML-like markup and common binding/event aliases. Vue, Svelte, and Astro retain component import origins; Angular templates use imports from the adjacent `.component.ts` file. This enables import-scoped design-system mappings outside JSX. Pair with rendered checks for DOM and CSS evidence. |
+| Content adapter | MDX | Authored markup is scanned while component import origins are retained and fenced examples are ignored. |
+
+Electron renderers use the web rule engine. `cleardom check` detects Electron dependencies and configuration, then either audits a static renderer discovered from `BrowserWindow.loadFile(...)` or starts the project's renderer development server and attaches to its local URL. Main and preload process source remains in the source scan when it uses a supported extension; accessibility findings apply to renderer UI rather than Electron's Node-side APIs.
 
 `--semantic auto` is the default. For JavaScript, TypeScript, JSX, and TSX files, ClearDOM builds a TypeScript Program and resolves safe static semantics such as string constants, simple imported constants, object-literal prop spreads, numeric literals, template literals without dynamic holes, and simple intrinsic tag aliases. Use `--semantic off` to force the lightweight adapters, or `--semantic required` when CI should fail if compiler-backed source analysis cannot initialize. JSON output includes `semanticAnalysis` and `semanticDiagnostics`.
+
+JSON output also includes an `outcome` contract for automation and local measurement: completed source files, whether rendered checks were requested, attempted/completed/failed rendered pages, finding detection modes, fix kinds, suppressions, baselined findings, and regressions. ClearDOM does not upload this information. Coding agents can request a structured remediation task with `cleardom fix . --json`.
 
 Web runtime checks use Chromium through `puppeteer-core` for CSS-dependent issues that static source cannot see. ClearDOM looks for an explicit browser path, `CHROME_PATH`, `PUPPETEER_EXECUTABLE_PATH`, a managed browser installed with `cleardom browser install`, and then common system Chrome locations. When an interactive `cleardom check` cannot find one, it offers to install a project-local managed browser; non-interactive runs complete source checks and explain how to enable rendered checks. Start your web app locally, then pass `--runtime-url` or configure `runtime.baseUrl`.
 
 The `runtime` block supports explicit `routes`, safe route discovery from common framework file layouts, optional same-origin crawl, interaction presets/scripts, Storybook story scanning, multiple `viewports`, auth/setup scripts, custom headers, cookies, localStorage, wait strategy, selectors, timeouts, and screenshot evidence. URL scans and runtime scans reuse a single browser session. JSON and HTML reports include runtime diagnostics plus selector and screenshot evidence for runtime findings.
 
-React Native checks are static guidance for iOS and Android semantics. They flag missing labels and roles in source, including mapped design-system components. To collect simulator-backed evidence, fill in the scaffolded `native` block and run `cleardom native scan .`; rendered VoiceOver and TalkBack behavior still needs manual verification on a device or simulator.
+React Native checks are static guidance for iOS and Android semantics. They flag missing labels and roles in source, including mapped design-system components. To collect simulator-backed evidence, fill in the scaffolded `native` block and run `cleardom native scan .`. ClearDOM waits for the paid EAS Simulator session to become ready, opens each configured app/deep link, records the initial accessibility tree, executes `press` and `fill` screen actions through `agent-device`, and records evidence after every state transition. Sessions are stopped on every exit path. Rendered VoiceOver and TalkBack behavior still needs manual verification on a device or simulator.
 
 Rule options can be `"off"`, `"critical"`, `"warning"`, `"info"`, or an object like:
 

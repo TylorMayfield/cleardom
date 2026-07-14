@@ -25,6 +25,9 @@ function markdownReport(result: ScanResult, options: ResolvedScanOptions): strin
     `- Baseline findings: ${result.summary.baselineFindings}`,
     `- Regressions: ${result.summary.regressions}`,
     `- Semantic analysis: ${result.semanticAnalysis.adapter} (${result.semanticAnalysis.mode})`,
+    `- Source completion: ${result.outcome.source.completedFiles}/${result.outcome.source.requestedFiles}`,
+    `- Rendered completion: ${result.outcome.runtime.requested ? `${result.outcome.runtime.completedPages}/${result.outcome.runtime.attemptedPages}` : "not requested"}`,
+    `- Native states: ${result.outcome.native.requested ? result.outcome.native.capturedStates : "not requested"}`,
     ""
   ];
 
@@ -80,7 +83,7 @@ function markdownReport(result: ScanResult, options: ResolvedScanOptions): strin
 }
 
 function formatLocation(finding: Finding, rootDir: string): string {
-  if (/^https?:\/\//i.test(finding.file)) return `${finding.file}:${finding.line}:${finding.column}`;
+  if (/^(?:https?|file):/i.test(finding.file)) return `${finding.file}:${finding.line}:${finding.column}`;
   const relative = path.relative(rootDir, finding.file);
   const file = relative && !relative.startsWith("..") ? relative : path.relative(process.cwd(), finding.file);
   return `${normalizePath(file)}:${finding.line}:${finding.column}`;

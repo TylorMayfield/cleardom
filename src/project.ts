@@ -9,6 +9,7 @@ export type StackDetection = {
   hasTests: boolean;
   hasStorybook: boolean;
   hasRuntimeApp: boolean;
+  hasElectron: boolean;
   detectedFrom: string[];
   summary: string;
 };
@@ -41,6 +42,18 @@ export async function detectProjectStack(rootDir: string): Promise<StackDetectio
   if (dependencies.has("astro") || await containsMatchingFile(rootDir, /\.astro$/)) frameworks.add("Astro");
   if (dependencies.has("@angular/core") || files.has("angular.json") || await containsMatchingFile(rootDir, /\.component\.html$/)) frameworks.add("Angular");
   if (dependencies.has("solid-js")) frameworks.add("Solid");
+  const hasElectron = dependencies.has("electron")
+    || dependencies.has("electron-vite")
+    || dependencies.has("electron-forge")
+    || dependencies.has("@electron-forge/cli")
+    || files.has("electron-builder.yml")
+    || files.has("electron-builder.yaml")
+    || files.has("electron.vite.config.ts")
+    || files.has("electron.vite.config.js");
+  if (hasElectron) {
+    frameworks.add("Electron");
+    detectedFrom.add("Electron dependency or configuration");
+  }
   if (dependencies.has("react-native")) frameworks.add("React Native");
   if (dependencies.has("expo")) frameworks.add("Expo");
   if (frameworks.size === 0 && (files.has("src") || files.has("app") || files.has("components"))) {
@@ -76,6 +89,7 @@ export async function detectProjectStack(rootDir: string): Promise<StackDetectio
     hasTests,
     hasStorybook,
     hasRuntimeApp,
+    hasElectron,
     detectedFrom: [...detectedFrom],
     summary: [...frameworks].join(", ") || "generic source project"
   };

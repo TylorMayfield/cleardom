@@ -201,7 +201,7 @@ function formatLocation(finding: Finding, rootDir: string): string {
 }
 
 function formatFile(file: string, rootDir: string): string {
-  if (/^https?:\/\//i.test(file)) return file;
+  if (/^(?:https?|file):/i.test(file)) return file;
   const relative = path.relative(rootDir, file);
   const display = relative && !relative.startsWith("..") ? relative : path.relative(process.cwd(), file);
   return display.replace(/\\/g, "/");

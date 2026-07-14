@@ -75,6 +75,23 @@ test("uses design-system component mappings for interactive controls", () => {
   assert.equal(scanSource('<IconButton label="Close cart" icon={<XIcon />} />', "Button.tsx", options).some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
 });
 
+test("uses import-scoped design-system mappings in Vue templates", () => {
+  const options = {
+    components: {
+      CloseButton: { importSource: "@acme/ui", role: "button" as const, nameProps: ["aria-label"] }
+    }
+  };
+  const missing = '<script setup>import { CloseButton } from "@acme/ui";</script><template><CloseButton /></template>';
+  const named = '<script setup>import { CloseButton } from "@acme/ui";</script><template><CloseButton aria-label="Close cart" /></template>';
+  const kebabCase = '<script setup>import { CloseButton } from "@acme/ui";</script><template><close-button /></template>';
+  const wrongOrigin = '<script setup>import { CloseButton } from "@other/ui";</script><template><CloseButton /></template>';
+
+  assert.equal(scanSource(missing, "Checkout.vue", options).some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), true);
+  assert.equal(scanSource(named, "Checkout.vue", options).some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
+  assert.equal(scanSource(kebabCase, "Checkout.vue", options).some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), true);
+  assert.equal(scanSource(wrongOrigin, "Checkout.vue", options).some((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL"), false);
+});
+
 test("flags React Native touchables missing labels and roles", () => {
   const findings = scanSource("<Pressable><Icon /></Pressable>", "Button.tsx");
 

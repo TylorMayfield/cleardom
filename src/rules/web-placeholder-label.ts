@@ -19,12 +19,18 @@ export const placeholderLabelRule: RuleDefinition = {
     { version: "wcag30", criterion: "clear-labels", title: "Clear labels and instructions" }
   ],
   platforms: ["web"],
-  fixable: false,
+  fixable: true,
   summary: "Placeholders disappear during entry and are not a reliable label.",
   guidance: "Pair the input with a visible label, aria-label, or aria-labelledby.",
   examples: [
     { label: "Visible label", code: '<label>Email<input name="email" placeholder="name@example.com" /></label>' }
   ],
+  remediation: {
+    before: '<input placeholder="Email" />',
+    after: '<input placeholder="Email" aria-label="Email" />',
+    safeAutofix: "When the placeholder is a static string, ClearDOM can reuse it as an accessible name without changing input behavior. Add a persistent visible label when the layout permits.",
+    manualVerification: "Confirm the accessible name describes the field and add visible instructions when users need them after entering a value."
+  },
   check(context) {
     return context.elements
       .filter((element) => ["input", "textarea", "select"].includes(element.tagName.toLowerCase()) || elementRole(element, context) === "textbox")

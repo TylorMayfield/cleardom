@@ -52,14 +52,14 @@ export type FixPlanGroup = {
 export async function planFixActions(findings: Finding[]): Promise<FixAction[]> {
   const byFile = new Map<string, string>();
   for (const finding of findings) {
-    if (/^https?:\/\//i.test(finding.file)) continue;
+    if (isRuntimeLocation(finding.file)) continue;
     if (!byFile.has(finding.file)) {
       byFile.set(finding.file, await fs.readFile(finding.file, "utf8"));
     }
   }
 
   return findings.map((finding) => {
-    if (/^https?:\/\//i.test(finding.file)) {
+    if (isRuntimeLocation(finding.file)) {
       return skipped(finding, "Runtime and URL findings need guided remediation.");
     }
     const source = byFile.get(finding.file);
@@ -89,7 +89,7 @@ export async function planFixActions(findings: Finding[]): Promise<FixAction[]> 
 
 export async function runSafeFixes(findings: Finding[], apply: boolean): Promise<FixRunResult> {
   let actions = await planFixActions(findings);
-  const edits = actions.flatMap((action) => action.edit ? [action.edit] : []);
+  const edits = uniqueEdits(actions.flatMap((action) => action.edit ? [action.edit] : []));
   const application = await applyFixEdits(edits, apply);
   const error = application.error;
   if (error) {
@@ -98,6 +98,14 @@ export async function runSafeFixes(findings: Finding[], apply: boolean): Promise
       : action);
   }
   return { actions, ...application };
+}
+
+function uniqueEdits(edits: FixEdit[]): FixEdit[] {
+  const unique = new Map<string, FixEdit>();
+  for (const edit of edits) {
+    unique.set(`${edit.file}\0${edit.start}\0${edit.end}\0${edit.after}`, edit);
+  }
+  return [...unique.values()];
 }
 
 export async function applyFixEdits(edits: FixEdit[], apply: boolean): Promise<FixEditApplication> {
@@ -155,13 +163,17 @@ export function formatFixRunResult(result: FixRunResult, apply: boolean): string
 }
 
 export function verifyFixRun(before: Finding[], selected: Finding[], after: Finding[]): FixVerification {
-  const beforeFingerprints = new Set(before.map((finding) => finding.fingerprint));
-  const afterFingerprints = new Set(after.map((finding) => finding.fingerprint));
+  const beforeIdentities = new Set(before.map(fixVerificationIdentity));
+  const afterIdentities = new Set(after.map(fixVerificationIdentity));
   return {
-    fixed: selected.filter((finding) => !afterFingerprints.has(finding.fingerprint)),
-    remaining: selected.filter((finding) => afterFingerprints.has(finding.fingerprint)),
-    introduced: after.filter((finding) => !beforeFingerprints.has(finding.fingerprint))
+    fixed: selected.filter((finding) => !afterIdentities.has(fixVerificationIdentity(finding))),
+    remaining: selected.filter((finding) => afterIdentities.has(fixVerificationIdentity(finding))),
+    introduced: after.filter((finding) => !beforeIdentities.has(fixVerificationIdentity(finding)))
   };
+}
+
+function fixVerificationIdentity(finding: Finding): string {
+  return `${finding.ruleId}\0${finding.file}\0${finding.semanticLocation}`;
 }
 
 export function formatFixVerification(verification: FixVerification): string {
@@ -199,7 +211,7 @@ export function buildFixPlan(findings: Finding[], rules: RuleSummary[], options:
       verification: `npx cleardom@latest scan ${shellQuote(target)} --fail-on none`
     };
     group.count += 1;
-    const relative = /^https?:\/\//i.test(finding.file) ? finding.file : path.relative(options.rootDir, finding.file).replace(/\\/g, "/");
+    const relative = isRuntimeLocation(finding.file) ? finding.file : path.relative(options.rootDir, finding.file).replace(/\\/g, "/");
     if (!group.files.includes(relative)) group.files.push(relative);
     if (rule?.title) group.title = rule.title;
     groups.set(key, group);
@@ -325,4 +337,8 @@ function shellQuote(value: string): string {
 
 function escapeAttribute(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+}
+
+function isRuntimeLocation(value: string): boolean {
+  return /^(?:https?|file):/i.test(value);
 }

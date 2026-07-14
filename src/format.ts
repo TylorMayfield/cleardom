@@ -477,7 +477,7 @@ function formatFindingLocation(finding: Finding): string {
     const interaction = finding.runtime.evidence?.interactionStep;
     return [finding.runtime.route, viewport, finding.runtime.selector, interaction].filter(Boolean).join(" · ");
   }
-  if (/^https?:\/\//i.test(finding.file)) {
+  if (/^(?:https?|file):/i.test(finding.file)) {
     return `${finding.file}:${finding.line}:${finding.column}`;
   }
   return `${normalizePath(path.relative(process.cwd(), finding.file))}:${finding.line}:${finding.column}`;

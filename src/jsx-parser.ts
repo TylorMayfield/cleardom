@@ -23,10 +23,10 @@ const htmlVoidElements = new Set([
 
 const rawTextElements = new Set(["script", "style"]);
 
-export function parseJsx(source: string): JsxElement[] {
+export function parseJsx(source: string, importSourceText = source): JsxElement[] {
   const elements: MutableElement[] = [];
   const stack: MutableElement[] = [];
-  const importSources = collectImportSources(source);
+  const importSources = collectImportSources(importSourceText);
   let index = 0;
 
   while (index < source.length) {
@@ -76,7 +76,7 @@ export function parseJsx(source: string): JsxElement[] {
     const element: MutableElement = {
       id: elements.length,
       tagName: parsed.tagName,
-      importSource: importSources.get(componentImportName(parsed.tagName)),
+      importSource: componentImportSource(importSources, parsed.tagName),
       attributes: parsed.attributes,
       parentId: parent?.id,
       childIds: [],
@@ -113,7 +113,7 @@ export function parseJsx(source: string): JsxElement[] {
 
 function collectImportSources(source: string): Map<string, string> {
   const imports = new Map<string, string>();
-  const importPattern = /^\s*import\s+(.+?)\s+from\s+["']([^"']+)["'];?/gm;
+  const importPattern = /(?:^|[;>\n])\s*import\s+(.+?)\s+from\s+["']([^"']+)["'];?/gm;
   let match: RegExpExecArray | null;
 
   while ((match = importPattern.exec(source)) !== null) {
@@ -148,6 +148,17 @@ function collectImportSources(source: string): Map<string, string> {
 
 function componentImportName(tagName: string): string {
   return tagName.split(".")[0];
+}
+
+function componentImportSource(imports: Map<string, string>, tagName: string): string | undefined {
+  const componentName = componentImportName(tagName);
+  const exact = imports.get(componentName);
+  if (exact) return exact;
+  const normalized = componentName.replace(/[-_:]/g, "").toLowerCase();
+  for (const [localName, source] of imports) {
+    if (localName.replace(/[-_:]/g, "").toLowerCase() === normalized) return source;
+  }
+  return undefined;
 }
 
 function readOpeningElement(source: string, start: number): {

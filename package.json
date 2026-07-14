@@ -1,7 +1,7 @@
 {
   "name": "cleardom",
   "version": "0.2.4",
-  "description": "Developer-first accessibility and readability scanner for React and React Native.",
+  "description": "Developer-first accessibility doctor for React, Electron, React Native, and web apps.",
   "type": "module",
   "license": "MIT",
   "homepage": "https://github.com/TylorMayfield/cleardom#readme",
@@ -17,6 +17,8 @@
     "a11y",
     "react",
     "react-native",
+    "electron",
+    "web-accessibility",
     "wcag",
     "cli",
     "sarif"

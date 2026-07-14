@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { prepareCheck } from "./check.js";
 
 test("check starts a detected dev server, discovers its URL, and stops it", async () => {
@@ -39,6 +40,50 @@ test("source-only check does not start a runtime", async () => {
   assert.equal(prepared.options.runtimeUrl, "");
   assert.equal(prepared.options.runtime?.baseUrl, "");
   assert.match(prepared.messages[0] ?? "", /Source-only/);
+});
+
+test("check discovers a static Electron renderer from BrowserWindow.loadFile", async () => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), "cleardom-electron-check-"));
+  await fs.writeFile(path.join(root, "package.json"), JSON.stringify({
+    main: "electron/main.js",
+    dependencies: { electron: "latest", react: "latest" }
+  }), "utf8");
+  await fs.mkdir(path.join(root, "electron"), { recursive: true });
+  await fs.writeFile(path.join(root, "electron", "main.js"), 'window.loadFile("renderer/index.html");', "utf8");
+  await fs.mkdir(path.join(root, "renderer"), { recursive: true });
+  await fs.writeFile(path.join(root, "renderer", "index.html"), "<main><button>Save</button></main>", "utf8");
+
+  const prepared = await prepareCheck(root, {}, false, {
+    resolveBrowserExecutable: async () => ({ executablePath: process.execPath, source: "system", message: "system" })
+  });
+
+  assert.ok(prepared.options.runtimeUrl?.startsWith("file:"));
+  assert.equal(fileURLToPath(prepared.options.runtimeUrl ?? ""), path.join(root, "renderer", "index.html"));
+  assert.deepEqual(prepared.options.runtime?.routes, ["/"]);
+  assert.match(prepared.messages.join("\n"), /Electron renderer/);
+});
+
+test("check falls back to an Electron renderer dev server when no static renderer is available", async () => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), "cleardom-electron-dev-check-"));
+  await fs.writeFile(path.join(root, "package.json"), JSON.stringify({
+    scripts: { dev: "node server.mjs" },
+    dependencies: { electron: "latest", vite: "latest" }
+  }), "utf8");
+  await fs.writeFile(path.join(root, "server.mjs"), [
+    'import http from "node:http";',
+    'const server = http.createServer((_request, response) => response.end("renderer"));',
+    'server.listen(0, "127.0.0.1", () => console.log(`http://localhost:${server.address().port}`));'
+  ].join("\n"), "utf8");
+
+  const prepared = await prepareCheck(root, {}, false, {
+    resolveBrowserExecutable: async () => ({ executablePath: process.execPath, source: "system", message: "system" })
+  });
+  try {
+    assert.match(prepared.messages.join("\n"), /Started npm run dev/);
+    assert.equal(await (await fetch(prepared.options.runtimeUrl ?? "")).text(), "renderer");
+  } finally {
+    await prepared.close();
+  }
 });
 
 test("check installs a managed browser after interactive approval", async () => {

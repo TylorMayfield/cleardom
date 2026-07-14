@@ -16,6 +16,33 @@ export type FixPromptResult = {
   prompt: string;
 };
 
+export function formatAgentFixJson(result: ScanResult, options: ResolvedScanOptions, fixOptions: FixPromptOptions, selected: FixPromptResult): string {
+  return JSON.stringify({
+    schemaVersion: 1,
+    kind: "cleardom-agent-remediation",
+    agent: fixOptions.agent,
+    target: fixOptions.target,
+    standard: result.standard,
+    outcome: result.outcome,
+    instructions: [
+      "Make the smallest code changes that satisfy the accessibility intent of each finding.",
+      "Prefer semantic HTML and platform-native accessibility props over rule suppression.",
+      "If a finding is a false positive, use the narrowest component mapping or configuration change and explain why.",
+      "Run the verification command after editing and report fixed findings plus remaining risk."
+    ],
+    verificationCommand: verificationCommand(fixOptions),
+    findings: selected.findings.map((finding) => {
+      const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
+      return {
+        ...finding,
+        file: sourceLocation(finding.file, options.rootDir),
+        guidance: rule?.guidance,
+        remediation: rule?.remediation
+      };
+    })
+  }, null, 2);
+}
+
 const contextRadius = 3;
 
 export async function formatAgentFixPrompt(result: ScanResult, options: ResolvedScanOptions, fixOptions: FixPromptOptions): Promise<FixPromptResult> {
@@ -97,7 +124,7 @@ function verificationCommand(options: FixPromptOptions): string {
 }
 
 function formatLocation(finding: Finding, rootDir: string): string {
-  if (/^https?:\/\//i.test(finding.file)) {
+  if (isUrlLocation(finding.file)) {
     return `${finding.file}:${finding.line}:${finding.column}`;
   }
   return `${normalizePath(path.relative(rootDir, finding.file))}:${finding.line}:${finding.column}`;
@@ -109,7 +136,7 @@ function formatRuleWcag(rule: RuleSummary | undefined, finding: Finding): string
 }
 
 async function codeContext(finding: Finding, rootDir: string): Promise<string> {
-  if (/^https?:\/\//i.test(finding.file)) {
+  if (isUrlLocation(finding.file)) {
     return finding.excerpt;
   }
 
@@ -130,6 +157,14 @@ async function codeContext(finding: Finding, rootDir: string): Promise<string> {
   } catch {
     return finding.excerpt;
   }
+}
+
+function sourceLocation(file: string, rootDir: string): string {
+  return isUrlLocation(file) ? file : normalizePath(path.relative(rootDir, file));
+}
+
+function isUrlLocation(value: string): boolean {
+  return /^(?:https?|file):/i.test(value);
 }
 
 function shellQuote(value: string): string {

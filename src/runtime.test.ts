@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { resolveScanOptions } from "./config.js";
 import { auditRuntimeUrl, auditRuntimeUrls } from "./runtime.js";
 import { scanPath } from "./scanner.js";
@@ -14,6 +15,26 @@ import type { ScanProgress } from "./types.js";
 const chromePath = process.env.CHROME_PATH
   ?? process.env.PUPPETEER_EXECUTABLE_PATH
   ?? (existsSync("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome") ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : undefined);
+
+test("scanPath audits a local Electron renderer file without rewriting it as a root file URL", { skip: chromePath === undefined }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "cleardom-electron-runtime-"));
+  const renderer = path.join(root, "renderer", "index.html");
+  await mkdir(path.dirname(renderer), { recursive: true });
+  await writeFile(renderer, "<!doctype html><html lang=\"en\"><title>Electron app</title><main><button>Save</button></main></html>", "utf8");
+  try {
+    const url = pathToFileURL(renderer).toString();
+    const result = await scanPath(root, {
+      runtimeUrl: url,
+      runtime: { routes: ["/settings"], screenshot: false, browser: { executablePath: chromePath } }
+    });
+    assert.equal(result.runtimePages.length, 1);
+    assert.equal(result.runtimePages[0]?.url, url);
+    assert.equal(result.runtimePages[0]?.route, "/");
+    assert.equal(result.runtimeDiagnostics.some((diagnostic) => diagnostic.stage === "navigation" && diagnostic.severity === "error"), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("runtime interaction checks flag high-confidence rendered failures", { skip: chromePath === undefined }, async () => {
   const server = await startServer(positiveRuntimeFixture);

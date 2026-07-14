@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { resolveBrowserExecutable } from "./browser.js";
 import { resolveScanOptions } from "./config.js";
 import { detectProjectStack, type StackDetection } from "./project.js";
@@ -131,6 +132,7 @@ function setupFlowChecks(options: ResolvedScanOptions, detection: StackDetection
   const isReactWeb = ["React", "Next.js", "Remix", "Gatsby"].some((framework) => frameworks.has(framework));
   const isSolid = frameworks.has("Solid");
   const isNative = frameworks.has("Expo") || frameworks.has("React Native");
+  const isElectron = frameworks.has("Electron");
   const templateFrameworks = ["Vite Vue", "Vue", "Svelte", "Astro", "Angular"].filter((framework) => frameworks.has(framework));
   const isVanillaWeb = !isReactWeb && !isSolid && !isNative && templateFrameworks.length === 0 && (frameworks.has("Vite") || options.include.some((pattern) => pattern.includes("html")));
 
@@ -177,6 +179,16 @@ function setupFlowChecks(options: ResolvedScanOptions, detection: StackDetection
     });
   }
 
+  if (isElectron) {
+    checks.push({
+      name: "Electron setup",
+      status: options.runtimeUrl ? "pass" : "warn",
+      message: options.runtimeUrl
+        ? `Electron renderer checks are configured at ${options.runtimeUrl}.`
+        : "Electron source scanning is enabled. Run cleardom check so ClearDOM can discover BrowserWindow.loadFile(...) or attach to the renderer dev server."
+    });
+  }
+
   if (checks.length === 0) {
     checks.push({
       name: "Setup flow",
@@ -191,6 +203,15 @@ function setupFlowChecks(options: ResolvedScanOptions, detection: StackDetection
 async function runtimeUrlCheck(options: ResolvedScanOptions): Promise<DoctorCheck> {
   if (!options.runtimeUrl) {
     return { name: "Runtime URL", status: "warn", message: "No runtimeUrl configured; browser-only checks will be skipped." };
+  }
+
+  if (options.runtimeUrl.startsWith("file:")) {
+    try {
+      await fs.access(fileURLToPath(options.runtimeUrl));
+      return { name: "Runtime URL", status: "pass", message: `${options.runtimeUrl} is available as a local Electron renderer.` };
+    } catch (error) {
+      return { name: "Runtime URL", status: "warn", message: `${options.runtimeUrl} is not readable: ${errorMessage(error)}` };
+    }
   }
 
   try {

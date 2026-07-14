@@ -1,0 +1,5 @@
+{
+  "include": ["renderer/**/*.html"],
+  "standard": "wcag22-aa",
+  "failOn": "none"
+}

@@ -22,13 +22,19 @@ export const formLabelRule: RuleDefinition = {
     { version: "wcag30", criterion: "clear-labels", title: "Clear labels and names" }
   ],
   platforms: ["web"],
-  fixable: false,
+  fixable: true,
   summary: "Inputs, selects, and textareas need labels exposed to assistive technology.",
   guidance: "Use a visible label, aria-label, aria-labelledby, or a mapped design-system label prop.",
   examples: [
     { label: "Explicit label", code: '<label htmlFor="email">Email</label><input id="email" name="email" />' },
     { label: "Select label", code: '<label htmlFor="state">State</label><select id="state" name="state" />' }
   ],
+  remediation: {
+    before: '<input placeholder="Email" />',
+    after: '<input placeholder="Email" aria-label="Email" />',
+    safeAutofix: "For an unlabelled control with a static placeholder, ClearDOM can reuse that text as an accessible name. Controls without a trustworthy static label remain guided fixes.",
+    manualVerification: "Prefer a persistent visible label and confirm the announced name remains accurate after a value is entered."
+  },
   check(context) {
     return context.elements
       .filter((element) => isLabelableFormControl(element, context))

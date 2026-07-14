@@ -16,7 +16,7 @@ ClearDOM will make the accessible path the easiest path—from local development
 
 ### Primary user
 
-The application developer working in an existing React, Next.js, React Native, Expo, or web codebase. They want to ship accessible work but may not know every WCAG criterion, assistive-technology behavior, or testing tool.
+The application developer working in an existing React, Next.js, Electron, React Native, Expo, or web codebase. They want to ship accessible work but may not know every WCAG criterion, assistive-technology behavior, or testing tool.
 
 They need:
 
@@ -103,6 +103,7 @@ ClearDOM is not only a linter and not only a browser audit. Its advantage is the
 - Verification after edits.
 - Regression-focused pull-request review.
 - Web and React Native developer workflows.
+- Electron renderer workflows that reuse web semantics and rendered evidence.
 
 We should deepen these connections before expanding into unrelated product categories.
 
