@@ -240,8 +240,11 @@ function terminalActions(result: ScanResult, target: string): string[] {
   if (topFinding?.runtime) {
     actions.add(`Inspect rendered issue: ${formatFindingLocation(topFinding)}`);
   } else if (topFinding) {
-    const rule = result.rules.find((candidate) => candidate.id === topFinding.ruleId);
-    if (rule?.remediation?.safeAutofix) actions.add(`cleardom fix ${shellTarget(target)} --rule ${topFinding.ruleId} --apply`);
+    if (topFinding.fixKind === "safe-auto-fix") {
+      actions.add(`cleardom fix ${shellTarget(target)} --rule ${topFinding.ruleId} --apply`);
+    } else if (topFinding.fixKind === "guided-fix") {
+      actions.add(`cleardom fix ${shellTarget(target)} --rule ${topFinding.ruleId}`);
+    }
   }
 
   if (result.runtimePages.length > 0 || result.runtimeDiagnostics.some((diagnostic) => diagnostic.url)) {

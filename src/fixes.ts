@@ -261,16 +261,6 @@ function safeEditForFinding(finding: Finding, line: string): SafeEditCandidate |
     return after === line ? undefined : candidate(after, "Replace positive tab index with 0.");
   }
 
-  if (finding.ruleId === "CDOM_4_1_2_NATIVE_ROLE" && /\<(Pressable|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback)\b/.test(line) && !/\baccessibilityRole=/.test(line)) {
-    const after = line.replace(/\<(Pressable|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback)\b/, '<$1 accessibilityRole="button"');
-    return candidate(after, "Add button role to React Native touch control.");
-  }
-
-  if (finding.ruleId === "CDOM_1_1_1_IMAGE_ALT" && /\<img\b/i.test(line) && !/\balt=/.test(line) && (/\baria-hidden=["']true["']/.test(line) || /\brole=["'](?:presentation|none)["']/.test(line))) {
-    const after = line.replace(/\<img\b/i, '<img alt=""');
-    return candidate(after, "Mark decorative image with empty alt text.");
-  }
-
   if ((finding.ruleId === "CDOM_3_3_2_PLACEHOLDER_LABEL" || finding.ruleId === "CDOM_4_1_2_FORM_LABEL") && !/\baria-label=/.test(line)) {
     const placeholder = line.match(/\bplaceholder=["']([^"']+)["']/)?.[1];
     if (placeholder?.trim()) {

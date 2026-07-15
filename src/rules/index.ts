@@ -23,7 +23,7 @@ import { nativeRoleRule } from "./native-role.js";
 import { placeholderLabelRule } from "./web-placeholder-label.js";
 import { pointerCancellationRule } from "./web-pointer-cancellation.js";
 import { positiveTabIndexRule } from "./web-positive-tabindex.js";
-import { contrastRuntimeRule, focusObscuredRuntimeRule, focusVisibleRuntimeRule, hoverFocusContentRuntimeRule, keyboardTrapRuntimeRule, reflowRuntimeRule, skipLinkRuntimeRule, targetSizeRuntimeRule, textSpacingRuntimeRule } from "./runtime-rules.js";
+import { ariaReferenceRuntimeRule, ariaStateRuntimeRule, contrastRuntimeRule, focusObscuredRuntimeRule, focusVisibleRuntimeRule, hoverFocusContentRuntimeRule, invalidAriaRoleRuntimeRule, keyboardTrapRuntimeRule, reflowRuntimeRule, skipLinkRuntimeRule, targetSizeRuntimeRule, textSpacingRuntimeRule } from "./runtime-rules.js";
 import { sensoryInstructionsRule } from "./web-sensory-instructions.js";
 import { statusLiveRegionRule } from "./web-status-live-region.js";
 import { unnamedControlRule } from "./web-unnamed-control.js";
@@ -114,7 +114,10 @@ export const rules: RuleDefinition[] = [
   textSpacingRuntimeRule,
   hoverFocusContentRuntimeRule,
   keyboardTrapRuntimeRule,
-  focusObscuredRuntimeRule
+  focusObscuredRuntimeRule,
+  invalidAriaRoleRuntimeRule,
+  ariaReferenceRuntimeRule,
+  ariaStateRuntimeRule
 ];
 
 export const legacyRuleAliases: Record<string, string> = {

@@ -7,6 +7,7 @@ declare function rectsOverlap(left: { left: number; right: number; top: number; 
 declare function isVisible(element: HTMLElement): boolean;
 declare function nearestNonModalRegion(element: HTMLElement): HTMLElement | undefined;
 declare function interactiveElements(): HTMLElement[];
+declare function focusableElements(): HTMLElement[];
 declare function isInsideModal(element: HTMLElement): boolean;
 
 export async function collectHoverFocusContentIssues(page: puppeteer.Page): Promise<RuntimeIssue[]> {
@@ -111,7 +112,7 @@ export async function collectKeyboardTrapIssues(page: puppeteer.Page): Promise<R
       const element = document.activeElement;
       if (!(element instanceof HTMLElement) || element === document.body) return undefined;
       const region = nearestNonModalRegion(element);
-      const allFocusable = interactiveElements().filter((candidate) => isVisible(candidate));
+      const allFocusable = focusableElements().filter((candidate) => isVisible(candidate));
       const index = allFocusable.indexOf(element);
       const hasFocusableAfter = index >= 0 && allFocusable.slice(index + 1).some((candidate) => !region || !region.contains(candidate));
       const regionFocusableCount = region ? allFocusable.filter((candidate) => region.contains(candidate)).length : 1;

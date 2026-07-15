@@ -7,6 +7,8 @@ import {
   collectContrastIssues,
   collectFocusObscuredIssues,
   collectFocusVisibleIssues,
+  collectRenderedSemanticIssues,
+  collectRenderedAriaIssues,
   collectReflowIssues,
   collectSkipLinkIssues,
   collectTargetSizeIssues,
@@ -17,6 +19,7 @@ import {
   elementText,
   hoverFocusTriggerElements,
   interactiveElements,
+  focusableElements,
   isInsideModal,
   isVisible,
   nearestNonModalRegion,
@@ -24,26 +27,20 @@ import {
   parseColor,
   rectsOverlap,
   relativeLuminance,
+  renderedAccessibleName,
+  renderedFormControl,
+  renderedTextAlternative,
+  invalidAriaState,
+  skipDeferredAriaReference,
+  validAriaRole,
   selectorFor,
   visibleElementSnapshots
 } from "./runtime-browser.js";
 import { collectHoverFocusContentIssues, collectKeyboardTrapIssues } from "./runtime-interactions.js";
 import type { RuntimeIssue } from "./runtime-types.js";
-import { contrastRuntimeRule, focusObscuredRuntimeRule, focusVisibleRuntimeRule, hoverFocusContentRuntimeRule, keyboardTrapRuntimeRule, reflowRuntimeRule, skipLinkRuntimeRule, targetSizeRuntimeRule, textSpacingRuntimeRule } from "./rules/runtime-rules.js";
+import { findRule } from "./rules/index.js";
 import { referencesForStandard, ruleAppliesToStandard } from "./standards.js";
 import type { Finding, ResolvedRuntimeScanConfig, ResolvedScanOptions, RuleDefinition, RuntimeDiagnostic, RuntimePageResult, RuntimeViewport, ScanProgress, Severity } from "./types.js";
-
-const runtimeRules = [
-  contrastRuntimeRule,
-  focusVisibleRuntimeRule,
-  targetSizeRuntimeRule,
-  reflowRuntimeRule,
-  skipLinkRuntimeRule,
-  textSpacingRuntimeRule,
-  hoverFocusContentRuntimeRule,
-  keyboardTrapRuntimeRule,
-  focusObscuredRuntimeRule
-];
 
 export async function auditRuntimeUrl(url: string, options: ResolvedScanOptions, chromePath?: string): Promise<Finding[]> {
   const result = await auditRuntimeUrls([{ url, route: routeFromUrl(url) }], options, chromePath);
@@ -209,7 +206,7 @@ async function auditRuntimePage(
 
   const findings: Finding[] = [];
   for (const issue of issues) {
-    const rule = runtimeRules.find((candidate) => candidate.id === issue.ruleId);
+    const rule = findRule(issue.ruleId);
     if (!rule || !ruleAppliesToStandard(rule, options.standard) || !isRuleEnabled(rule.id, options.rules[rule.id])) continue;
     const evidence = options.runtime.screenshot ? await captureRuntimeEvidence(page, issue.selector, diagnostics, url, route, viewport, issue.interactionStep) : undefined;
     findings.push(runtimeFinding(rule, issue, url, route, viewport, evidence?.elementScreenshot ?? evidence?.pageScreenshot, evidence, options, severityOverride(options.rules[rule.id]) ?? rule.severity));
@@ -241,6 +238,8 @@ async function collectBaseRuntimeIssues(
   interactionStep?: string
 ): Promise<void> {
   const collectors: Array<() => Promise<RuntimeIssue[]>> = [
+    async () => page.evaluate("collectRenderedSemanticIssues()") as Promise<RuntimeIssue[]>,
+    async () => page.evaluate("collectRenderedAriaIssues()") as Promise<RuntimeIssue[]>,
     async () => page.evaluate("collectContrastIssues()") as Promise<RuntimeIssue[]>,
     async () => page.evaluate("collectFocusVisibleIssues()") as Promise<RuntimeIssue[]>,
     async () => page.evaluate("collectTargetSizeIssues()") as Promise<RuntimeIssue[]>,
@@ -428,7 +427,10 @@ function runtimeCollectorScript(): string {
     collectSkipLinkIssues,
     collectTextSpacingIssues,
     collectFocusObscuredIssues,
+    collectRenderedSemanticIssues,
+    collectRenderedAriaIssues,
     interactiveElements,
+    focusableElements,
     hoverFocusTriggerElements,
     isVisible,
     directText,
@@ -442,6 +444,12 @@ function runtimeCollectorScript(): string {
     parseColor,
     contrastRatio,
     relativeLuminance,
+    renderedAccessibleName,
+    renderedFormControl,
+    renderedTextAlternative,
+    invalidAriaState,
+    skipDeferredAriaReference,
+    validAriaRole,
     selectorFor
   ].map((collector) => collector.toString()).join("\n");
 }

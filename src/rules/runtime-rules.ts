@@ -183,3 +183,63 @@ export const focusObscuredRuntimeRule: RuleDefinition = {
   examples: [],
   check: noopCheck
 };
+
+const ariaRuntimeStandards: RuleDefinition["standards"] = [
+  { version: "wcag20", criterion: "4.1.2", level: "a", title: "Name, Role, Value" },
+  { version: "wcag21", criterion: "4.1.2", level: "a", title: "Name, Role, Value" },
+  { version: "wcag22", criterion: "4.1.2", level: "a", title: "Name, Role, Value" },
+  { version: "wcag30", criterion: "programmatic-role", title: "Controls expose accurate roles and states" }
+];
+
+export const invalidAriaRoleRuntimeRule: RuleDefinition = {
+  id: "CDOM_4_1_2_INVALID_ARIA_ROLE",
+  title: "Rendered element uses an unsupported ARIA role",
+  severity: "critical",
+  confidence: "high",
+  category: "names-and-roles",
+  wcag: ["4.1.2"],
+  standards: ariaRuntimeStandards,
+  platforms: ["web"],
+  fixable: false,
+  summary: "Unsupported role tokens prevent assistive technology from receiving the intended control type.",
+  guidance: "Use a valid ARIA role or, preferably, a native HTML element with the required semantics.",
+  examples: [],
+  check: noopCheck
+};
+
+export const ariaReferenceRuntimeRule: RuleDefinition = {
+  id: "CDOM_4_1_2_ARIA_REFERENCE",
+  title: "Rendered ARIA relationship references a missing element",
+  severity: "critical",
+  confidence: "high",
+  category: "names-and-roles",
+  wcag: ["4.1.2", "1.3.1"],
+  standards: [
+    ...ariaRuntimeStandards,
+    { version: "wcag20", criterion: "1.3.1", level: "a", title: "Info and Relationships" },
+    { version: "wcag21", criterion: "1.3.1", level: "a", title: "Info and Relationships" },
+    { version: "wcag22", criterion: "1.3.1", level: "a", title: "Info and Relationships" }
+  ],
+  platforms: ["web"],
+  fixable: false,
+  summary: "ARIA relationships only work when every referenced ID exists in the rendered document.",
+  guidance: "Render the referenced element, correct the ID, or remove the stale ARIA relationship.",
+  examples: [],
+  check: noopCheck
+};
+
+export const ariaStateRuntimeRule: RuleDefinition = {
+  id: "CDOM_4_1_2_ARIA_STATE",
+  title: "Rendered ARIA widget has a missing or invalid state",
+  severity: "critical",
+  confidence: "high",
+  category: "names-and-roles",
+  wcag: ["4.1.2"],
+  standards: ariaRuntimeStandards,
+  platforms: ["web"],
+  fixable: false,
+  summary: "Stateful widgets need valid current-state properties so assistive technology can announce their behavior.",
+  guidance: "Provide the required ARIA state for the widget role and keep its value synchronized with the rendered UI.",
+  examples: [],
+  check: noopCheck
+};

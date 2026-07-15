@@ -133,8 +133,9 @@ function setupFlowChecks(options: ResolvedScanOptions, detection: StackDetection
   const isSolid = frameworks.has("Solid");
   const isNative = frameworks.has("Expo") || frameworks.has("React Native");
   const isElectron = frameworks.has("Electron");
+  const webContainers = detection.webContainers;
   const templateFrameworks = ["Vite Vue", "Vue", "Svelte", "Astro", "Angular"].filter((framework) => frameworks.has(framework));
-  const isVanillaWeb = !isReactWeb && !isSolid && !isNative && templateFrameworks.length === 0 && (frameworks.has("Vite") || options.include.some((pattern) => pattern.includes("html")));
+  const isVanillaWeb = !isReactWeb && !isSolid && !isNative && webContainers.length === 0 && templateFrameworks.length === 0 && (frameworks.has("Vite") || options.include.some((pattern) => pattern.includes("html")));
 
   if (isReactWeb) {
     const presets = options.componentPresets.length > 0 ? options.componentPresets.join(", ") : "none";
@@ -186,6 +187,14 @@ function setupFlowChecks(options: ResolvedScanOptions, detection: StackDetection
       message: options.runtimeUrl
         ? `Electron renderer checks are configured at ${options.runtimeUrl}.`
         : "Electron source scanning is enabled. Run cleardom check so ClearDOM can discover BrowserWindow.loadFile(...) or attach to the renderer dev server."
+    });
+  }
+
+  if (webContainers.length > 0) {
+    checks.push({
+      name: "Web container setup",
+      status: "pass",
+      message: `${webContainers.join(", ")} UI uses the shared web source and rendered rule engine. Run cleardom check for a detected dev server; use runtime routes or built HTML for shell-specific popup, options, and webview surfaces.`
     });
   }
 

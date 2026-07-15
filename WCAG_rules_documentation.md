@@ -27,7 +27,7 @@ This document tracks the full WCAG 2.2 success-criteria catalog and how ClearDOM
 | 1.2.7 | AAA | Extended Audio Description (Prerecorded) | No | - | CDOM_1_2_7_EXTENDED_AUDIO_DESCRIPTION | ClearDOM mapped |
 | 1.2.8 | AAA | Media Alternative (Prerecorded) | No | - | CDOM_1_2_8_FULL_MEDIA_ALTERNATIVE | ClearDOM mapped |
 | 1.2.9 | AAA | Audio-only (Live) | No | - | CDOM_1_2_9_LIVE_AUDIO_TRANSCRIPT | ClearDOM mapped |
-| 1.3.1 | A | Info and Relationships | Yes | cleardom-static, pa11y, manual | CDOM_1_3_1_FIELDSET_LEGEND, CDOM_1_3_1_HEADING_ORDER, CDOM_3_3_2_PLACEHOLDER_LABEL, CDOM_4_1_2_ARIA_HIDDEN_FOCUS, CDOM_4_1_2_DUPLICATE_ID, CDOM_4_1_2_FORM_LABEL | ClearDOM mapped |
+| 1.3.1 | A | Info and Relationships | Yes | cleardom-static, cleardom-runtime, pa11y, manual | CDOM_1_3_1_FIELDSET_LEGEND, CDOM_1_3_1_HEADING_ORDER, CDOM_3_3_2_PLACEHOLDER_LABEL, CDOM_4_1_2_ARIA_HIDDEN_FOCUS, CDOM_4_1_2_ARIA_REFERENCE, CDOM_4_1_2_DUPLICATE_ID, CDOM_4_1_2_FORM_LABEL | ClearDOM mapped |
 | 1.3.2 | A | Meaningful Sequence | Yes | cleardom-static, manual | CDOM_1_3_2_MEANINGFUL_SEQUENCE | ClearDOM mapped |
 | 1.3.3 | A | Sensory Characteristics | Yes | cleardom-static, manual | CDOM_1_3_3_SENSORY_INSTRUCTIONS | ClearDOM mapped |
 | 1.3.4 | AA | Orientation | Yes | cleardom-static, manual | CDOM_1_3_4_ORIENTATION | ClearDOM mapped |
@@ -101,7 +101,7 @@ This document tracks the full WCAG 2.2 success-criteria catalog and how ClearDOM
 | 3.3.7 | A | Redundant Entry | Yes | cleardom-static, manual | CDOM_3_3_7_REDUNDANT_ENTRY | ClearDOM mapped |
 | 3.3.8 | AA | Accessible Authentication (Minimum) | Yes | cleardom-static, manual | CDOM_3_3_8_ACCESSIBLE_AUTHENTICATION | ClearDOM mapped |
 | 3.3.9 | AAA | Accessible Authentication (Enhanced) | No | - | CDOM_3_3_9_ACCESSIBLE_AUTHENTICATION_ENHANCED | ClearDOM mapped |
-| 4.1.2 | A | Name, Role, Value | Yes | cleardom-static, axe, pa11y | CDOM_2_1_1_KEYBOARD, CDOM_3_3_1_ERROR_DESCRIPTION, CDOM_4_1_2_ANCHOR_HREF, CDOM_4_1_2_ARIA_HIDDEN_FOCUS, CDOM_4_1_2_DUPLICATE_ID, CDOM_4_1_2_FORM_LABEL, CDOM_4_1_2_NATIVE_LABEL, CDOM_4_1_2_NATIVE_ROLE, CDOM_4_1_2_UNNAMED_CONTROL | ClearDOM mapped |
+| 4.1.2 | A | Name, Role, Value | Yes | cleardom-static, cleardom-runtime, axe, pa11y | CDOM_2_1_1_KEYBOARD, CDOM_3_3_1_ERROR_DESCRIPTION, CDOM_4_1_2_ANCHOR_HREF, CDOM_4_1_2_ARIA_HIDDEN_FOCUS, CDOM_4_1_2_ARIA_REFERENCE, CDOM_4_1_2_ARIA_STATE, CDOM_4_1_2_DUPLICATE_ID, CDOM_4_1_2_FORM_LABEL, CDOM_4_1_2_INVALID_ARIA_ROLE, CDOM_4_1_2_NATIVE_LABEL, CDOM_4_1_2_NATIVE_ROLE, CDOM_4_1_2_UNNAMED_CONTROL | ClearDOM mapped |
 | 4.1.3 | AA | Status Messages | Yes | cleardom-static, pa11y, manual | CDOM_4_1_3_STATUS_LIVE_REGION | ClearDOM mapped |
 
 ## ClearDOM Rule Catalog
@@ -193,6 +193,9 @@ This document tracks the full WCAG 2.2 success-criteria catalog and how ClearDOM
 | CDOM_1_4_13_HOVER_FOCUS_CONTENT | Hover or focus content is not dismissible or hoverable | warning | medium | 1.4.13 | web |
 | CDOM_2_1_2_KEYBOARD_TRAP | Keyboard focus appears trapped | critical | medium | 2.1.2 | web |
 | CDOM_2_4_11_FOCUS_OBSCURED | Focused control is fully obscured by author content | critical | medium | 2.4.11 | web |
+| CDOM_4_1_2_INVALID_ARIA_ROLE | Rendered element uses an unsupported ARIA role | critical | high | 4.1.2 | web |
+| CDOM_4_1_2_ARIA_REFERENCE | Rendered ARIA relationship references a missing element | critical | high | 4.1.2, 1.3.1 | web |
+| CDOM_4_1_2_ARIA_STATE | Rendered ARIA widget has a missing or invalid state | critical | high | 4.1.2 | web |
 
 ## Unmapped WCAG 2.2 Criteria
 

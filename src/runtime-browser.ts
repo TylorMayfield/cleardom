@@ -24,7 +24,7 @@ export function collectContrastIssues(): RuntimeIssue[] {
 }
 
 export function collectFocusVisibleIssues(): RuntimeIssue[] {
-  const elements = interactiveElements().filter((element) => isVisible(element));
+  const elements = focusableElements().filter((element) => isVisible(element));
   const issues: RuntimeIssue[] = [];
 
   for (const element of elements.slice(0, 60)) {
@@ -190,7 +190,7 @@ export function collectTextSpacingIssues(): RuntimeIssue[] {
 
 export function collectFocusObscuredIssues(): RuntimeIssue[] {
   const issues: RuntimeIssue[] = [];
-  for (const element of interactiveElements().filter((candidate) => isVisible(candidate)).slice(0, 80)) {
+  for (const element of focusableElements().filter((candidate) => isVisible(candidate)).slice(0, 80)) {
     element.focus();
     if (document.activeElement !== element) continue;
     const rect = element.getBoundingClientRect();
@@ -221,8 +221,223 @@ export function collectFocusObscuredIssues(): RuntimeIssue[] {
   return issues.slice(0, 25);
 }
 
+export function collectRenderedSemanticIssues(): RuntimeIssue[] {
+  const issues: RuntimeIssue[] = [];
+  const focusable = new Set(focusableElements());
+  const visibleControls = interactiveElements()
+    .filter((element) => isVisible(element))
+    .filter((element) => !element.matches(":disabled") && !element.closest("[inert]"));
+
+  for (const element of visibleControls) {
+    if (focusable.has(element) && element.closest("[aria-hidden='true']")) {
+      issues.push({
+        ruleId: "CDOM_4_1_2_ARIA_HIDDEN_FOCUS",
+        selector: selectorFor(element),
+        message: "Remove this control from the tab order or stop hiding it from assistive technology."
+      });
+      continue;
+    }
+
+    if (!renderedAccessibleName(element)) {
+      issues.push({
+        ruleId: renderedFormControl(element) ? "CDOM_4_1_2_FORM_LABEL" : "CDOM_4_1_2_UNNAMED_CONTROL",
+        selector: selectorFor(element),
+        message: renderedFormControl(element)
+          ? "Add a rendered label, aria-label, or valid aria-labelledby reference for this form control."
+          : "Add visible text, aria-label, or a valid aria-labelledby reference for this rendered control."
+      });
+    }
+  }
+
+  const ids = new Map<string, HTMLElement[]>();
+  for (const element of document.querySelectorAll<HTMLElement>("[id]")) {
+    const id = element.id.trim();
+    if (!id) continue;
+    ids.set(id, [...(ids.get(id) ?? []), element]);
+  }
+  for (const duplicates of ids.values()) {
+    if (duplicates.length < 2) continue;
+    for (const element of duplicates) {
+      issues.push({
+        ruleId: "CDOM_4_1_2_DUPLICATE_ID",
+        selector: selectorFor(element),
+        message: `Make the rendered id "${element.id}" unique so accessibility references resolve predictably.`
+      });
+    }
+  }
+
+  return issues.slice(0, 25);
+}
+
+export function collectRenderedAriaIssues(): RuntimeIssue[] {
+  const issues: RuntimeIssue[] = [];
+  const referenceAttributes = ["aria-activedescendant", "aria-controls", "aria-describedby", "aria-details", "aria-errormessage", "aria-flowto", "aria-labelledby", "aria-owns"];
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>("[role], [aria-activedescendant], [aria-controls], [aria-describedby], [aria-details], [aria-errormessage], [aria-flowto], [aria-labelledby], [aria-owns], [aria-checked], [aria-expanded], [aria-pressed], [aria-selected], [aria-current], [aria-haspopup], [aria-invalid], [aria-live], [aria-orientation], [aria-sort], [aria-autocomplete]"))
+    .filter((element) => isVisible(element) && !element.closest("[inert]"));
+
+  for (const element of candidates) {
+    const roleTokens = (element.getAttribute("role") ?? "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const resolvedRole = roleTokens.find((role) => validAriaRole(role));
+    if (roleTokens.length > 0 && !resolvedRole) {
+      issues.push({
+        ruleId: "CDOM_4_1_2_INVALID_ARIA_ROLE",
+        selector: selectorFor(element),
+        message: `Replace unsupported role value "${roleTokens.join(" ")}" with a valid semantic role or native HTML element.`
+      });
+    }
+
+    for (const attribute of referenceAttributes) {
+      const value = element.getAttribute(attribute)?.trim();
+      if (!value || skipDeferredAriaReference(element, attribute)) continue;
+      const missing = value.split(/\s+/).filter((id) => !document.getElementById(id));
+      if (missing.length === 0) continue;
+      issues.push({
+        ruleId: "CDOM_4_1_2_ARIA_REFERENCE",
+        selector: selectorFor(element),
+        message: `${attribute} references missing id${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`
+      });
+    }
+
+    const stateProblem = invalidAriaState(element, resolvedRole);
+    if (stateProblem) {
+      issues.push({
+        ruleId: "CDOM_4_1_2_ARIA_STATE",
+        selector: selectorFor(element),
+        message: stateProblem
+      });
+    }
+  }
+
+  return issues.slice(0, 25);
+}
+
+export function validAriaRole(role: string): boolean {
+  const roles = new Set([
+    "alert", "alertdialog", "application", "article", "banner", "blockquote", "button", "caption", "cell", "checkbox", "code", "columnheader", "combobox", "complementary", "contentinfo", "definition", "deletion", "dialog", "directory", "document", "emphasis", "feed", "figure", "form", "generic", "grid", "gridcell", "group", "heading", "img", "insertion", "link", "list", "listbox", "listitem", "log", "main", "marquee", "math", "menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio", "meter", "navigation", "none", "note", "option", "paragraph", "presentation", "progressbar", "radio", "radiogroup", "region", "row", "rowgroup", "rowheader", "scrollbar", "search", "searchbox", "separator", "slider", "spinbutton", "status", "strong", "subscript", "suggestion", "superscript", "switch", "tab", "table", "tablist", "tabpanel", "term", "textbox", "time", "timer", "toolbar", "tooltip", "tree", "treegrid", "treeitem"
+  ]);
+  return roles.has(role) || role.startsWith("doc-") || role.startsWith("graphics-");
+}
+
+export function skipDeferredAriaReference(element: HTMLElement, attribute: string): boolean {
+  if (attribute === "aria-controls" && element.getAttribute("aria-expanded") === "false") return true;
+  if (attribute === "aria-errormessage" && element.getAttribute("aria-invalid") !== "true") return true;
+  return false;
+}
+
+export function invalidAriaState(element: HTMLElement, role: string | undefined): string | undefined {
+  const allowedValues: Record<string, string[]> = {
+    "aria-expanded": ["true", "false", "undefined"],
+    "aria-pressed": ["true", "false", "mixed", "undefined"],
+    "aria-selected": ["true", "false", "undefined"],
+    "aria-current": ["page", "step", "location", "date", "time", "true", "false"],
+    "aria-haspopup": ["false", "true", "menu", "listbox", "tree", "grid", "dialog"],
+    "aria-invalid": ["false", "true", "grammar", "spelling"],
+    "aria-live": ["off", "polite", "assertive"],
+    "aria-orientation": ["horizontal", "vertical"],
+    "aria-sort": ["none", "ascending", "descending", "other"],
+    "aria-autocomplete": ["none", "inline", "list", "both"]
+  };
+  for (const [attribute, allowed] of Object.entries(allowedValues)) {
+    const value = element.getAttribute(attribute)?.trim().toLowerCase();
+    if (value !== undefined && !allowed.includes(value)) return `${attribute} has invalid value "${value}"; use ${allowed.join(", ")}.`;
+  }
+
+  const checked = element.getAttribute("aria-checked")?.trim().toLowerCase();
+  if (checked !== undefined && !["true", "false", "mixed", "undefined"].includes(checked)) {
+    return `aria-checked has invalid value "${checked}"; use true, false, mixed, or undefined.`;
+  }
+  if (role === "switch" && checked === "mixed") return "A switch cannot use aria-checked=\"mixed\"; use true or false.";
+
+  const requiredState: Record<string, string> = {
+    checkbox: "aria-checked",
+    combobox: "aria-expanded",
+    menuitemcheckbox: "aria-checked",
+    menuitemradio: "aria-checked",
+    radio: "aria-checked",
+    slider: "aria-valuenow",
+    spinbutton: "aria-valuenow",
+    switch: "aria-checked"
+  };
+  const required = role ? requiredState[role] : undefined;
+  if (required) {
+    const value = element.getAttribute(required)?.trim().toLowerCase();
+    if (!value || value === "undefined") return `Role "${role}" requires ${required} to expose its current state.`;
+    if (required === "aria-valuenow" && !Number.isFinite(Number(value))) return `${required} must be numeric for role "${role}".`;
+  }
+  if (role === "heading") {
+    const level = Number(element.getAttribute("aria-level"));
+    if (!Number.isInteger(level) || level < 1) return "Role \"heading\" requires aria-level with a positive integer value.";
+  }
+  return undefined;
+}
+
+export function renderedAccessibleName(element: HTMLElement): string {
+  const labelledBy = element.getAttribute("aria-labelledby")?.trim();
+  if (labelledBy) {
+    const referencedText = labelledBy.split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (referencedText) return referencedText;
+  }
+
+  const ariaLabel = element.getAttribute("aria-label")?.trim();
+  if (ariaLabel) return ariaLabel;
+
+  if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) {
+    const labelText = Array.from(element.labels ?? [])
+      .map((label) => label.textContent ?? "")
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (labelText) return labelText;
+  }
+
+  if (element instanceof HTMLInputElement) {
+    const type = element.type.toLowerCase();
+    if (type === "image" && element.alt.trim()) return element.alt.trim();
+    if (["button", "submit", "reset"].includes(type) && element.value.trim()) return element.value.trim();
+  }
+
+  if (renderedFormControl(element)) return element.getAttribute("title")?.trim() ?? "";
+
+  const visibleText = renderedTextAlternative(element).replace(/\s+/g, " ").trim();
+  if (visibleText) return visibleText;
+
+  const svgTitle = element.querySelector("svg title")?.textContent?.trim();
+  if (svgTitle) return svgTitle;
+  return element.getAttribute("title")?.trim() ?? "";
+}
+
+export function renderedTextAlternative(element: Element): string {
+  return Array.from(element.childNodes).map((node) => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+    if (!(node instanceof Element) || node.getAttribute("aria-hidden") === "true") return "";
+    if (node instanceof HTMLImageElement && node.alt.trim()) return node.alt;
+    if (node.tagName.toLowerCase() === "svg") return node.querySelector("title")?.textContent ?? "";
+    return renderedTextAlternative(node);
+  }).join(" ");
+}
+
+export function renderedFormControl(element: HTMLElement): boolean {
+  if (element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement) return true;
+  if (!(element instanceof HTMLInputElement)) return false;
+  return !["button", "submit", "reset", "image", "hidden"].includes(element.type.toLowerCase());
+}
+
 export function interactiveElements(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>("a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex='-1']), [role='button'], [role='link'], [role='checkbox'], [role='radio'], [role='switch'], [role='tab']"));
+}
+
+export function focusableElements(): HTMLElement[] {
+  return interactiveElements().filter((element) => {
+    if (element.matches(":disabled") || element.closest("[inert]")) return false;
+    if (element instanceof HTMLInputElement && element.type.toLowerCase() === "hidden") return false;
+    if (element.tabIndex < 0) return false;
+    if (element.matches("a[href], button, input, select, textarea, summary")) return true;
+    return element.tabIndex >= 0 || element.getAttribute("contenteditable") === "true";
+  });
 }
 
 export function hoverFocusTriggerElements(): HTMLElement[] {
@@ -345,7 +560,10 @@ export function relativeLuminance([red, green, blue]: [number, number, number]):
 }
 
 export function selectorFor(element: Element): string {
-  if (element.id) return `#${element.id}`;
+  if (element.id) {
+    const idSelector = `#${CSS.escape(element.id)}`;
+    if (document.querySelectorAll(idSelector).length === 1) return idSelector;
+  }
   const parts: string[] = [];
   let current: Element | null = element;
   while (current && current !== document.body && parts.length < 4) {

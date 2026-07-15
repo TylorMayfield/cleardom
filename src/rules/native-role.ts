@@ -16,7 +16,7 @@ export const nativeRoleRule: RuleDefinition = {
     { version: "wcag30", criterion: "clear-role", title: "Clear role and purpose" }
   ],
   platforms: ["react-native-ios", "react-native-android"],
-  fixable: true,
+  fixable: false,
   summary: "Touch controls need a role so assistive technology can announce the control type.",
   guidance: "Add accessibilityRole=\"button\" or a more specific role when appropriate.",
   examples: [

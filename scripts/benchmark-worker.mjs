@@ -1,6 +1,8 @@
 import { AxePuppeteer } from "@axe-core/puppeteer";
 import pa11y from "pa11y";
 import puppeteer from "puppeteer-core";
+import { resolveScanOptions } from "../dist/config.js";
+import { auditRuntimeUrl } from "../dist/runtime.js";
 import { scanPath } from "../dist/scanner.js";
 
 const tool = process.argv[2];
@@ -38,16 +40,22 @@ async function runClearDOMStatic({ sourcePath }) {
   };
 }
 
-async function runClearDOMRuntime({ url, sourceDir }) {
+async function runClearDOMRuntime({ url, sourceDir, chromePath }) {
   if (!url) throw new Error("ClearDOM benchmark runs require a URL");
   if (!sourceDir) throw new Error("ClearDOM runtime benchmark requires an empty source directory");
 
-  const result = await scanPath(sourceDir, { standard: "wcag22-aa", format: "json", runtimeUrl: url });
+  const scanOptions = await resolveScanOptions({
+    standard: "wcag22-aa",
+    format: "json",
+    runtimeUrl: url,
+    runtime: { baseUrl: url, routes: [] }
+  }, sourceDir);
+  const findings = await auditRuntimeUrl(url, scanOptions, chromePath);
 
   return {
     ok: true,
-    rawSummary: result.summary,
-    findings: result.findings.map(clearDOMFinding)
+    rawSummary: { findings: findings.length },
+    findings: findings.map(clearDOMFinding)
   };
 }
 

@@ -603,9 +603,10 @@
       "title": "Name Role Value",
       "level": "A",
       "target": "[data-case='4.1.2']",
-      "failure": "Custom checkbox lacks complete native keyboard semantics, and hidden focusable content can confuse assistive technology.",
+      "failure": "Custom checkbox lacks its required programmatic checked state.",
       "detection": [
         "cleardom-static",
+        "cleardom-runtime",
         "axe",
         "pa11y"
       ]

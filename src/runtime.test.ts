@@ -88,6 +88,72 @@ test("runtime false-positive cases ignore benign suspicious patterns", { skip: c
   }
 });
 
+test("runtime semantic checks catch dynamically rendered accessibility failures", { skip: chromePath === undefined }, async () => {
+  const server = await startServer(renderedSemanticFailureFixture);
+  try {
+    const options = await resolveScanOptions({ rules: disabledLayoutRuntimeRules() });
+    const findings = await auditRuntimeUrl(server.url, options, chromePath);
+    const ruleIds = new Set(findings.map((finding) => finding.ruleId));
+
+    assert.equal(ruleIds.has("CDOM_4_1_2_UNNAMED_CONTROL"), true);
+    assert.equal(ruleIds.has("CDOM_4_1_2_FORM_LABEL"), true);
+    assert.equal(ruleIds.has("CDOM_4_1_2_ARIA_HIDDEN_FOCUS"), true);
+    assert.equal(ruleIds.has("CDOM_4_1_2_DUPLICATE_ID"), true);
+    assert.equal(findings.every((finding) => finding.source === "runtime"), true);
+    assert.equal(findings.some((finding) => finding.runtime?.selector === "#dynamic-button"), true);
+    assert.equal(findings.filter((finding) => finding.ruleId === "CDOM_4_1_2_FORM_LABEL").length, 3);
+  } finally {
+    await server.close();
+  }
+});
+
+test("runtime semantic checks accept rendered naming patterns and ignored controls", { skip: chromePath === undefined }, async () => {
+  const server = await startServer(renderedSemanticPassingFixture);
+  try {
+    const options = await resolveScanOptions({ rules: disabledLayoutRuntimeRules() });
+    const findings = await auditRuntimeUrl(server.url, options, chromePath);
+    const semanticRuleIds = new Set([
+      "CDOM_4_1_2_UNNAMED_CONTROL",
+      "CDOM_4_1_2_FORM_LABEL",
+      "CDOM_4_1_2_ARIA_HIDDEN_FOCUS",
+      "CDOM_4_1_2_DUPLICATE_ID"
+    ]);
+
+    assert.deepEqual(findings.filter((finding) => semanticRuleIds.has(finding.ruleId)), []);
+  } finally {
+    await server.close();
+  }
+});
+
+test("runtime ARIA checks catch malformed roles, references, and widget states", { skip: chromePath === undefined }, async () => {
+  const server = await startServer(renderedAriaFailureFixture);
+  try {
+    const options = await resolveScanOptions({ rules: disabledLayoutRuntimeRules() });
+    const findings = await auditRuntimeUrl(server.url, options, chromePath);
+
+    assert.equal(findings.filter((finding) => finding.ruleId === "CDOM_4_1_2_INVALID_ARIA_ROLE").length, 1);
+    assert.equal(findings.filter((finding) => finding.ruleId === "CDOM_4_1_2_ARIA_REFERENCE").length, 2);
+    assert.equal(findings.filter((finding) => finding.ruleId === "CDOM_4_1_2_ARIA_STATE").length, 5);
+    assert.equal(findings.some((finding) => finding.runtime?.selector === "#bad-role"), true);
+    assert.equal(findings.every((finding) => finding.detectionMode === "automated"), true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("runtime ARIA checks accept valid fallbacks, lazy references, and synchronized states", { skip: chromePath === undefined }, async () => {
+  const server = await startServer(renderedAriaPassingFixture);
+  try {
+    const options = await resolveScanOptions({ rules: disabledLayoutRuntimeRules() });
+    const findings = await auditRuntimeUrl(server.url, options, chromePath);
+    const ariaRules = new Set(["CDOM_4_1_2_INVALID_ARIA_ROLE", "CDOM_4_1_2_ARIA_REFERENCE", "CDOM_4_1_2_ARIA_STATE"]);
+
+    assert.deepEqual(findings.filter((finding) => ariaRules.has(finding.ruleId)), []);
+  } finally {
+    await server.close();
+  }
+});
+
 test("runtime edge cases catch alternating keyboard traps", { skip: chromePath === undefined }, async () => {
   const server = await startServer(alternatingTrapFixture);
   try {
@@ -280,6 +346,20 @@ function runtimeRulesExcept(enabledRuleId: string): Record<string, "off"> {
   ].filter((ruleId) => ruleId !== enabledRuleId).map((ruleId) => [ruleId, "off" as const]));
 }
 
+function disabledLayoutRuntimeRules(): Record<string, "off"> {
+  return Object.fromEntries([
+    "CDOM_1_4_3_CONTRAST",
+    "CDOM_2_4_7_FOCUS_VISIBLE",
+    "CDOM_2_5_8_TARGET_SIZE",
+    "CDOM_1_4_10_REFLOW",
+    "CDOM_2_4_1_SKIP_LINK",
+    "CDOM_1_4_12_TEXT_SPACING",
+    "CDOM_1_4_13_HOVER_FOCUS_CONTENT",
+    "CDOM_2_1_2_KEYBOARD_TRAP",
+    "CDOM_2_4_11_FOCUS_OBSCURED"
+  ].map((ruleId) => [ruleId, "off" as const]));
+}
+
 async function startServer(body: string | ((request: http.IncomingMessage, response: http.ServerResponse) => void)): Promise<{ url: string; close: () => Promise<void> }> {
   const server = http.createServer((request: http.IncomingMessage, response: http.ServerResponse) => {
     if (typeof body === "function") {
@@ -439,6 +519,90 @@ const falsePositiveRuntimeFixture = `<!doctype html>
       <p class="spacious">This paragraph already has generous spacing and can wrap naturally without clipping or overlapping when spacing preferences increase.</p>
       <button class="icon-button"><span aria-hidden="true"></span>Icon child</button>
       <button>After</button>
+    </main>
+  </body>
+</html>`;
+
+const renderedSemanticFailureFixture = `<!doctype html>
+<html lang="en">
+  <head><title>Rendered semantic failures</title><style>${baseStyles}</style></head>
+  <body>
+    <main id="main">
+      <div id="dynamic-root"></div>
+    </main>
+    <script>
+      document.querySelector("#dynamic-root").innerHTML = \`
+        <button id="dynamic-button"><span aria-hidden="true">×</span></button>
+        <input id="dynamic-input" placeholder="Email">
+        <select id="dynamic-select"><option>Choose a country</option></select>
+        <textarea id="dynamic-textarea">Prefilled value</textarea>
+        <div aria-hidden="true"><button id="hidden-focus">Hidden action</button></div>
+        <p id="duplicate">First duplicate</p>
+        <p id="duplicate">Second duplicate</p>
+      \`;
+    </script>
+  </body>
+</html>`;
+
+const renderedSemanticPassingFixture = `<!doctype html>
+<html lang="en">
+  <head>
+    <title>Rendered semantic passing cases</title>
+    <style>${baseStyles}.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; }</style>
+  </head>
+  <body>
+    <main id="main">
+      <span id="hidden-name" class="visually-hidden">Open settings</span>
+      <button aria-labelledby="hidden-name"><span aria-hidden="true">⚙</span></button>
+      <label for="email">Email address</label><input id="email" placeholder="name@example.com">
+      <label>Phone number <input id="phone"></label>
+      <div role="button" tabindex="0" aria-label="Open account"></div>
+      <button><img src="save.svg" alt="Save document"></button>
+      <button><svg aria-hidden="false"><title>View reports</title></svg></button>
+      <button disabled></button>
+      <div aria-hidden="true"><button tabindex="-1">Programmatically hidden action</button></div>
+      <section inert><button></button></section>
+      <button style="display:none"></button>
+    </main>
+  </body>
+</html>`;
+
+const renderedAriaFailureFixture = `<!doctype html>
+<html lang="en">
+  <head><title>Rendered ARIA failures</title><style>${baseStyles}.widget { display: inline-block; width: 40px; height: 40px; }</style></head>
+  <body>
+    <main id="main">
+      <button id="bad-role" role="totally-made-up">Unsupported role</button>
+      <button id="broken-description" aria-describedby="missing-description">More information</button>
+      <button id="expanded-control" aria-expanded="true" aria-controls="missing-panel">Open panel</button>
+      <div class="widget" role="checkbox" aria-label="Subscribe"></div>
+      <div class="widget" role="switch" aria-label="Notifications" aria-checked="mixed"></div>
+      <div class="widget" role="heading">Account settings</div>
+      <div class="widget" role="slider" aria-label="Volume" aria-valuenow="loud"></div>
+      <button aria-expanded="sometimes">Toggle details</button>
+    </main>
+  </body>
+</html>`;
+
+const renderedAriaPassingFixture = `<!doctype html>
+<html lang="en">
+  <head><title>Rendered ARIA passing cases</title><style>${baseStyles}.widget { display: inline-block; width: 40px; height: 40px; }</style></head>
+  <body>
+    <main id="main">
+      <span id="description" hidden>Additional context</span>
+      <button role="future-widget button">Fallback role</button>
+      <a href="#main" role="doc-noteref">Document note</a>
+      <button aria-describedby="description">Described action</button>
+      <button aria-controls="lazy-panel" aria-expanded="false">Closed lazy panel</button>
+      <button aria-errormessage="lazy-error" aria-invalid="false">Validate later</button>
+      <div class="widget" role="checkbox" aria-label="Mixed selection" aria-checked="mixed"></div>
+      <div class="widget" role="switch" aria-label="Notifications" aria-checked="false"></div>
+      <div class="widget" role="heading" aria-level="2">Account settings</div>
+      <div class="widget" role="combobox" aria-label="Country" aria-expanded="false" aria-controls="lazy-options"></div>
+      <div class="widget" role="slider" aria-label="Volume" aria-valuenow="50"></div>
+      <button aria-current="page" aria-haspopup="dialog">Current settings</button>
+      <div hidden role="not-a-role"></div>
+      <section inert><div class="widget" role="not-a-role"></div></section>
     </main>
   </body>
 </html>`;

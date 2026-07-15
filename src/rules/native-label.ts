@@ -18,7 +18,7 @@ export const nativeLabelRule: RuleDefinition = {
     { version: "wcag30", criterion: "clear-labels", title: "Clear labels and names" }
   ],
   platforms: ["react-native-ios", "react-native-android"],
-  fixable: true,
+  fixable: false,
   summary: "VoiceOver and TalkBack need a stable label for touchable controls.",
   guidance: "Add accessibilityLabel and, when needed, accessibilityRole or accessibilityHint.",
   examples: [

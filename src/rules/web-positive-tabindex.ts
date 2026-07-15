@@ -18,7 +18,7 @@ export const positiveTabIndexRule: RuleDefinition = {
     { version: "wcag30", criterion: "focus-order", title: "Focus order is meaningful" }
   ],
   platforms: ["web"],
-  fixable: false,
+  fixable: true,
   summary: "Positive tabIndex values create a custom keyboard order that often diverges from visual and DOM order.",
   guidance: "Use the natural DOM order and tabIndex={0} only when a custom interactive element must enter the tab sequence.",
   examples: [

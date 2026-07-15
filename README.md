@@ -2,7 +2,7 @@
 
 ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
 
-It is a CLI-first scanner for React, Next.js, Electron, React Native, and web apps. The v0.2 scanner is dependency-light: TypeScript for development, Node built-ins at runtime, and small in-repo source adapters for JSX, HTML, Vue, Svelte, Astro, Angular templates, and MDX.
+It is a CLI-first scanner for React, Next.js, Electron, React Native, web-container platforms, and web apps. The v0.2 scanner is dependency-light: TypeScript for development, Node built-ins at runtime, and small in-repo source adapters for JSX, HTML, Vue, Svelte, Astro, Angular templates, and MDX.
 
 Product decisions are guided by [product.MD](product.MD).
 
@@ -255,11 +255,13 @@ ClearDOM documents framework support in tiers:
 
 Electron renderers use the web rule engine. `cleardom check` detects Electron dependencies and configuration, then either audits a static renderer discovered from `BrowserWindow.loadFile(...)` or starts the project's renderer development server and attaches to its local URL. Main and preload process source remains in the source scan when it uses a supported extension; accessibility findings apply to renderer UI rather than Electron's Node-side APIs.
 
+Tauri, Capacitor, Ionic, and browser-extension projects are detected as web-container platforms and reuse the same source and rendered rule engine. Conventional dev scripts work with `cleardom check`; packaged-only surfaces such as extension popups/options pages or embedded webviews can be covered through configured runtime routes or built HTML targets. A normal PWA `manifest.json` is not treated as a browser extension unless it declares extension `manifest_version` 2 or 3.
+
 `--semantic auto` is the default. For JavaScript, TypeScript, JSX, and TSX files, ClearDOM builds a TypeScript Program and resolves safe static semantics such as string constants, simple imported constants, object-literal prop spreads, numeric literals, template literals without dynamic holes, and simple intrinsic tag aliases. Use `--semantic off` to force the lightweight adapters, or `--semantic required` when CI should fail if compiler-backed source analysis cannot initialize. JSON output includes `semanticAnalysis` and `semanticDiagnostics`.
 
 JSON output also includes an `outcome` contract for automation and local measurement: completed source files, whether rendered checks were requested, attempted/completed/failed rendered pages, finding detection modes, fix kinds, suppressions, baselined findings, and regressions. ClearDOM does not upload this information. Coding agents can request a structured remediation task with `cleardom fix . --json`.
 
-Web runtime checks use Chromium through `puppeteer-core` for CSS-dependent issues that static source cannot see. ClearDOM looks for an explicit browser path, `CHROME_PATH`, `PUPPETEER_EXECUTABLE_PATH`, a managed browser installed with `cleardom browser install`, and then common system Chrome locations. When an interactive `cleardom check` cannot find one, it offers to install a project-local managed browser; non-interactive runs complete source checks and explain how to enable rendered checks. Start your web app locally, then pass `--runtime-url` or configure `runtime.baseUrl`.
+Web runtime checks use Chromium through `puppeteer-core` for issues that static source cannot see. In addition to CSS, focus, keyboard, viewport, and interaction checks, the rendered semantic pass catches dynamically generated unnamed controls, unlabeled form controls, focusable content hidden from assistive technology, duplicate IDs, unsupported ARIA roles, broken ARIA references, and missing or invalid widget states. ClearDOM looks for an explicit browser path, `CHROME_PATH`, `PUPPETEER_EXECUTABLE_PATH`, a managed browser installed with `cleardom browser install`, and then common system Chrome locations. When an interactive `cleardom check` cannot find one, it offers to install a project-local managed browser; non-interactive runs complete source checks and explain how to enable rendered checks. Start your web app locally, then pass `--runtime-url` or configure `runtime.baseUrl`.
 
 The `runtime` block supports explicit `routes`, safe route discovery from common framework file layouts, optional same-origin crawl, interaction presets/scripts, Storybook story scanning, multiple `viewports`, auth/setup scripts, custom headers, cookies, localStorage, wait strategy, selectors, timeouts, and screenshot evidence. URL scans and runtime scans reuse a single browser session. JSON and HTML reports include runtime diagnostics plus selector and screenshot evidence for runtime findings.
 
@@ -437,6 +439,9 @@ cleardom scan src --standard wcag30-draft
 - `CDOM_1_4_13_HOVER_FOCUS_CONTENT`: hover or focus content is not dismissible or hoverable
 - `CDOM_2_1_2_KEYBOARD_TRAP`: keyboard focus appears trapped
 - `CDOM_2_4_11_FOCUS_OBSCURED`: focused control is fully obscured by author content
+- `CDOM_4_1_2_INVALID_ARIA_ROLE`: rendered element uses an unsupported ARIA role
+- `CDOM_4_1_2_ARIA_REFERENCE`: rendered ARIA relationship references a missing element
+- `CDOM_4_1_2_ARIA_STATE`: rendered ARIA widget has a missing or invalid state
 
 The score is automated guidance for developer workflow quality. It is not a legal compliance claim and does not replace manual accessibility testing.
 

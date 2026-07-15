@@ -227,6 +227,25 @@ test("doctor explains the vanilla web setup flow", async () => {
   assert.match(result.stdout, /--runtime-url http:\/\/localhost:3000/);
 });
 
+test("doctor explains shared web checks for container platforms", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "cleardom-"));
+  await fs.writeFile(path.join(directory, "package.json"), JSON.stringify({
+    dependencies: {
+      react: "19.0.0",
+      "@capacitor/core": "7.0.0",
+      "@ionic/react": "8.0.0"
+    }
+  }), "utf8");
+  await fs.writeFile(path.join(directory, "capacitor.config.ts"), "export default {};", "utf8");
+
+  const result = await execFileAsync(process.execPath, [cliPath, "doctor", directory]);
+
+  assert.match(result.stdout, /Project stack: Detected React, Capacitor, Ionic/);
+  assert.match(result.stdout, /Web container setup: Capacitor, Ionic UI uses the shared web source and rendered rule engine/);
+  assert.match(result.stdout, /runtime routes or built HTML/);
+  assert.doesNotMatch(result.stdout, /Vanilla web setup/);
+});
+
 test("doctor explains template framework setup flows", async () => {
   const cases = [
     { name: "Vue", dependencies: { vite: "6.0.0", vue: "3.5.0" }, expectedStack: /Detected Vite Vue, Vue/, expectedConfigPattern: "src/**/*.vue" },

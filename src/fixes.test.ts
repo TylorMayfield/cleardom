@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { applyFixEdits, runSafeFixes, verifyFixRun, type FixEdit } from "./fixes.js";
+import { rules } from "./rules/index.js";
 import { scanSource } from "./scanner.js";
 
 test("source-range edits preview and apply the exact same multi-edit result", async () => {
@@ -75,4 +76,43 @@ test("verification keeps an unchanged rule stable when another fix changes its t
 
   const verification = verifyFixRun(before, before.filter((finding) => finding.ruleId !== "CDOM_1_3_5_AUTOCOMPLETE"), after);
   assert.equal(verification.introduced.some((finding) => finding.ruleId === "CDOM_1_3_5_AUTOCOMPLETE"), false);
+});
+
+test("safe fix metadata matches implemented non-speculative transforms", () => {
+  assert.deepEqual(rules.filter((rule) => rule.fixable).map((rule) => rule.id).sort(), [
+    "CDOM_2_4_3_POSITIVE_TABINDEX",
+    "CDOM_3_3_2_PLACEHOLDER_LABEL",
+    "CDOM_4_1_2_FORM_LABEL"
+  ]);
+});
+
+test("positive tabindex autofix removes the offensive focus order", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cleardom-fixes-"));
+  const file = path.join(directory, "FocusOrder.tsx");
+  const source = 'export const FocusOrder = () => <button tabIndex={3}>Save</button>;';
+  await writeFile(file, source, "utf8");
+  const findings = scanSource(source, file).filter((finding) => finding.ruleId === "CDOM_2_4_3_POSITIVE_TABINDEX");
+
+  const applied = await runSafeFixes(findings, true);
+  const updated = await readFile(file, "utf8");
+  assert.equal(applied.applied, 1);
+  assert.match(updated, /tabIndex=\{0\}/);
+  assert.equal(scanSource(updated, file).some((finding) => finding.ruleId === "CDOM_2_4_3_POSITIVE_TABINDEX"), false);
+});
+
+test("safe fixes do not guess a React Native touchable role or label", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "cleardom-fixes-"));
+  const file = path.join(directory, "Native.tsx");
+  const source = 'export const Close = () => <Pressable onPress={close}><Icon /></Pressable>;';
+  await writeFile(file, source, "utf8");
+  const findings = scanSource(source, file);
+
+  assert.equal(findings.some((finding) => finding.ruleId === "CDOM_4_1_2_NATIVE_ROLE"), true);
+  assert.equal(findings.some((finding) => finding.ruleId === "CDOM_4_1_2_NATIVE_LABEL"), true);
+
+  const applied = await runSafeFixes(findings, true);
+  assert.equal(applied.applied, 0);
+  assert.equal(await readFile(file, "utf8"), source);
+  assert.equal(applied.actions.some((action) => action.finding.ruleId === "CDOM_4_1_2_NATIVE_ROLE" && action.outcome === "auto-fixable"), false);
+  assert.equal(applied.actions.some((action) => action.finding.ruleId === "CDOM_4_1_2_NATIVE_LABEL" && action.outcome === "auto-fixable"), false);
 });

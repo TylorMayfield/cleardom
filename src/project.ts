@@ -10,6 +10,7 @@ export type StackDetection = {
   hasStorybook: boolean;
   hasRuntimeApp: boolean;
   hasElectron: boolean;
+  webContainers: string[];
   detectedFrom: string[];
   summary: string;
 };
@@ -54,6 +55,27 @@ export async function detectProjectStack(rootDir: string): Promise<StackDetectio
     frameworks.add("Electron");
     detectedFrom.add("Electron dependency or configuration");
   }
+  const webContainers: string[] = [];
+  if (hasAnyDependency(dependencies, ["@tauri-apps/api", "@tauri-apps/cli"]) || files.has("src-tauri") || files.has("tauri.conf.json")) {
+    frameworks.add("Tauri");
+    webContainers.push("Tauri");
+    detectedFrom.add("Tauri dependency or configuration");
+  }
+  if (hasAnyDependency(dependencies, ["@capacitor/core", "@capacitor/cli"]) || hasCapacitorConfig(files)) {
+    frameworks.add("Capacitor");
+    webContainers.push("Capacitor");
+    detectedFrom.add("Capacitor dependency or configuration");
+  }
+  if (hasAnyDependency(dependencies, ["@ionic/core", "@ionic/react", "@ionic/vue", "@ionic/angular"]) || files.has("ionic.config.json")) {
+    frameworks.add("Ionic");
+    webContainers.push("Ionic");
+    detectedFrom.add("Ionic dependency or configuration");
+  }
+  if (hasAnyDependency(dependencies, ["wxt", "plasmo", "@crxjs/vite-plugin"]) || hasExtensionConfig(files) || await hasBrowserExtensionManifest(rootDir)) {
+    frameworks.add("Browser Extension");
+    webContainers.push("Browser Extension");
+    detectedFrom.add("browser extension dependency or manifest");
+  }
   if (dependencies.has("react-native")) frameworks.add("React Native");
   if (dependencies.has("expo")) frameworks.add("Expo");
   if (frameworks.size === 0 && (files.has("src") || files.has("app") || files.has("components"))) {
@@ -90,6 +112,7 @@ export async function detectProjectStack(rootDir: string): Promise<StackDetectio
     hasStorybook,
     hasRuntimeApp,
     hasElectron,
+    webContainers,
     detectedFrom: [...detectedFrom],
     summary: [...frameworks].join(", ") || "generic source project"
   };
@@ -236,6 +259,26 @@ function hasNextConfig(files: Set<string>): boolean {
 
 function hasViteConfig(files: Set<string>): boolean {
   return files.has("vite.config.js") || files.has("vite.config.mjs") || files.has("vite.config.ts");
+}
+
+function hasCapacitorConfig(files: Set<string>): boolean {
+  return files.has("capacitor.config.ts") || files.has("capacitor.config.js") || files.has("capacitor.config.json");
+}
+
+function hasExtensionConfig(files: Set<string>): boolean {
+  return files.has("wxt.config.ts") || files.has("wxt.config.js") || files.has("plasmo.config.ts") || files.has("plasmo.config.js");
+}
+
+async function hasBrowserExtensionManifest(rootDir: string): Promise<boolean> {
+  for (const candidate of [path.join(rootDir, "manifest.json"), path.join(rootDir, "public", "manifest.json")]) {
+    try {
+      const manifest = JSON.parse(await fs.readFile(candidate, "utf8")) as { manifest_version?: unknown };
+      if (manifest.manifest_version === 2 || manifest.manifest_version === 3) return true;
+    } catch {
+      // Missing, malformed, and ordinary web app manifests are not extension signals.
+    }
+  }
+  return false;
 }
 
 async function hasNextAppRouter(rootDir: string): Promise<boolean> {

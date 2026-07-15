@@ -1,8 +1,18 @@
 import * as assert from "node:assert/strict";
-import { promises as fs } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, promises as fs } from "node:fs";
+import * as http from "node:http";
+import * as os from "node:os";
 import * as path from "node:path";
+import type { AddressInfo } from "node:net";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { scanSource } from "./scanner.js";
+
+const execFileAsync = promisify(execFile);
+const chromePath = process.env.CHROME_PATH
+  ?? process.env.PUPPETEER_EXECUTABLE_PATH
+  ?? (existsSync("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome") ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : undefined);
 
 test("WCAG benchmark fixture exercises every product static ClearDOM rule", async () => {
   const source = await fs.readFile(path.resolve("examples/wcag-benchmark/Fixture.tsx"), "utf8");
@@ -130,7 +140,7 @@ test("WCAG benchmark manifest covers every WCAG 2.2 A/AA criterion", async () =>
     "4.1.3"
   ]);
 
-  for (const id of ["1.4.12", "1.4.13", "2.1.2", "2.4.11"]) {
+  for (const id of ["1.4.12", "1.4.13", "2.1.2", "2.4.11", "4.1.2"]) {
     assert.equal(manifest.criteria.find((criterion) => criterion.id === id)?.detection.includes("cleardom-runtime"), true);
   }
 
@@ -158,6 +168,7 @@ test("WCAG benchmark fixture renders every manifest case", async () => {
 
 test("benchmark runner writes a GitHub Markdown report", async () => {
   const script = await fs.readFile(path.resolve("scripts/benchmark.mjs"), "utf8");
+  const worker = await fs.readFile(path.resolve("scripts/benchmark-worker.mjs"), "utf8");
 
   assert.doesNotMatch(script, /tylor\.nz/);
   assert.match(script, /const useLocal = cliOptions\.local \|\| !cliOptions\.url/);
@@ -169,4 +180,50 @@ test("benchmark runner writes a GitHub Markdown report", async () => {
   assert.match(script, /cleardom-runtime/);
   assert.match(script, /Missed Detector Expectations/);
   assert.match(script, /WCAG Coverage Matrix/);
+  assert.match(worker, /auditRuntimeUrl\(url, scanOptions, chromePath\)/);
+  assert.doesNotMatch(worker, /scanPath\(sourceDir,[\s\S]*runtimeUrl/);
 });
+
+test("benchmark runtime worker audits the exact offensive and clean URLs", { skip: chromePath === undefined }, async () => {
+  const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), "cleardom-benchmark-worker-"));
+  const server = http.createServer((request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(benchmarkWorkerPage(request.url !== "/false-positive.html"));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const offensive = await runBenchmarkWorker(baseUrl, sourceDir);
+    const clean = await runBenchmarkWorker(`${baseUrl}/false-positive.html`, sourceDir);
+
+    assert.equal(offensive.ok, true);
+    assert.equal(offensive.findings.some((finding) => finding.id === "CDOM_4_1_2_ARIA_STATE"), true);
+    assert.equal(clean.ok, true);
+    assert.deepEqual(clean.findings, []);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fs.rm(sourceDir, { recursive: true, force: true });
+  }
+});
+
+async function runBenchmarkWorker(url: string, sourceDir: string): Promise<{ ok: boolean; findings: Array<{ id: string }> }> {
+  const { stdout } = await execFileAsync(process.execPath, [
+    path.resolve("scripts/benchmark-worker.mjs"),
+    "cleardom-runtime",
+    JSON.stringify({ url, sourceDir, chromePath })
+  ]);
+  return JSON.parse(stdout) as { ok: boolean; findings: Array<{ id: string }> };
+}
+
+function benchmarkWorkerPage(offensive: boolean): string {
+  return `<!doctype html><html lang="en"><head><title>Benchmark worker</title><style>
+    body { color: #111; background: #fff; font-family: Arial, sans-serif; }
+    a, [role="checkbox"] { display: inline-flex; min-width: 32px; min-height: 32px; align-items: center; }
+    a:focus, [role="checkbox"]:focus { outline: 3px solid #111; }
+  </style></head><body>
+    <a href="#main">Skip to content</a>
+    <main id="main"><div role="checkbox" aria-checked="${offensive ? "undefined" : "false"}">Email updates</div></main>
+  </body></html>`;
+}
