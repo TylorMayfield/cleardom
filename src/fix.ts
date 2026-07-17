@@ -30,7 +30,19 @@ export function formatAgentFixJson(result: ScanResult, options: ResolvedScanOpti
       "If a finding is a false positive, use the narrowest component mapping or configuration change and explain why.",
       "Run the verification command after editing and report fixed findings plus remaining risk."
     ],
+    allowedEditScope: selected.findings
+      .filter((finding) => !isUrlLocation(finding.file))
+      .map((finding) => sourceLocation(finding.file, options.rootDir))
+      .filter((file, index, files) => files.indexOf(file) === index),
+    expectedOutcome: {
+      selectedFindingsFixed: selected.findings.map((finding) => finding.fingerprint),
+      introducedBlockingFindings: 0,
+      verificationRequired: true
+    },
     verificationCommand: verificationCommand(fixOptions),
+    unresolvedManualTests: selected.findings
+      .filter((finding) => finding.detectionMode !== "automated")
+      .map((finding) => ({ fingerprint: finding.fingerprint, instruction: result.rules.find((rule) => rule.id === finding.ruleId)?.remediation?.manualVerification ?? "Confirm the behavior with assistive technology and keyboard/touch input." })),
     findings: selected.findings.map((finding) => {
       const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
       return {
@@ -119,7 +131,7 @@ function filterFindings(findings: Finding[], options: ResolvedScanOptions, fixOp
 }
 
 function verificationCommand(options: FixPromptOptions): string {
-  const parts = ["npx cleardom@latest", "scan", shellQuote(options.target), "--fail-on", "none"];
+  const parts = ["npx cleardom@1", "scan", shellQuote(options.target), "--fail-on", "none"];
   return parts.join(" ");
 }
 

@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags: ["v1.0.0-alpha.*", "v1.0.0-beta.*", "v1.0.0-rc.*", "v1.*.*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.12
+          registry-url: https://registry.npmjs.org
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm docs:check
+      - run: pnpm test:conformance
+      - run: pnpm test:conformance:runtime
+      - run: pnpm test:corpus
+      - run: pnpm evidence:assemble
+      - run: pnpm release:gates
+        env:
+          CLEARDOM_GA4_API_SECRET: ${{ secrets.CLEARDOM_GA4_API_SECRET }}
+      - run: pnpm build:release
+        env:
+          CLEARDOM_GA4_API_SECRET: ${{ secrets.CLEARDOM_GA4_API_SECRET }}
+      - run: pnpm sbom --prod --sbom-format cyclonedx --sbom-spec-version 1.6 > cleardom-sbom.json
+      - run: pnpm pack:check
+      - run: pnpm pack
+      - run: sha256sum cleardom-*.tgz > SHA256SUMS
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: gh release upload "${GITHUB_REF_NAME}" cleardom-*.tgz cleardom-sbom.json SHA256SUMS --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

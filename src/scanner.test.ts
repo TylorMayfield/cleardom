@@ -4,7 +4,59 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { fingerprintFinding } from "./baseline.js";
-import { scanPath, scanSource } from "./scanner.js";
+import { consolidateFindings, scanPath, scanSource, shouldFail } from "./scanner.js";
+
+test("scan results expose the stable schema 1 contract", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cleardom-schema-result-"));
+  await fs.writeFile(path.join(root, "App.tsx"), "export const App = () => <button />;", "utf8");
+  const result = await scanPath(root);
+  assert.equal(result.schemaVersion, 1);
+  assert.equal(result.kind, "cleardom-scan-result");
+  assert.equal(result.activeFindings.every((finding) => typeof finding.blocking === "boolean"), true);
+});
+
+test("default gates block only high-confidence automated findings unless promoted", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "cleardom-trust-gate-"));
+  await fs.writeFile(path.join(root, "App.tsx"), "export const App = () => <div onClick={() => {}}>Open</div>;", "utf8");
+  const reviewResult = await scanPath(root, { failOn: "critical" });
+  assert.equal(reviewResult.activeFindings.some((finding) => finding.ruleId === "CDOM_2_1_1_KEYBOARD"), true);
+  assert.equal(shouldFail(reviewResult, "critical"), false);
+  const promoted = await scanPath(root, { rules: { CDOM_2_1_1_KEYBOARD: { blocking: true } } });
+  assert.equal(shouldFail(promoted, "critical"), true);
+});
+
+test("lightweight template fallback findings remain non-blocking unless promoted", () => {
+  const fallback = scanSource("<button></button>", "Component.vue");
+  const finding = fallback.find((candidate) => candidate.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL");
+  assert.equal(finding?.source, "static");
+  assert.equal(finding?.blocking, false);
+  const promoted = scanSource("<button></button>", "Component.vue", { rules: { CDOM_4_1_2_UNNAMED_CONTROL: { blocking: true } } });
+  assert.equal(promoted.find((candidate) => candidate.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL")?.blocking, true);
+});
+
+test("source and runtime evidence consolidate when a stable element id correlates them", () => {
+  const source = scanSource('<button id="save"></button>', "App.tsx").find((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL")!;
+  const runtime = {
+    ...source,
+    file: "http://localhost/",
+    source: "runtime" as const,
+    target: "#save",
+    semanticLocation: "#save",
+    fingerprint: "runtime-save",
+    runtime: {
+      url: "http://localhost/",
+      route: "/",
+      viewport: { name: "desktop", width: 1280, height: 900 },
+      selector: "#save",
+      evidence: { route: "/", viewport: { name: "desktop", width: 1280, height: 900 }, domSnippet: '<button id="save"></button>', timestamp: new Date(0).toISOString() }
+    }
+  };
+  const combined = consolidateFindings([source, runtime]);
+  assert.equal(combined.length, 1);
+  assert.equal(combined[0].file, "App.tsx");
+  assert.equal(combined[0].runtime?.selector, "#save");
+  assert.equal(combined[0].occurrences?.length, 2);
+});
 
 test("flags web controls without accessible names", () => {
   const findings = scanSource("<button><XIcon /></button>", "Button.tsx");
@@ -273,6 +325,18 @@ test("fingerprints semantic rule target and location instead of message text", (
   });
 
   assert.equal(first, second);
+});
+
+test("source fingerprints are stable across equivalent checkout roots", async () => {
+  const firstRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cleardom-fingerprint-a-"));
+  const secondRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cleardom-fingerprint-b-"));
+  await fs.writeFile(path.join(firstRoot, "Button.tsx"), "export const Button = () => <button />;", "utf8");
+  await fs.writeFile(path.join(secondRoot, "Button.tsx"), "export const Button = () => <button />;", "utf8");
+  await fs.writeFile(path.join(firstRoot, "cleardom.config.json"), '{"schemaVersion":1}', "utf8");
+  await fs.writeFile(path.join(secondRoot, "cleardom.config.json"), '{"schemaVersion":1}', "utf8");
+  const first = await scanPath(firstRoot, { configPath: path.join(firstRoot, "cleardom.config.json") });
+  const second = await scanPath(secondRoot, { configPath: path.join(secondRoot, "cleardom.config.json") });
+  assert.equal(first.activeFindings.find((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL")?.fingerprint, second.activeFindings.find((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL")?.fingerprint);
 });
 
 test("flags personal information fields missing autocomplete purpose tokens", () => {

@@ -1,4 +1,4 @@
-import { hasAccessibleName, isWebInteractive } from "../rule-utils.js";
+import { accessibleNameEvidence, isProvenHidden, isWebInteractive } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const unnamedControlRule: RuleDefinition = {
@@ -31,8 +31,11 @@ export const unnamedControlRule: RuleDefinition = {
     { label: "Visible text", code: "<button>Close cart</button>" }
   ],
   check(context) {
-    return context.elements
-      .filter((element) => isWebInteractive(element, context) && !hasAccessibleName(element, context))
-      .map((element) => context.createFinding(this, element, "Add visible text, aria-label, or aria-labelledby."));
+    return context.elements.flatMap((element) => {
+      if (!isWebInteractive(element, context) || isProvenHidden(element, context)) return [];
+      const evidence = accessibleNameEvidence(element, context);
+      if (evidence === "present") return [];
+      return [context.createFinding(this, element, "Add visible text, aria-label, or aria-labelledby.", evidence === "unresolved" ? { state: "unresolved" } : undefined)];
+    });
   }
 };

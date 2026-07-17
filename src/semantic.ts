@@ -327,7 +327,7 @@ function appendDirectText(node: ts.Node, sourceFile: ts.SourceFile, element: Mut
     } else if (ts.isJsxExpression(child) && child.expression) {
       const value = evaluateExpression(child.expression, sourceFile, constants, checker);
       if (typeof value === "string") element.textParts.push(value);
-      if (value === undefined && isLikelyTextExpression(child.expression)) element.textParts.push(child.expression.getText(sourceFile));
+      if (value === undefined && isLikelyTextExpression(child.expression)) element.dynamicText = true;
     }
   }
 }

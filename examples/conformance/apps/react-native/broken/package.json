@@ -1,0 +1,13 @@
+{
+  "name": "@cleardom/conformance-react-native-broken",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "react-native start",
+    "ios": "react-native run-ios",
+    "android": "react-native run-android"
+  },
+  "dependencies": {
+    "react-native": "*"
+  }
+}

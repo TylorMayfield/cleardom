@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "include": [
+    "**/*.{html,js,jsx,ts,tsx,vue,svelte,astro,mdx}"
+  ],
+  "runtime": {
+    "enabled": false
+  },
+  "native": {
+    "enabled": true,
+    "runner": "local",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "appIds": {
+      "ios": "dev.cleardom.expo",
+      "android": "dev.cleardom.expo"
+    },
+    "screens": [
+      {
+        "name": "account",
+        "actions": [
+          {
+            "assert": "label=Save profile"
+          }
+        ]
+      }
+    ]
+  }
+}

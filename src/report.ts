@@ -22,6 +22,7 @@ function markdownReport(result: ScanResult, options: ResolvedScanOptions): strin
     `- Standard: ${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}`,
     `- Checked files: ${result.checkedFiles}`,
     `- Active findings: ${result.summary.activeFindings}`,
+    `- Blocking findings: ${result.activeFindings.filter((finding) => finding.blocking).length}`,
     `- Baseline findings: ${result.summary.baselineFindings}`,
     `- Regressions: ${result.summary.regressions}`,
     `- Semantic analysis: ${result.semanticAnalysis.adapter} (${result.semanticAnalysis.mode})`,
@@ -46,6 +47,8 @@ function markdownReport(result: ScanResult, options: ResolvedScanOptions): strin
       lines.push(`- Location: ${formatLocation(finding, options.rootDir)}`);
       lines.push(`- Severity: ${finding.severity}`);
       lines.push(`- Confidence: ${finding.confidence}`);
+      lines.push(`- Default gate: ${finding.blocking ? "blocking" : "advisory"}`);
+      lines.push(`- Detection: ${finding.detectionMode}`);
       lines.push(`- Message: ${finding.message}`);
       lines.push(`- WCAG: ${finding.wcag.join(", ") || "not mapped"}`);
       if (finding.runtime) {

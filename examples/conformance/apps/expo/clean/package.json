@@ -1,0 +1,13 @@
+{
+  "name": "@cleardom/conformance-expo-clean",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo run:ios",
+    "android": "expo run:android"
+  },
+  "dependencies": {
+    "expo": "*"
+  }
+}

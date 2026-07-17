@@ -1,6 +1,6 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { extractRuleId, githubRequestAll, parseNextLink, type GithubContext } from "./github.js";
+import { extractRuleId, githubRequestAll, parseNextLink, publicGithubUrl, sanitizeGithubMarkdown, type GithubContext } from "./github.js";
 
 const context: GithubContext = {
   token: "token",
@@ -60,6 +60,14 @@ test("githubRequestAll follows every next page", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("GitHub output escapes markup, strips controls, and redacts URL secrets", () => {
+  const markdown = sanitizeGithubMarkdown("<script>alert(1)</script>\n| injected\u001b[31m");
+  assert.doesNotMatch(markdown, /<script>|\u001b|\n/);
+  assert.match(markdown, /\\<script\\>/);
+  assert.match(markdown, /\\\| injected/);
+  assert.equal(publicGithubUrl("https://user:secret@example.test/private?token=abc#fragment"), "https://example.test/private");
 });
 
 function jsonResponse(value: unknown, link?: string): Response {

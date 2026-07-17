@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "thresholds": {
+    "conformanceBlockingRecall": 1,
+    "conformanceCleanBlockingFindings": 0,
+    "blockingRulePrecision": 0.95,
+    "aggregateAutomatedPrecision": 0.95,
+    "minimumReviewedAutomatedFindingsPerBlockingRule": 20,
+    "sourceCompletion": 0.99,
+    "runtimeCompletion": 0.97,
+    "nativeCompletion": 0.95,
+    "verifiedFixSuccess": 0.95,
+    "introducedBlockingFindings": 0,
+    "source1000MaxMs": 10000,
+    "source1000MaxRssMb": 750,
+    "runtimeTenRoutesMaxMs": 180000,
+    "nativeScreenMaxMs": 30000
+  },
+  "requiredEvidenceFragments": [
+    "precision",
+    "conformance-source",
+    "conformance-runtime",
+    "native",
+    "performance",
+    "fix-safety",
+    "security",
+    "platform",
+    "supply-chain",
+    "release-history"
+  ],
+  "requiredEvidence": [
+    "fingerprintsStable",
+    "renameClassificationCorrect",
+    "securityReviewClear",
+    "noP0OrP1Defects",
+    "reportsAccessible",
+    "macosInstallPassed",
+    "linuxInstallPassed",
+    "windowsInstallPassed",
+    "iosSimulatorPassed",
+    "androidMacosPassed",
+    "androidLinuxPassed",
+    "androidWindowsPassed",
+    "packageContentsReproducible",
+    "npmProvenanceVerified",
+    "sbomPublished",
+    "checksumsPublished",
+    "ga4TwoMonthRetentionVerified"
+  ]
+}

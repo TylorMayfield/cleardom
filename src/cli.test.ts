@@ -50,6 +50,39 @@ test("version flags print package version without scanning", async () => {
   }
 });
 
+test("config schema rejects unknown keys and migrates one-platform native appId", async () => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), "cleardom-config-v1-"));
+  await fs.writeFile(path.join(root, "cleardom.config.json"), JSON.stringify({ schemaVersion: 1, native: { platforms: ["ios"], appId: "com.example.app" } }), "utf8");
+  const resolved = await resolveScanOptions({}, root);
+  assert.equal(resolved.native.runner, "local");
+  assert.equal(resolved.native.appIds.ios, "com.example.app");
+  await fs.writeFile(path.join(root, "cleardom.config.json"), JSON.stringify({ schemaVersion: 1, surprise: true }), "utf8");
+  await assert.rejects(resolveScanOptions({}, root), /Unknown ClearDOM config key: surprise/);
+  await fs.writeFile(path.join(root, "cleardom.config.json"), JSON.stringify({ schemaVersion: 1, runtime: { browser: { typo: true } } }), "utf8");
+  await assert.rejects(resolveScanOptions({}, root), /Unknown ClearDOM runtime\.browser key: typo/);
+  await fs.writeFile(path.join(root, "cleardom.config.json"), JSON.stringify({ schemaVersion: 1, native: { screens: [{ name: "Home", actions: [{ fill: "Email" }] }] } }), "utf8");
+  await assert.rejects(resolveScanOptions({}, root), /text is required for fill/);
+  await fs.writeFile(path.join(root, "cleardom.config.json"), JSON.stringify({ schemaVersion: 1, runtime: { timeoutMs: "fast" } }), "utf8");
+  await assert.rejects(resolveScanOptions({}, root), /does not match schemaVersion 1.*must be integer/);
+  await fs.writeFile(path.join(root, "cleardom.config.json"), JSON.stringify({ schemaVersion: 1, components: { Button: { namePropz: ["label"] } } }), "utf8");
+  await assert.rejects(resolveScanOptions({}, root), /Unknown ClearDOM components\.Button key: namePropz/);
+});
+
+test("telemetry defaults on and supports status, disable, enable, and identifier reset", async () => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), "cleardom-telemetry-"));
+  const environment = { ...process.env, XDG_CONFIG_HOME: root, CLEARDOM_TELEMETRY: undefined };
+  const status = await execFileAsync(process.execPath, [cliPath, "telemetry", "status"], { env: environment });
+  assert.match(status.stdout, /enabled/);
+  const disabled = await execFileAsync(process.execPath, [cliPath, "telemetry", "disable"], { env: environment });
+  assert.match(disabled.stdout, /disabled/);
+  const disabledStatus = await execFileAsync(process.execPath, [cliPath, "telemetry", "status"], { env: environment });
+  assert.match(disabledStatus.stdout, /disabled/);
+  const enabled = await execFileAsync(process.execPath, [cliPath, "telemetry", "enable"], { env: environment });
+  assert.match(enabled.stdout, /enabled/);
+  const reset = await execFileAsync(process.execPath, [cliPath, "telemetry", "reset"], { env: environment });
+  assert.match(reset.stdout, /identifier were deleted/);
+});
+
 test("scan text output leads with fixes and keeps details behind verbose", async () => {
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
@@ -98,7 +131,7 @@ test("fix prints an agent remediation prompt with finding context", async () => 
   assert.match(result.stdout, /Rule guidance: Add visible text, aria-label, aria-labelledby/);
   assert.match(result.stdout, /> 1 \| <button \/>/);
   assert.doesNotMatch(result.stdout, /CDOM_4_1_2_ANCHOR_HREF -/);
-  assert.match(result.stdout, /npx cleardom@latest scan .* --fail-on none/);
+  assert.match(result.stdout, /npx cleardom@1 scan .* --fail-on none/);
 });
 
 test("fix --json emits a structured agent remediation contract", async () => {
@@ -114,7 +147,7 @@ test("fix --json emits a structured agent remediation contract", async () => {
 
   assert.equal(task.schemaVersion, 1);
   assert.equal(task.kind, "cleardom-agent-remediation");
-  assert.match(task.verificationCommand, /cleardom@latest scan/);
+  assert.match(task.verificationCommand, /cleardom@1 scan/);
   assert.equal(task.findings[0]?.ruleId, "CDOM_4_1_2_UNNAMED_CONTROL");
   assert.equal(typeof task.findings[0]?.guidance, "string");
   assert.equal(task.outcome.source.completedFiles, 1);
@@ -159,7 +192,7 @@ test("fix --preview and --apply handle safe mechanical transforms", async () => 
   assert.match(preview.stdout, /ClearDOM fix preview/);
   assert.match(preview.stdout, /Auto-fixable: 1/);
   assert.match(preview.stdout, /-<button tabIndex=\{3\}>Save<\/button>/);
-  assert.match(preview.stdout, /\+<button tabIndex=\{0\}>Save<\/button>/);
+  assert.match(preview.stdout, /\+<button>Save<\/button>/);
   assert.equal(await fs.readFile(file, "utf8"), '<button tabIndex={3}>Save</button>');
 
   const applied = await execFileAsync(process.execPath, [cliPath, "fix", fixture, "--apply", "--rule", "CDOM_2_4_3_POSITIVE_TABINDEX"]);
@@ -168,7 +201,7 @@ test("fix --preview and --apply handle safe mechanical transforms", async () => 
   assert.match(applied.stdout, /Fixed: 1/);
   assert.match(applied.stdout, /Introduced: 0/);
   assert.match(applied.stdout, /introduced no new findings/);
-  assert.equal(await fs.readFile(file, "utf8"), '<button tabIndex={0}>Save</button>');
+  assert.equal(await fs.readFile(file, "utf8"), "<button>Save</button>");
 });
 
 test("fix --plan groups findings by owner and rule", async () => {
@@ -181,7 +214,7 @@ test("fix --plan groups findings by owner and rule", async () => {
   const parsed = JSON.parse(result.stdout) as { plan: Array<{ ruleId: string; owner?: string; verification: string }> };
 
   assert.equal(parsed.plan.some((group) => group.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL" && group.owner === "@design-systems"), true);
-  assert.match(parsed.plan[0].verification, /npx cleardom@latest scan/);
+  assert.match(parsed.plan[0].verification, /npx cleardom@1 scan/);
 });
 
 test("doctor validates local developer workflow context", async () => {
@@ -515,7 +548,7 @@ test("init --ci-dry-run previews the GitHub workflow without writing it", async 
   const result = await execFileAsync(process.execPath, [cliPath, "init", "--ci-dry-run"], { cwd: directory });
 
   assert.match(result.stdout, /CI dry-run preview:/);
-  assert.match(result.stdout, /npx cleardom@latest review \. --changed-files-only/);
+  assert.match(result.stdout, /npx cleardom@1 review \. --changed-files-only/);
   await assert.rejects(fs.readFile(path.join(directory, ".github", "workflows", "cleardom.yml"), "utf8"), /ENOENT/);
 });
 
@@ -543,8 +576,8 @@ test("install --agents writes idempotent project-level agent guidance", async ()
 
   assert.match(agents, /# Project Notes/);
   assert.match(agents, /<!-- cleardom:start -->/);
-  assert.match(agents, /npx cleardom@latest --fail-on none/);
-  assert.match(agents, /npx cleardom@latest --diff --fail-on none/);
+  assert.match(agents, /npx cleardom@1 --fail-on none/);
+  assert.match(agents, /npx cleardom@1 --diff --fail-on none/);
   assert.match(claude, /ClearDOM Agent Skill/);
   assert.match(cursor, /ClearDOM Agent Skill/);
 
@@ -562,7 +595,9 @@ test("install writes a GitHub Actions PR workflow by default", async () => {
 
   assert.match(result.stdout, /GitHub Actions PR review/);
   assert.doesNotMatch(result.stdout, /AGENTS\.md/);
-  assert.match(workflow, /npx cleardom@latest review \. --changed-files-only/);
+  assert.match(workflow, /npx cleardom@1 review \. --changed-files-only/);
+  assert.match(workflow, /node-version: 22\.12/);
+  assert.doesNotMatch(workflow, /uses: actions\/[a-z-]+@v\d/);
   assert.match(workflow, /types: \[opened, synchronize, reopened, ready_for_review\]/);
   assert.match(workflow, /fetch-depth: 0/);
   assert.match(workflow, /concurrency:/);

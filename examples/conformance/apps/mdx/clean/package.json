@@ -1,0 +1,11 @@
+{
+  "name": "@cleardom/conformance-mdx-clean",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node ../../../serve-conformance.mjs ."
+  },
+  "dependencies": {
+    "@mdx-js/mdx": "*"
+  }
+}

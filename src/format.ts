@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import { formatScanHtmlReport } from "./html-report.js";
+import { sanitizeTerminal } from "./sanitize.js";
 import { sourceAdapters } from "./source-adapters.js";
 import type { Finding, RuleCategory, RuleSummary, ScanResult, Severity, StandardDefinition } from "./types.js";
 
@@ -47,6 +48,7 @@ function formatVerboseScanResult(result: ScanResult, version: string, target: st
   lines.push(`  Web runtime checks: ${result.runtimePages.length > 0 ? `${result.runtimePages.length} page ${pluralize("run", result.runtimePages.length)}` : "available with --runtime-url and Chromium"}`);
   lines.push("  React Native checks: static source guidance; verify VoiceOver and TalkBack behavior manually on device or simulator");
   lines.push(`  Active: ${result.summary.activeFindings}`);
+  lines.push(`  Blocking by default: ${result.activeFindings.filter((finding) => finding.blocking).length}`);
   lines.push(`  Baseline: ${result.summary.baselineFindings}`);
   lines.push(`  Suppressed: ${result.summary.suppressedFindings}`);
   lines.push(`  ${result.baseline ? "Regressions" : "New findings"}: ${result.summary.regressions}`);
@@ -89,6 +91,7 @@ function formatCompactScanResult(result: ScanResult, version: string, target: st
   const modeCounts = detectionModeCounts(result.activeFindings);
   if (result.activeFindings.length > 0) {
     lines.push(`Detection: ${modeCounts.automated} automated, ${modeCounts.needsReview} needs review, ${modeCounts.manualGuidance} manual guidance`);
+    lines.push(`Default gate: ${result.activeFindings.filter((finding) => finding.blocking).length} blocking, ${result.activeFindings.filter((finding) => !finding.blocking).length} advisory`);
   }
 
   const findingGroups = groupTerminalFindings(result.activeFindings).sort((left, right) => compareFindingPriority(left.finding, right.finding));
@@ -97,9 +100,9 @@ function formatCompactScanResult(result: ScanResult, version: string, target: st
     lines.push("", "Top findings");
     for (const { finding, occurrences } of shownGroups) {
       const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
-      lines.push(`  ${terminalStyle(severitySymbol(finding.severity), finding.severity === "critical" ? "red" : finding.severity === "warning" ? "yellow" : "dim", color)} ${finding.title}`);
+      lines.push(`  ${terminalStyle(severitySymbol(finding.severity), finding.severity === "critical" ? "red" : finding.severity === "warning" ? "yellow" : "dim", color)} ${finding.title}${finding.blocking ? " [blocking]" : " [advisory]"}`);
       lines.push(`    ${formatFindingLocation(finding)}`);
-      lines.push(`    ${finding.message}`);
+      lines.push(`    ${sanitizeTerminal(finding.message)}`);
       if (occurrences.length > 1 && finding.runtime) lines.push(`    ${formatOccurrenceSummary(occurrences)}`);
       if (rule?.guidance) lines.push(`    Fix: ${rule.guidance}`);
       lines.push(`    Rule: ${finding.ruleId}`);
@@ -151,13 +154,13 @@ function appendVerboseFinding(
   const { finding, occurrences } = group;
   const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
   lines.push(`  ${finding.ruleId} ${formatFindingLocation(finding)} ${finding.title}`);
-  lines.push(`     ${finding.message}`);
+  lines.push(`     ${sanitizeTerminal(finding.message)}`);
   if (occurrences.length > 1 && finding.runtime) lines.push(`     ${formatOccurrenceSummary(occurrences)}`);
   lines.push(`     Detection: ${finding.detectionMode}; confidence ${finding.confidence} (${finding.confidenceReason})`);
   if (rule?.guidance) lines.push(`     Fix: ${rule.guidance}`);
   if (rule?.remediation?.safeAutofix && !finding.runtime) lines.push(`     Autofix: ${rule.remediation.safeAutofix}`);
   lines.push(`     Learn: cleardom explain ${finding.ruleId}${rule?.docsUrl ? ` | ${rule.docsUrl}` : ""}`);
-  if (!finding.runtime && finding.excerpt) lines.push(`     Evidence: ${finding.excerpt}`);
+  if (!finding.runtime && finding.excerpt) lines.push(`     Evidence: ${sanitizeTerminal(finding.excerpt)}`);
   lines.push(`     Standards: ${formatStandardRefs(finding.standards)}`);
   if (finding.native) {
     lines.push(`     Native: ${finding.native.platform} ${finding.native.screen ?? ""}${finding.native.deepLink ? ` ${finding.native.deepLink}` : ""}`.trimEnd());
@@ -318,6 +321,7 @@ export function formatSarif(result: ScanResult): string {
     $schema: "https://json.schemastore.org/sarif-2.1.0.json",
     runs: [
       {
+        properties: { schemaVersion: 1, kind: "cleardom-sarif-result" },
         tool: {
           driver: {
             name: "ClearDOM",
@@ -351,6 +355,7 @@ export function formatSarif(result: ScanResult): string {
             impact: finding.impact,
             source: finding.source,
             fixKind: finding.fixKind,
+            blocking: finding.blocking,
             confidenceReason: finding.confidenceReason,
             target: finding.target,
             semanticLocation: finding.semanticLocation

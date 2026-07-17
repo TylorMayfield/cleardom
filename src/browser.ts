@@ -93,7 +93,7 @@ async function resolveCommand(command: string): Promise<string | undefined> {
   try {
     const result = process.platform === "win32"
       ? await execFileAsync("where", [command])
-      : await execFileAsync("/bin/sh", ["-c", `command -v ${shellQuote(command)}`]);
+      : await execFileAsync("which", [command]);
     return result.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
   } catch {
     return undefined;
@@ -135,10 +135,6 @@ function platformBrowserCandidates(): string[] {
     "/usr/bin/microsoft-edge",
     "/usr/bin/msedge"
   ];
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 async function exists(filePath: string): Promise<boolean> {

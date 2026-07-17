@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "reviewPolicy": {
+    "initialLabels": "One documented reviewer may accept or reject an unambiguous finding.",
+    "disputedBlockingFindings": "Two independent reviewers must agree before a disputed finding can count as blocking ground truth."
+  },
+  "projects": [
+    {
+      "id": "jsx-next", "commit": "83e99f0a2eb91a6604c98493dd945690108e1646", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [
+        { "fingerprint": "f8cb41c1", "ruleId": "CDOM_2_5_2_POINTER_CANCELLATION", "detectionClass": "needs-review", "verdict": "review-guidance", "rationale": "A resize handle starts a drag on pointer down; cancellation behavior requires interaction review." },
+        { "fingerprint": "f6398765", "ruleId": "CDOM_4_1_2_FORM_LABEL", "detectionClass": "automated", "verdict": "false-positive", "rationale": "Select is a project component whose rendered trigger/value supplies the control semantics; treating its component name as an intrinsic select is not direct evidence." }
+      ], "disputedBlockingFindings": []
+    },
+    { "id": "jsx-remix", "commit": "6743b1fc12c700b097c06c1b92ae01732a9bf9df", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    {
+      "id": "html-boilerplate", "commit": "b7e31d67f4cf83e23d51f4decc73618bf8bd77ba", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [
+        { "fingerprint": "aa6cf783", "ruleId": "CDOM_3_1_1_DOCUMENT_METADATA", "detectionClass": "automated", "verdict": "true-positive", "rationale": "The shipped template has an empty document language and requires consumers to set it." },
+        { "fingerprint": "34021524", "ruleId": "CDOM_3_1_1_DOCUMENT_METADATA", "detectionClass": "automated", "verdict": "true-positive", "rationale": "The shipped template has an empty title and requires consumers to set it." }
+      ], "disputedBlockingFindings": []
+    },
+    { "id": "html-mdn", "commit": "6c7a360ddb4a0d75be06044bf8a914f260ff10c7", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    {
+      "id": "vue-docs", "commit": "e4641141026871271e5083c99ad4cd3f4a8e9a68", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [
+        { "fingerprint": "4a67ed49", "ruleId": "CDOM_4_1_2_ANCHOR_HREF", "detectionClass": "automated", "verdict": "true-positive", "rationale": "The banner anchor has no href." },
+        { "fingerprint": "5a0f448a", "ruleId": "CDOM_4_1_2_UNNAMED_CONTROL", "detectionClass": "automated", "verdict": "true-positive", "rationale": "The banner anchor is empty and has no accessible name." },
+        { "fingerprint": "36391212", "ruleId": "CDOM_4_1_2_UNNAMED_CONTROL", "detectionClass": "automated", "verdict": "true-positive", "rationale": "The dismiss button contains only an icon and has no static accessible name." }
+      ], "disputedBlockingFindings": []
+    },
+    {
+      "id": "vue-pinia", "commit": "e4f6d663df5b20368bb85250b0d402a44954f80b", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [{ "fingerprint": "1e0b9073", "ruleId": "CDOM_1_1_1_IMAGE_ALT", "detectionClass": "automated", "verdict": "false-positive", "rationale": "The reported image is inside a commented-out template block." }], "disputedBlockingFindings": []
+    },
+    {
+      "id": "svelte-realworld", "commit": "ec8552fee0d0b7e8ad3c6a6818f3fe9ee7d861f5", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [
+        { "fingerprint": "3c5aefa0", "ruleId": "CDOM_4_1_2_UNNAMED_CONTROL", "detectionClass": "automated", "verdict": "false-positive", "rationale": "The linked author image has dynamic alt text from the author username." },
+        { "fingerprint": "5856bac6", "ruleId": "CDOM_1_1_1_IMAGE_ALT", "detectionClass": "automated", "verdict": "false-positive", "rationale": "The image has dynamic alt text from the author username." },
+        { "fingerprint": "232691a7", "ruleId": "CDOM_4_1_2_UNNAMED_CONTROL", "detectionClass": "automated", "verdict": "false-positive", "rationale": "The favorite button has a rendered numeric text label." },
+        { "fingerprint": "3f7ef847", "ruleId": "CDOM_4_1_2_FORM_LABEL", "detectionClass": "automated", "verdict": "false-positive", "rationale": "The checkbox is hidden and is not an exposed form control." }
+      ], "disputedBlockingFindings": []
+    },
+    { "id": "svelte-core", "commit": "602a873b6b82bba4e6edc91b039e2f6defbe3fc4", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    {
+      "id": "astro-core", "commit": "092da560eea77ee63a3e2c583c80d8238544e42b", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [{ "fingerprint": "919a2950", "ruleId": "CDOM_4_1_2_ANCHOR_HREF", "detectionClass": "needs-review", "verdict": "review-guidance", "rationale": "The Astro component receives its href dynamically; static analysis cannot prove whether every caller supplies a non-empty destination." }], "disputedBlockingFindings": []
+    },
+    {
+      "id": "astro-starlight", "commit": "bbab7b19e74de7f1758dafea52b16f8011149cd1", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [{ "fingerprint": "073af6ac", "ruleId": "CDOM_2_5_1_POINTER_GESTURES", "detectionClass": "manual-guidance", "verdict": "false-positive", "rationale": "An SVG path data string is not evidence of a user-operated path-based gesture." }], "disputedBlockingFindings": []
+    },
+    {
+      "id": "angular-core", "commit": "d7a13b989a2a6fbdf8fe49bb4dfb518cecc579b6", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [
+        { "fingerprint": "5c8607cb", "ruleId": "CDOM_2_5_1_POINTER_GESTURES", "detectionClass": "manual-guidance", "verdict": "false-positive", "rationale": "A bound breadcrumb path is navigation data, not evidence of a path-based pointer gesture." },
+        { "fingerprint": "1125f21c", "ruleId": "CDOM_4_1_2_ANCHOR_HREF", "detectionClass": "needs-review", "verdict": "review-guidance", "rationale": "Angular binds the breadcrumb href dynamically; the destination is supplied by component data and requires rendered review rather than an automated failure." },
+        { "fingerprint": "2fdeb3d5", "ruleId": "CDOM_4_1_2_UNNAMED_CONTROL", "detectionClass": "automated", "verdict": "false-positive", "rationale": "Angular interpolation supplies visible anchor text." },
+        { "fingerprint": "e22729f7", "ruleId": "CDOM_4_1_2_ANCHOR_HREF", "detectionClass": "automated", "verdict": "false-positive", "rationale": "Angular routerLink supplies the navigation destination." },
+        { "fingerprint": "a328caba", "ruleId": "CDOM_4_1_2_UNNAMED_CONTROL", "detectionClass": "automated", "verdict": "false-positive", "rationale": "Angular interpolation supplies visible anchor text." }
+      ], "disputedBlockingFindings": []
+    },
+    { "id": "angular-components", "commit": "5fad07b30b41cd7ec455b787b298e7ba069cca3f", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    { "id": "mdx-core", "commit": "685627a819567c0788eadb85f5f57065bcc81c2c", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    { "id": "mdx-deck", "commit": "a4779fc0555e26bc241afd8176661d41fd6981ac", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    { "id": "native-react-native", "commit": "dd5dc6b2313425e81f21f49c32bf68c4fa79e5a2", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    {
+      "id": "native-expo", "commit": "0073f46826addae3904f5ac2385a1340ab47f2c1", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [
+        { "fingerprint": "16c3b049", "ruleId": "CDOM_4_1_2_UNNAMED_CONTROL", "detectionClass": "automated", "verdict": "false-positive", "rationale": "The local Expo Button receives the static label Choose a photo." },
+        { "fingerprint": "917dbe0e", "ruleId": "CDOM_4_1_2_UNNAMED_CONTROL", "detectionClass": "automated", "verdict": "false-positive", "rationale": "The local Expo Button receives the static label Use this photo." }
+      ], "disputedBlockingFindings": []
+    },
+    { "id": "native-paper", "commit": "1b2b0433ea918b2949b192dfc52bef30f568430c", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    { "id": "native-elements", "commit": "32ae0eda7c559f55a9d858fc6880ed46f7714c5b", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    {
+      "id": "container-electron", "commit": "b4f681add21303def253f4f1a36cfe28d44787fe", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [{ "fingerprint": "aa6cf783", "ruleId": "CDOM_3_1_1_DOCUMENT_METADATA", "detectionClass": "automated", "verdict": "true-positive", "rationale": "The Electron renderer document has no language declaration." }], "disputedBlockingFindings": []
+    },
+    { "id": "container-tauri", "commit": "5b19ac9f19956cf6a318f4f01ffbf17b73d0b3a1", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    { "id": "container-capacitor", "commit": "5479f5409a437bee3033866d9cefdfc3be557a89", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    { "id": "container-ionic", "commit": "5542abb36586a78d621f11e8e1ac32ff9862f404", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"], "labels": [], "disputedBlockingFindings": [] },
+    {
+      "id": "container-extension", "commit": "c4393862e164d74d1b6112ced19f2a2bbe26506c", "reviewStatus": "reviewed", "reviewers": ["OpenAI Codex"],
+      "labels": [{ "fingerprint": "f0692710", "ruleId": "CDOM_3_1_1_DOCUMENT_METADATA", "detectionClass": "automated", "verdict": "true-positive", "rationale": "The browser-extension side panel document has no language declaration." }], "disputedBlockingFindings": []
+    }
+  ]
+}

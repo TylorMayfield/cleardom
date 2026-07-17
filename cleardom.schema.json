@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unpkg.com/cleardom@1/cleardom.schema.json",
+  "title": "ClearDOM 1.x configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "include": { "type": "array", "items": { "type": "string" } },
+    "exclude": { "type": "array", "items": { "type": "string" } },
+    "standard": { "type": "string" },
+    "failOn": { "enum": ["none", "critical", "warning", "findings", "regression"] },
+    "format": { "enum": ["text", "json", "sarif", "html"] },
+    "baseline": { "type": "string" },
+    "verbose": { "type": "boolean" },
+    "semantic": { "enum": ["auto", "off", "required"] },
+    "runtimeUrl": { "type": "string" },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "baseUrl": { "type": "string" },
+        "routes": { "type": "array", "items": { "type": "string" } },
+        "discoverRoutes": { "type": "boolean" },
+        "viewports": { "type": "array", "items": { "$ref": "#/$defs/viewport" } },
+        "auth": { "type": "object", "additionalProperties": false, "properties": { "setupScript": { "type": "string" } } },
+        "setupScript": { "type": "string" },
+        "waitUntil": { "enum": ["load", "domcontentloaded", "networkidle0", "networkidle2"] },
+        "waitForSelector": { "type": "string" },
+        "waitForTimeoutMs": { "type": "integer", "minimum": 0 },
+        "timeoutMs": { "type": "integer", "minimum": 1 },
+        "cookies": { "type": "array", "items": { "$ref": "#/$defs/cookie" } },
+        "localStorage": { "type": "object", "additionalProperties": { "type": "string" } },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "screenshot": { "type": "boolean" },
+        "browser": { "type": "object", "additionalProperties": false, "properties": { "mode": { "enum": ["auto", "system", "managed"] }, "executablePath": { "type": "string" } } },
+        "crawl": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean" }, "maxDepth": { "type": "integer", "minimum": 0 }, "maxRoutes": { "type": "integer", "minimum": 1 }, "include": { "type": "array", "items": { "type": "string" } }, "exclude": { "type": "array", "items": { "type": "string" } } } },
+        "interactions": { "type": "object", "additionalProperties": false, "properties": { "presets": { "type": "array", "uniqueItems": true, "items": { "enum": ["menus", "dialogs", "accordions", "forms", "drawers", "tabs", "popovers", "validation", "route-changes", "keyboard-navigation"] } }, "scripts": { "type": "array", "items": { "type": "string" } } } },
+        "stories": { "type": "object", "additionalProperties": false, "properties": { "enabled": { "type": "boolean" }, "baseUrl": { "type": "string" }, "include": { "type": "array", "items": { "type": "string" } }, "exclude": { "type": "array", "items": { "type": "string" } } } }
+      }
+    },
+    "componentPresets": { "type": "array", "uniqueItems": true, "items": { "enum": ["radix", "mui", "react-aria", "react-native", "chakra", "ant-design", "headless-ui", "mantine", "react-bootstrap"] } },
+    "components": { "type": "object", "additionalProperties": { "$ref": "#/$defs/componentMapping" } },
+    "rules": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "enum": ["off", "critical", "warning", "info"] },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "severity": { "enum": ["critical", "warning", "info"] },
+              "blocking": { "type": "boolean" }
+            }
+          }
+        ]
+      }
+    },
+    "suppressions": { "type": "array", "items": { "$ref": "#/$defs/suppression" } },
+    "suppressionPolicy": { "type": "object", "additionalProperties": false, "properties": { "requireReason": { "type": "boolean" }, "requireExpires": { "type": "boolean" }, "requireApprovedBy": { "type": "boolean" } } },
+    "ownership": { "type": "array", "items": { "$ref": "#/$defs/ownership" } },
+    "pr": { "$ref": "#/$defs/pr" },
+    "packages": { "type": "array", "items": { "$ref": "#/$defs/package" } },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "enabled": { "type": "boolean", "default": true } }
+    },
+    "native": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "runner": { "const": "local" },
+        "platforms": { "type": "array", "uniqueItems": true, "items": { "enum": ["ios", "android"] } },
+        "appIds": { "type": "object", "additionalProperties": false, "properties": { "ios": { "type": "string" }, "android": { "type": "string" } } },
+        "devices": { "type": "object", "additionalProperties": false, "properties": { "ios": { "type": "string" }, "android": { "type": "string" } } },
+        "appId": { "type": "string", "deprecated": true },
+        "provider": { "const": "eas", "deprecated": true },
+        "deepLinks": { "type": "array", "items": { "type": "string" } },
+        "maxDurationMinutes": { "type": "integer", "minimum": 1 },
+        "screens": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "deepLink": { "type": "string" },
+              "timeoutMs": { "type": "integer", "minimum": 1 },
+              "screenshot": { "type": "boolean" },
+              "actions": { "type": "array", "items": { "$ref": "#/$defs/nativeAction" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stringArray": { "type": "array", "items": { "type": "string" } },
+    "componentMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "role": { "enum": ["button", "link", "textbox", "checkbox", "radio", "switch", "tab", "menuitem", "image"] },
+        "importSource": { "oneOf": [{ "type": "string" }, { "$ref": "#/$defs/stringArray" }] },
+        "asProp": { "type": "string" },
+        "roleProps": { "$ref": "#/$defs/stringArray" },
+        "valueProps": { "$ref": "#/$defs/stringArray" },
+        "nameProps": { "$ref": "#/$defs/stringArray" },
+        "labelProps": { "$ref": "#/$defs/stringArray" },
+        "childLabelProps": { "$ref": "#/$defs/stringArray" },
+        "disabledProps": { "$ref": "#/$defs/stringArray" },
+        "decorativeProps": { "$ref": "#/$defs/stringArray" },
+        "wrapper": { "type": "boolean" }
+      }
+    },
+    "cookie": {
+      "type": "object",
+      "required": ["name", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" }, "value": { "type": "string" }, "domain": { "type": "string" }, "path": { "type": "string" }, "url": { "type": "string" },
+        "expires": { "type": "number" }, "httpOnly": { "type": "boolean" }, "secure": { "type": "boolean" }, "sameSite": { "enum": ["Strict", "Lax", "None"] }
+      }
+    },
+    "suppression": {
+      "type": "object", "required": ["reason", "expires"], "additionalProperties": false,
+      "properties": { "rule": { "type": "string" }, "rules": { "$ref": "#/$defs/stringArray" }, "file": { "type": "string" }, "files": { "$ref": "#/$defs/stringArray" }, "reason": { "type": "string" }, "expires": { "type": "string" }, "approvedBy": { "type": "string" }, "ticket": { "type": "string" }, "owner": { "type": "string" } },
+      "allOf": [{ "anyOf": [{ "required": ["rule"] }, { "required": ["rules"] }] }, { "anyOf": [{ "required": ["file"] }, { "required": ["files"] }] }]
+    },
+    "ownership": {
+      "type": "object", "required": ["files", "owner"], "additionalProperties": false,
+      "properties": { "files": { "$ref": "#/$defs/stringArray" }, "owner": { "type": "string" }, "reviewers": { "$ref": "#/$defs/stringArray" }, "rules": { "$ref": "#/$defs/stringArray" } }
+    },
+    "pr": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "maxComments": { "type": "integer", "minimum": 0, "maximum": 100 }, "severityThreshold": { "enum": ["critical", "warning", "info"] }, "commentMode": { "enum": ["off", "summary", "inline", "both"] }, "changedFilesOnly": { "type": "boolean" }, "baselinePolicy": { "enum": ["new", "all"] }, "statusCheckName": { "type": "string" }, "uploadSarif": { "type": "boolean" } }
+    },
+    "package": {
+      "type": "object", "required": ["name", "path"], "additionalProperties": false,
+      "properties": { "name": { "type": "string" }, "path": { "type": "string" }, "label": { "type": "string" }, "include": { "$ref": "#/$defs/stringArray" }, "exclude": { "$ref": "#/$defs/stringArray" }, "rules": { "type": "object" }, "standard": { "type": "string" }, "failOn": { "enum": ["none", "critical", "warning", "findings", "regression"] }, "baseline": { "type": "string" }, "semantic": { "enum": ["auto", "off", "required"] }, "componentPresets": { "type": "array", "items": { "type": "string" } }, "components": { "type": "object", "additionalProperties": { "$ref": "#/$defs/componentMapping" } } }
+    },
+    "viewport": {
+      "type": "object",
+      "required": ["width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "deviceScaleFactor": { "type": "number", "exclusiveMinimum": 0 },
+        "isMobile": { "type": "boolean" }
+      }
+    },
+    "nativeAction": {
+      "oneOf": [
+        { "type": "object", "required": ["press"], "additionalProperties": false, "properties": { "press": { "type": "string" } } },
+        { "type": "object", "required": ["fill", "text"], "additionalProperties": false, "properties": { "fill": { "type": "string" }, "text": { "type": "string" } } },
+        { "type": "object", "required": ["swipe"], "additionalProperties": false, "properties": { "swipe": { "enum": ["up", "down", "left", "right"] } } },
+        { "type": "object", "required": ["back"], "additionalProperties": false, "properties": { "back": { "const": true } } },
+        { "type": "object", "required": ["waitFor"], "additionalProperties": false, "properties": { "waitFor": { "type": "string" }, "timeoutMs": { "type": "integer", "minimum": 1 } } },
+        { "type": "object", "required": ["assert"], "additionalProperties": false, "properties": { "assert": { "type": "string" } } }
+      ]
+    }
+  }
+}

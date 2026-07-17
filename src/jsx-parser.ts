@@ -38,7 +38,9 @@ export function parseJsx(source: string, importSourceText = source): JsxElement[
     const char = source[index];
     if (char === "{") {
       const expressionEnd = readBalancedExpression(source, index);
-      appendText(stack, expressionText(source.slice(index + 1, expressionEnd - 1)));
+      const expression = expressionText(source.slice(index + 1, expressionEnd - 1));
+      appendText(stack, expression.text);
+      if (expression.dynamic && stack.length > 0) stack[stack.length - 1].dynamicText = true;
       index = expressionEnd;
       continue;
     }
@@ -385,10 +387,12 @@ function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function expressionText(value: string): string {
+function expressionText(value: string): { text: string; dynamic: boolean } {
   const trimmed = value.trim();
   const literal = trimmed.match(/^["'`]([^"'`{}]+)["'`]$/);
-  return literal ? literal[1] : "";
+  if (literal) return { text: literal[1], dynamic: false };
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return { text: trimmed, dynamic: false };
+  return { text: "", dynamic: trimmed.length > 0 && !/^\/\*/.test(trimmed) };
 }
 
 function lineAndColumn(source: string, index: number): { line: number; column: number } {

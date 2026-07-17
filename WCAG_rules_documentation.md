@@ -13,6 +13,8 @@ This document tracks the full WCAG 2.2 success-criteria catalog and how ClearDOM
 | Criteria mapped by ClearDOM rules | 86 |
 | Criteria with no ClearDOM rule | 0 |
 
+Rule mapping is not the same as automated proof. The 88-rule catalog currently contains 14 automated rules, 27 needs-review rules, and 47 manual-guidance rules. Only high-confidence automated findings block by default; reports expose these classes separately.
+
 ## WCAG 2.2 Criteria Tracker
 
 | Criterion | Level | Title | Benchmark Fixture | Benchmark Detectors | ClearDOM Rules | Status |

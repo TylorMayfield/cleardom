@@ -1,14 +1,16 @@
-import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import { promisify } from "node:util";
+import { createAgentDeviceClient } from "agent-device";
 import { fingerprintFinding } from "./baseline.js";
 import { ownerForFinding } from "./config.js";
 import type { Finding, NativeScreenAction, ResolvedScanOptions, RuntimeDiagnostic, ScanResult } from "./types.js";
 
-const execFileAsync = promisify(execFile);
+type NativePlatform = "ios" | "android";
+type AgentClient = ReturnType<typeof createAgentDeviceClient>;
+type AgentSnapshot = Awaited<ReturnType<AgentClient["capture"]["snapshot"]>>;
+type AgentNode = AgentSnapshot["nodes"][number];
 
-export async function runNativeScan(target: string, options: ResolvedScanOptions, staticResult: ScanResult): Promise<ScanResult> {
+export async function runNativeScan(_target: string, options: ResolvedScanOptions, staticResult: ScanResult): Promise<ScanResult> {
   if (!options.native.enabled) return staticResult;
   const diagnostics: RuntimeDiagnostic[] = [...staticResult.runtimeDiagnostics];
   const findings: Finding[] = [...staticResult.findings];
@@ -18,10 +20,12 @@ export async function runNativeScan(target: string, options: ResolvedScanOptions
     const native = await collectNativeFindings(options, diagnostics);
     findings.push(...native.findings);
     capturedStates = native.capturedStates;
-  } finally {
-    if (!process.env.CLEARDOM_NATIVE_MOCK_SNAPSHOT) {
-      await stopEasSimulator(options.rootDir);
-    }
+  } catch (error) {
+    diagnostics.push({
+      stage: "native",
+      severity: "error",
+      message: `${errorMessage(error)} Recovery: run \`cleardom doctor .\`, boot a configured local simulator/emulator, install the app, and retry.`
+    });
   }
 
   const activeFindings = findings.filter((finding) => finding.baselineStatus === "active");
@@ -43,11 +47,7 @@ export async function runNativeScan(target: string, options: ResolvedScanOptions
     runtimeDiagnostics: diagnostics,
     outcome: {
       ...staticResult.outcome,
-      native: {
-        requested: true,
-        capturedStates,
-        findings: nativeFindings.length
-      },
+      native: { requested: true, capturedStates, findings: nativeFindings.length },
       findings: {
         ...staticResult.outcome.findings,
         automated: activeFindings.filter((finding) => finding.detectionMode === "automated").length,
@@ -62,169 +62,304 @@ export async function runNativeScan(target: string, options: ResolvedScanOptions
 }
 
 async function collectNativeFindings(options: ResolvedScanOptions, diagnostics: RuntimeDiagnostic[]): Promise<{ findings: Finding[]; capturedStates: number }> {
-  if (process.env.CLEARDOM_NATIVE_MOCK_SNAPSHOT) {
-    return { findings: findingsFromSnapshot(process.env.CLEARDOM_NATIVE_MOCK_SNAPSHOT, options, "ios", "mock"), capturedStates: 1 };
+  const mock = process.env.CLEARDOM_NATIVE_MOCK_SNAPSHOT;
+  if (mock) {
+    const nodes = parseMockSnapshot(mock);
+    return { findings: findingsFromNodes(nodes, options, "ios", "mock"), capturedStates: 1 };
   }
 
-  if (!options.native.appId && options.native.deepLinks.length === 0 && options.native.screens.length === 0) {
-    diagnostics.push({ stage: "native", severity: "warning", message: "Native scan is enabled but native.appId, deepLinks, or screens were not configured." });
-    return { findings: [], capturedStates: 0 };
-  }
-
+  validateNativeHost(options);
   const findings: Finding[] = [];
   let capturedStates = 0;
-  await writeSimulatorEnv(options.rootDir);
+
   for (const platform of options.native.platforms) {
-    await eas(["simulator:start", "--platform", platform, "--type", "agent-device", "--non-interactive", "--max-duration-minutes", String(options.native.maxDurationMinutes)], options.rootDir, diagnostics);
-    await waitForEasSimulator(options.rootDir, diagnostics);
-    const targets = nativeTargets(options);
-    for (const target of targets) {
-      if (target.deepLink || options.native.appId) {
-        await eas(["simulator:exec", "npx", "agent-device@latest", "open", target.deepLink ?? options.native.appId, "--platform", platform], options.rootDir, diagnostics);
+    const appId = options.native.appIds[platform];
+    if (!appId) {
+      diagnostics.push({ stage: "native", severity: "error", message: `Native ${platform} scanning needs native.appIds.${platform}. Recovery: add the installed bundle/package identifier to cleardom.config.json and run \`cleardom doctor .\`.` });
+      continue;
+    }
+
+    const session = `cleardom-${platform}-${process.pid}`;
+    const client = createAgentDeviceClient({ cwd: options.rootDir, session, lockPlatform: platform, lockPolicy: "reject", responseLevel: "full" });
+    const selection = { platform, device: options.native.devices[platform] };
+    try {
+      const devices = await client.devices.list(selection);
+      if (devices.length === 0) throw new Error(`No local ${platform} simulator/emulator is available.`);
+      await client.devices.capabilities(selection);
+      const installedApps = await client.apps.list(selection);
+      if (!installedApps.some((installed) => installed === appId || installed.includes(appId))) {
+        throw new Error(`${appId} is not installed on the selected ${platform} device.`);
       }
-      findings.push(...await captureNativeState(options, diagnostics, platform, target.name, target.deepLink));
-      capturedStates += 1;
-      for (const [index, action] of target.actions.entries()) {
-        const command = nativeActionCommand(action);
-        if (!command) {
-          diagnostics.push({ stage: "native", severity: "warning", message: `Skipped invalid native action ${index + 1} for ${target.name}. Configure either press or fill with text.` });
-          continue;
-        }
-        await eas(["simulator:exec", "npx", "agent-device@latest", ...command], options.rootDir, diagnostics);
-        findings.push(...await captureNativeState(options, diagnostics, platform, `${target.name}-step-${index + 1}`, target.deepLink));
+      const targets = nativeTargets(options);
+      const firstTarget = targets[0];
+      await client.apps.open({ ...selection, app: appId, url: firstTarget?.deepLink, relaunch: true });
+      const scanDeadline = Date.now() + options.native.maxDurationMinutes * 60_000;
+      for (const [targetIndex, target] of targets.entries()) {
+        ensureNativeBudget(scanDeadline, platform);
+        if (targetIndex > 0) await client.apps.open({ ...selection, app: appId, url: target.deepLink, relaunch: true });
+        const initial = await captureNativeState(client, options, platform, target.name, target.deepLink, target.screenshot, undefined, target.timeoutMs);
+        findings.push(...initial);
         capturedStates += 1;
+        for (const [index, action] of target.actions.entries()) {
+          ensureNativeBudget(scanDeadline, platform);
+          await runNativeAction(client, selection, action, target.timeoutMs);
+          const step = `${target.name}-step-${index + 1}`;
+          findings.push(...await captureNativeState(client, options, platform, step, target.deepLink, target.screenshot, describeAction(action), target.timeoutMs));
+          capturedStates += 1;
+        }
       }
+    } finally {
+      await client.sessions.close().catch(() => undefined);
     }
   }
   return { findings, capturedStates };
 }
 
-async function captureNativeState(options: ResolvedScanOptions, diagnostics: RuntimeDiagnostic[], platform: "ios" | "android", screen: string, deepLink?: string): Promise<Finding[]> {
-  const snapshot = await eas(["simulator:exec", "npx", "agent-device@latest", "snapshot", "-i"], options.rootDir, diagnostics);
-  const screenshotPath = path.join(options.rootDir, ".cleardom", `native-${platform}-${safeName(screen)}.png`);
-  await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
-  await eas(["simulator:exec", "npx", "agent-device@latest", "screenshot", screenshotPath], options.rootDir, diagnostics).catch(() => "");
-  return findingsFromSnapshot(snapshot, options, platform, screen, deepLink, screenshotPath);
+function validateNativeHost(options: ResolvedScanOptions): void {
+  if (Number(process.versions.node.split(".")[0]) < 22) throw new Error("Local native scanning requires Node.js 22.12 or newer.");
+  if (options.native.platforms.includes("ios") && process.platform !== "darwin") throw new Error("Local iOS scanning requires macOS with Xcode.");
 }
 
-function nativeTargets(options: ResolvedScanOptions): Array<{ name: string; deepLink?: string; actions: NativeScreenAction[] }> {
-  const screens = options.native.screens.map((screen) => ({ name: screen.name, deepLink: screen.deepLink, actions: screen.actions ?? [] }));
-  const deepLinks = options.native.deepLinks.map((deepLink, index) => ({ name: `deep-link-${index + 1}`, deepLink, actions: [] }));
+function ensureNativeBudget(deadline: number, platform: NativePlatform): void {
+  if (Date.now() >= deadline) throw new Error(`Native ${platform} scan exceeded native.maxDurationMinutes before the next configured step.`);
+}
+
+async function captureNativeState(
+  client: AgentClient,
+  options: ResolvedScanOptions,
+  platform: NativePlatform,
+  screen: string,
+  deepLink?: string,
+  screenshotEnabled = true,
+  actionStep?: string,
+  timeoutMs = 30_000
+): Promise<Finding[]> {
+  const snapshot = await client.capture.snapshot({ platform, device: options.native.devices[platform], raw: true, forceFull: true, timeoutMs });
+  let screenshot: string | undefined;
+  if (screenshotEnabled) {
+    const screenshotPath = path.join(options.rootDir, ".cleardom", `native-${platform}-${safeName(screen)}.png`);
+    await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
+    screenshot = (await client.capture.screenshot({ path: screenshotPath })).path;
+  }
+  return findingsFromNodes(snapshot.nodes, options, platform, screen, deepLink, screenshot, actionStep);
+}
+
+function nativeTargets(options: ResolvedScanOptions): Array<{ name: string; deepLink?: string; actions: NativeScreenAction[]; timeoutMs: number; screenshot: boolean }> {
+  const screens = options.native.screens.map((screen) => ({
+    name: screen.name,
+    deepLink: screen.deepLink,
+    actions: screen.actions ?? [],
+    timeoutMs: screen.timeoutMs ?? 30_000,
+    screenshot: screen.screenshot ?? true
+  }));
+  const deepLinks = options.native.deepLinks.map((deepLink, index) => ({ name: `deep-link-${index + 1}`, deepLink, actions: [], timeoutMs: 30_000, screenshot: true }));
   if (screens.length > 0 || deepLinks.length > 0) return [...screens, ...deepLinks];
-  return [{ name: "app", deepLink: undefined, actions: [] }];
+  return [{ name: "app", actions: [], timeoutMs: 30_000, screenshot: true }];
 }
 
-export function nativeActionCommand(action: NativeScreenAction): string[] | undefined {
+async function runNativeAction(client: AgentClient, selection: { platform: NativePlatform; device?: string }, action: NativeScreenAction, defaultTimeout: number): Promise<void> {
+  if ("press" in action) {
+    await client.interactions.press({ ...selection, ...interactionTarget(action.press), settle: true, timeoutMs: defaultTimeout, verify: true });
+  } else if ("fill" in action) {
+    await client.interactions.fill({ ...selection, ...interactionTarget(action.fill), text: action.text, settle: true, timeoutMs: defaultTimeout, verify: true });
+  } else if ("swipe" in action) {
+    await client.interactions.scroll({ ...selection, direction: action.swipe });
+  } else if ("back" in action) {
+    await client.command.back(selection);
+  } else if ("waitFor" in action) {
+    await client.command.wait({ ...selection, selector: action.waitFor, timeoutMs: action.timeoutMs ?? defaultTimeout });
+  } else if ("assert" in action) {
+    await client.interactions.is({ ...selection, predicate: "visible", selector: action.assert });
+  }
+}
+
+function interactionTarget(target: string): { ref: string } | { selector: string } {
+  return target.startsWith("@") ? { ref: target } : { selector: target };
+}
+
+export function nativeActionCommand(action: Partial<Record<"press" | "fill" | "text" | "swipe" | "waitFor" | "assert", string>> & { back?: boolean }): string[] | undefined {
   if (action.press?.trim()) return ["press", action.press.trim()];
   if (action.fill?.trim() && action.text !== undefined) return ["fill", action.fill.trim(), action.text];
+  if (action.swipe) return ["scroll", action.swipe];
+  if (action.back) return ["back"];
+  if (action.waitFor) return ["wait", action.waitFor];
+  if (action.assert) return ["is", "visible", action.assert];
   return undefined;
 }
 
-function findingsFromSnapshot(snapshot: string, options: ResolvedScanOptions, platform: "ios" | "android", screen: string, deepLink?: string, screenshot?: string): Finding[] {
+function findingsFromNodes(nodes: AgentNode[], options: ResolvedScanOptions, platform: NativePlatform, screen: string, deepLink?: string, screenshot?: string, actionStep?: string): Finding[] {
   const findings: Finding[] = [];
-  const lines = snapshot.split(/\r?\n/).filter(Boolean);
-  const labels = new Map<string, number>();
-  for (const line of lines) {
-    const label = extractValue(line, "label");
-    const role = extractValue(line, "role") ?? extractValue(line, "accessibilityRole");
-    const state = extractValue(line, "state") ?? extractValue(line, "value") ?? extractValue(line, "checked") ?? extractValue(line, "selected");
-    if (label) labels.set(label, (labels.get(label) ?? 0) + 1);
-    const interactive = /\b(button|link|switch|checkbox|tab|menuitem|textfield|text field)\b/i.test(line) || /pressable|touchable/i.test(line);
-    if (interactive && !label) findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_LABEL", "Native control has no accessible label", "Add an accessibilityLabel or visible text so assistive technology can announce this control.", options, platform, screen, deepLink, line, { role }, screenshot));
-    if (interactive && !role) findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_ROLE", "Native control has no accessible role", "Add accessibilityRole so assistive technology can announce the control type.", options, platform, screen, deepLink, line, { label }, screenshot));
-    if (/\b(switch|checkbox|radio|tab)\b/i.test(role ?? "") && !state) findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_STATE", "Native stateful control exposes no current state", "Expose checked, selected, or value state so assistive technology can announce the control's current state.", options, platform, screen, deepLink, line, { label, role }, screenshot));
+  const labels = new Map<string, AgentNode[]>();
+  const interactive = nodes.filter(isInteractiveNode);
+  for (const node of interactive) {
+    const label = clean(node.label);
+    const role = clean(node.role ?? node.type);
+    const state = nativeState(node);
+    if (label) labels.set(label, [...(labels.get(label) ?? []), node]);
+    if (!label) findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_LABEL", "Native control has no accessible label", "Add an accessibilityLabel or visible text so assistive technology can announce this control.", options, platform, screen, deepLink, node, { role }, screenshot, actionStep, "critical", "high", "automated"));
+    if (!role) findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_ROLE", "Native control has no accessible role", "Add accessibilityRole so assistive technology can announce the control type.", options, platform, screen, deepLink, node, { label }, screenshot, actionStep, "critical", "high", "automated"));
+    if (isStatefulRole(role) && !state) findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_STATE", "Native stateful control exposes no current state", "Expose checked, selected, or value state so assistive technology can announce the current state.", options, platform, screen, deepLink, node, { label, role }, screenshot, actionStep, "critical", "high", "automated"));
+    if (node.visibleToUser === false || node.interactionBlocked === "covered") findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_HIDDEN_CONTROL", "Native interactive control is unavailable to the user", "Remove the hidden control from accessibility navigation or make it visibly operable.", options, platform, screen, deepLink, node, { label, role, hidden: true }, screenshot, actionStep, "critical", "high", "automated"));
+    if (node.rect && isSmallTarget(node.rect, platform)) findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_TARGET_SIZE", "Native touch target may be too small", `Increase the interactive bounds to at least ${platform === "ios" ? "44×44 points" : "48×48 dp"} or provide sufficient spacing.`, options, platform, screen, deepLink, node, { label, role, bounds: node.rect }, screenshot, actionStep, "warning", "medium", "needs-review"));
   }
-  for (const [label, count] of labels) {
-    if (count > 1 && /^(edit|delete|remove|close|open|save|submit|next|back)$/i.test(label.trim())) {
-      findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_DUPLICATE_LABEL", "Native screen has duplicate ambiguous labels", `Make repeated "${label}" labels specific to their target.`, options, platform, screen, deepLink, snapshot, { label }, screenshot));
+  for (const node of nodes.filter(isHeadingNode)) {
+    if (!clean(node.label)) findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_HEADING", "Native heading has no accessible text", "Give this heading visible text or an accessibility label that describes the section.", options, platform, screen, deepLink, node, { role: "heading" }, screenshot, actionStep, "critical", "high", "automated"));
+  }
+  for (const modal of nodes.filter(isModalNode)) {
+    const exposedOutside = interactive.find((node) => node.visibleToUser !== false && node.index !== modal.index && !isDescendant(node, modal, nodes));
+    if (exposedOutside) findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_MODAL_CONTAINMENT", "Native modal does not contain accessibility navigation", "Hide background controls from the accessibility tree while the modal is active and restore them after dismissal.", options, platform, screen, deepLink, exposedOutside, { label: clean(exposedOutside.label), role: clean(exposedOutside.role ?? exposedOutside.type) }, screenshot, actionStep, "critical", "high", "automated"));
+  }
+  const traversalRisk = findTraversalRisk(interactive);
+  if (traversalRisk) findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_TRAVERSAL_ORDER", "Native accessibility traversal may not follow visual order", "Set an explicit accessibility traversal order and verify it with VoiceOver and TalkBack.", options, platform, screen, deepLink, traversalRisk, { label: clean(traversalRisk.label), role: clean(traversalRisk.role ?? traversalRisk.type), bounds: traversalRisk.rect }, screenshot, actionStep, "warning", "medium", "needs-review"));
+  for (const [label, repeated] of labels) {
+    if (repeated.length > 1 && /^(edit|delete|remove|close|open|save|submit|next|back)$/i.test(label)) {
+      findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_DUPLICATE_LABEL", "Native screen has duplicate ambiguous labels", `Make repeated "${label}" labels specific to their targets.`, options, platform, screen, deepLink, repeated[0], { label }, screenshot, actionStep, "warning", "medium", "needs-review"));
     }
+  }
+  if (interactive.length === 0 && nodes.length > 0) {
+    findings.push(nativeFinding("CDOM_NATIVE_RUNTIME_NO_ACTIONS", "Native screen exposes no actionable controls", "Confirm that the screen is intentionally informational and that navigation remains available to assistive technology.", options, platform, screen, deepLink, nodes[0], {}, screenshot, actionStep, "info", "medium", "automated"));
   }
   return findings.map((finding) => ({ ...finding, owner: ownerForFinding(finding, options) }));
 }
 
-function nativeFinding(ruleId: string, title: string, message: string, options: ResolvedScanOptions, platform: "ios" | "android", screen: string, deepLink: string | undefined, excerpt: string, element: { label?: string; role?: string; state?: string }, screenshot?: string): Finding {
-  const file = deepLink ?? (options.native.appId || `native:${screen}`);
-  const fingerprint = fingerprintFinding({ ruleId, file, target: excerpt, semanticLocation: `${platform}:${screen}:${element.label ?? element.role ?? "unknown"}` });
+function nativeFinding(
+  ruleId: string,
+  title: string,
+  message: string,
+  options: ResolvedScanOptions,
+  platform: NativePlatform,
+  screen: string,
+  deepLink: string | undefined,
+  node: AgentNode,
+  element: NonNullable<NonNullable<Finding["native"]>["element"]>,
+  screenshot: string | undefined,
+  actionStep: string | undefined,
+  severity: Finding["severity"],
+  confidence: Finding["confidence"],
+  detectionMode: Finding["detectionMode"]
+): Finding {
+  const appId = options.native.appIds[platform];
+  const file = deepLink ?? appId ?? `native:${screen}`;
+  const excerpt = JSON.stringify({ ref: node.ref, type: node.type, role: node.role, label: node.label, value: node.value, rect: node.rect });
+  const semanticLocation = `${platform}:${screen}:${node.identifier ?? node.ref ?? node.index}`;
   return {
     ruleId,
     title,
-    severity: "warning",
-    confidence: "medium",
-    impact: "moderate",
-    confidenceReason: "Native runtime evidence was collected from the simulator accessibility tree.",
-    detectionMode: "needs-review",
+    severity,
+    confidence,
+    impact: severity === "critical" ? "serious" : severity === "warning" ? "moderate" : "minor",
+    confidenceReason: detectionMode === "automated" ? "Structured local accessibility-tree evidence directly demonstrates this failure." : "Structured local accessibility-tree evidence identifies a risk that requires context review.",
+    detectionMode,
     source: "native-runtime",
-    fixKind: "guided-fix",
+    fixKind: detectionMode === "manual-guidance" ? "manual-review" : "guided-fix",
+    blocking: detectionMode === "automated" && confidence === "high",
     category: "react-native",
     file,
     line: 1,
     column: 1,
     excerpt,
     message,
-    wcag: ["4.1.2"],
-    standards: [{ version: "wcag22", criterion: "4.1.2", level: "a", title: "Name, Role, Value" }],
+    wcag: ruleId.includes("TARGET_SIZE") ? ["2.5.8"] : ["4.1.2"],
+    standards: [{ version: "wcag22", criterion: ruleId.includes("TARGET_SIZE") ? "2.5.8" : "4.1.2", level: "a", title: ruleId.includes("TARGET_SIZE") ? "Target Size (Minimum)" : "Name, Role, Value" }],
     platforms: [platform === "ios" ? "react-native-ios" : "react-native-android"],
-    target: excerpt,
-    semanticLocation: `${platform}:${screen}`,
-    fingerprint,
+    target: node.identifier ?? node.ref ?? excerpt,
+    semanticLocation,
+    fingerprint: fingerprintFinding({ ruleId, file, target: node.identifier ?? node.ref ?? excerpt, semanticLocation }),
     baselineStatus: "active",
-    native: {
-      platform,
-      screen,
-      deepLink,
-      accessibilityTree: excerpt,
-      element,
-      screenshot
-    }
+    native: { platform, screen, deepLink, accessibilityTree: excerpt, element: { ...element, sourceHint: node.identifier }, screenshot, actionStep }
   };
 }
 
-async function eas(args: string[], cwd: string, diagnostics: RuntimeDiagnostic[]): Promise<string> {
+function parseMockSnapshot(value: string): AgentNode[] {
   try {
-    const result = await execFileAsync("npx", ["--yes", "eas-cli@latest", ...args], { cwd, timeout: 120000 });
-    return result.stdout;
-  } catch (error) {
-    diagnostics.push({ stage: "native", severity: "warning", message: error instanceof Error ? error.message : String(error) });
-    throw error;
+    const parsed = JSON.parse(value) as AgentNode[] | { nodes?: AgentNode[] };
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed.nodes)) return parsed.nodes;
+  } catch {
+    // Preserve the legacy line mock during the 0.2 -> 1.0 migration.
   }
+  return value.split(/\r?\n/).filter(Boolean).map((line, index) => ({
+    index,
+    ref: `e${index + 1}`,
+    label: extractLegacyValue(line, "label"),
+    role: extractLegacyValue(line, "role") ?? extractLegacyValue(line, "accessibilityRole"),
+    value: extractLegacyValue(line, "state") ?? extractLegacyValue(line, "value"),
+    type: /pressable|touchable/i.test(line) ? "button" : undefined,
+    visibleToUser: true
+  }));
 }
 
-async function waitForEasSimulator(cwd: string, diagnostics: RuntimeDiagnostic[]): Promise<void> {
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    const output = await eas(["simulator:get", "--json"], cwd, diagnostics);
-    let status = "";
-    try {
-      const parsed = JSON.parse(output) as { status?: string };
-      status = parsed.status ?? "";
-    } catch {
-      status = output.match(/\b(?:IN_PROGRESS|FINISHED|FAILED|CANCELED|ERRORED)\b/i)?.[0] ?? "";
-    }
-    if (status.toUpperCase() === "IN_PROGRESS") return;
-    if (/^(?:FINISHED|FAILED|CANCELED|ERRORED)$/i.test(status)) {
-      throw new Error(`EAS Simulator stopped before it became ready (${status}).`);
-    }
-    await delay(2_000);
+function isInteractiveNode(node: AgentNode): boolean {
+  return /button|link|switch|checkbox|radio|tab|menuitem|text.?field|input|pressable|touchable/i.test(`${node.role ?? ""} ${node.type ?? ""}`) || node.hittable === true;
+}
+
+function isHeadingNode(node: AgentNode): boolean {
+  return /heading|header/i.test(`${node.role ?? ""} ${node.subrole ?? ""} ${node.type ?? ""}`);
+}
+
+function isModalNode(node: AgentNode): boolean {
+  return /dialog|alertdialog/i.test(`${node.role ?? ""} ${node.subrole ?? ""}`)
+    && (node.presentationHints?.some((hint) => /modal/i.test(hint)) ?? false);
+}
+
+function isDescendant(node: AgentNode, ancestor: AgentNode, nodes: AgentNode[]): boolean {
+  const byIndex = new Map(nodes.map((candidate) => [candidate.index, candidate]));
+  let parentIndex = node.parentIndex;
+  while (parentIndex !== undefined) {
+    if (parentIndex === ancestor.index) return true;
+    parentIndex = byIndex.get(parentIndex)?.parentIndex;
   }
-  throw new Error("Timed out waiting for EAS Simulator to become ready.");
+  return false;
 }
 
-async function stopEasSimulator(rootDir: string): Promise<void> {
-  await execFileAsync("npx", ["--yes", "eas-cli@latest", "simulator:stop"], { cwd: rootDir, timeout: 30000 }).catch(() => undefined);
-  await writeSimulatorEnv(rootDir);
+function findTraversalRisk(nodes: AgentNode[]): AgentNode | undefined {
+  const positioned = nodes.filter((node) => node.rect && node.visibleToUser !== false);
+  for (let index = 1; index < positioned.length; index += 1) {
+    const previous = positioned[index - 1];
+    const current = positioned[index];
+    if (!previous?.rect || !current?.rect) continue;
+    if (current.rect.y + current.rect.height < previous.rect.y) return current;
+  }
+  return undefined;
 }
 
-async function writeSimulatorEnv(rootDir: string): Promise<void> {
-  await fs.writeFile(path.join(rootDir, ".env.eas-simulator"), "# managed by eas-cli\n", "utf8").catch(() => undefined);
+function nativeState(node: AgentNode): string | undefined {
+  if (node.value !== undefined && String(node.value).trim()) return String(node.value);
+  if (node.selected !== undefined) return String(node.selected);
+  return undefined;
 }
 
-function extractValue(line: string, name: string): string | undefined {
+function isStatefulRole(role: string | undefined): boolean {
+  return /switch|checkbox|radio|tab/i.test(role ?? "");
+}
+
+function isSmallTarget(rect: { width: number; height: number }, platform: NativePlatform): boolean {
+  const minimum = platform === "ios" ? 44 : 48;
+  return rect.width > 0 && rect.height > 0 && (rect.width < minimum || rect.height < minimum);
+}
+
+function clean(value: unknown): string | undefined {
+  const normalized = value === undefined || value === null ? "" : String(value).trim();
+  return normalized || undefined;
+}
+
+function extractLegacyValue(line: string, name: string): string | undefined {
   return line.match(new RegExp(`${name}=["']([^"']+)["']`, "i"))?.[1] ?? line.match(new RegExp(`${name}:\\s*([^,]+)`, "i"))?.[1]?.trim();
+}
+
+function describeAction(action: NativeScreenAction): string {
+  if ("press" in action) return `press ${action.press}`;
+  if ("fill" in action) return `fill ${action.fill}`;
+  if ("swipe" in action) return `swipe ${action.swipe}`;
+  if ("back" in action) return "back";
+  if ("waitFor" in action) return `waitFor ${action.waitFor}`;
+  return `assert ${action.assert}`;
 }
 
 function safeName(value: string): string {
   return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-|-$/g, "") || "screen";
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

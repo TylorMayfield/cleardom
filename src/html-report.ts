@@ -40,6 +40,7 @@ export function formatScanHtmlReport(result: ScanResult, options: HtmlReportOpti
     .controls { display: grid; grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(150px, 220px)); gap: 12px; align-items: end; padding: 16px; }
     label { display: grid; gap: 5px; color: var(--muted); font-size: .86rem; font-weight: 700; }
     input, select { width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; color: var(--ink); background: #fff; font: inherit; }
+    :focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
     .group { overflow: hidden; }
     summary { cursor: pointer; padding: 14px 16px; font-weight: 800; background: #edf2f7; }
     .finding { padding: 16px; border-top: 1px solid var(--line); }
@@ -53,6 +54,7 @@ export function formatScanHtmlReport(result: ScanResult, options: HtmlReportOpti
     dl div { display: grid; gap: 2px; }
     dt { font-weight: 700; }
     dd { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+    code { overflow-wrap: anywhere; }
     img { display: block; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; margin-top: 12px; }
     .diagnostics { padding: 16px; }
     .empty { padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
@@ -70,6 +72,7 @@ export function formatScanHtmlReport(result: ScanResult, options: HtmlReportOpti
       ${metric("Standard", `${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}`)}
       ${metric("Checked", String(result.checkedFiles))}
       ${metric("Active", String(result.summary.activeFindings))}
+      ${metric("Blocking", String(result.activeFindings.filter((finding) => finding.blocking).length))}
       ${metric("Regressions", String(result.summary.regressions))}
       ${metric("Runtime Pages", String(result.runtimePages.length))}
     </section>

@@ -142,6 +142,8 @@ export function recommendedConfig(detection: StackDetection): ScanConfig {
   include.add("components/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}");
 
   return {
+    schemaVersion: 1,
+    $schema: "https://unpkg.com/cleardom@1/cleardom.schema.json",
     include: [...include],
     exclude: [...exclude],
     standard: "wcag22-aa",
@@ -177,13 +179,15 @@ export function recommendedConfig(detection: StackDetection): ScanConfig {
     },
     native: {
       enabled: false,
-      provider: "eas",
+      runner: "local",
       platforms: frameworks.has("React Native") || frameworks.has("Expo") ? ["ios"] : [],
-      appId: "",
+      appIds: {},
+      devices: {},
       deepLinks: [],
       screens: [],
       maxDurationMinutes: 20
     },
+    telemetry: { enabled: true },
     ownership: [],
     suppressionPolicy: {
       requireReason: true,

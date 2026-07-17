@@ -311,11 +311,12 @@ async function collectInteractionRuntimeIssues(
 }
 
 async function runInteractionPreset(page: puppeteer.Page, preset: string): Promise<string[]> {
-  if (preset === "menus" || preset === "dialogs" || preset === "drawers") {
-    const selector = await page.evaluate(() => {
-      const candidates = [...document.querySelectorAll<HTMLElement>("[aria-haspopup], [aria-controls], button")];
+  if (preset === "menus" || preset === "dialogs" || preset === "drawers" || preset === "popovers") {
+    const selector = await page.evaluate((interactionPreset) => {
+      const role = interactionPreset === "popovers" ? "[aria-haspopup], [popovertarget]" : "[aria-haspopup], [aria-controls], button";
+      const candidates = [...document.querySelectorAll<HTMLElement>(role)];
       return candidates.map((element) => selectorFor(element)).find(Boolean);
-    }) as string | undefined;
+    }, preset) as string | undefined;
     if (!selector) return [];
     await page.click(selector).catch(() => undefined);
     await waitForInteraction();
@@ -343,6 +344,59 @@ async function runInteractionPreset(page: puppeteer.Page, preset: string): Promi
     await page.keyboard.type("ClearDOM test").catch(() => undefined);
     await waitForInteraction();
     return [`preset:${preset}:${selector}`];
+  }
+
+  if (preset === "tabs") {
+    const selector = await page.evaluate(() => {
+      const candidate = document.querySelector<HTMLElement>("[role=tab]:not([aria-selected=true])");
+      return candidate ? selectorFor(candidate) : undefined;
+    }) as string | undefined;
+    if (!selector) return [];
+    await page.focus(selector).catch(() => undefined);
+    await page.keyboard.press("Enter").catch(() => undefined);
+    await waitForInteraction();
+    return [`preset:${preset}:${selector}`];
+  }
+
+  if (preset === "validation") {
+    const selector = await page.evaluate(() => {
+      const form = document.querySelector<HTMLFormElement>("form");
+      if (!form) return undefined;
+      const submit = form.querySelector<HTMLElement>("button[type=submit], input[type=submit]");
+      return submit ? selectorFor(submit) : undefined;
+    }) as string | undefined;
+    if (!selector) return [];
+    await page.click(selector).catch(() => undefined);
+    await waitForInteraction();
+    return [`preset:${preset}:${selector}`];
+  }
+
+  if (preset === "route-changes") {
+    const selector = await page.evaluate(() => {
+      const candidate = [...document.querySelectorAll<HTMLAnchorElement>("a[href]")]
+        .find((anchor) => {
+          const target = new URL(anchor.href, location.href);
+          return target.origin === location.origin && target.href !== location.href && !anchor.hasAttribute("download");
+        });
+      return candidate ? selectorFor(candidate) : undefined;
+    }) as string | undefined;
+    if (!selector) return [];
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 3_000 }).catch(() => undefined),
+      page.click(selector).catch(() => undefined)
+    ]);
+    await waitForInteraction();
+    return [`preset:${preset}:${selector}`];
+  }
+
+  if (preset === "keyboard-navigation") {
+    const steps: string[] = [];
+    for (let index = 0; index < 12; index += 1) {
+      await page.keyboard.press("Tab");
+      const selector = await page.evaluate(() => document.activeElement instanceof HTMLElement ? selectorFor(document.activeElement) : undefined) as string | undefined;
+      if (selector) steps.push(`preset:${preset}:${index + 1}:${selector}`);
+    }
+    return steps;
   }
 
   return [];
@@ -408,14 +462,24 @@ function runtimeDiagnostic(
   error: unknown,
   severity: RuntimeDiagnostic["severity"]
 ): RuntimeDiagnostic {
+  const message = error instanceof Error ? error.message : String(error);
   return {
     url,
     route,
     viewport: viewport.name,
     stage,
     severity,
-    message: error instanceof Error ? error.message : String(error)
+    message: `${message} Recovery: run \`cleardom doctor .\`, then retry \`cleardom check --runtime-url ${recoveryUrl(url)}\`.`
   };
+}
+
+function recoveryUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    return parsed.origin;
+  } catch {
+    return "http://localhost:3000";
+  }
 }
 
 function runtimeCollectorScript(): string {
@@ -466,6 +530,11 @@ function runtimeFinding(
   severity: Severity
 ): Finding {
   const excerpt = issue.selector;
+  const detectionMode = rule.detectionMode ?? (rule.confidence === "high" ? "automated" : rule.confidence === "medium" ? "needs-review" : "manual-guidance");
+  const configured = options.rules[rule.id];
+  const blocking = configured && typeof configured === "object" && configured.blocking !== undefined
+    ? configured.blocking
+    : detectionMode === "automated" && rule.confidence === "high";
   return {
     ruleId: rule.id,
     title: rule.title,
@@ -473,9 +542,10 @@ function runtimeFinding(
     confidence: rule.confidence,
     impact: rule.impact ?? (severity === "critical" ? "serious" : severity === "warning" ? "moderate" : "minor"),
     confidenceReason: rule.confidenceReason ?? "Rendered-page evidence was collected from the browser runtime.",
-    detectionMode: rule.detectionMode ?? (rule.confidence === "high" ? "automated" : rule.confidence === "medium" ? "needs-review" : "manual-guidance"),
+    detectionMode,
     source: "runtime",
     fixKind: rule.fixKind ?? (rule.fixable && rule.confidence === "high" ? "safe-auto-fix" : "guided-fix"),
+    blocking,
     category: rule.category,
     file: url,
     line: 1,

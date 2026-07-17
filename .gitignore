@@ -3,3 +3,6 @@ dist/
 .DS_Store
 *.log
 examples/wcag-benchmark/reports/
+.cleardom/corpus-results/
+.cleardom/evidence/
+.cleardom/release-evidence.json

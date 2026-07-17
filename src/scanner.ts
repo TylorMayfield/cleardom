@@ -2,15 +2,16 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import * as puppeteer from "puppeteer-core";
 import { fingerprintFinding, markBaselineFindings, readBaseline } from "./baseline.js";
+import { parseWithProjectFrameworkCompiler } from "./framework-compilers.js";
 import { resolveBrowserExecutable } from "./browser.js";
 import { isRuleEnabled, matchesAnyPattern, normalizeSuppressions, ownerForFinding, resolveComponentMappings, resolveScanOptions, severityOverride } from "./config.js";
 import { auditRuntimeUrls, prepareRuntimePage, runRuntimeSetupScript } from "./runtime.js";
 import { normalizeRuleId, rules, summarizeRule } from "./rules/index.js";
 import { createSemanticProject, isSemanticSourceFile, parseSemanticSource } from "./semantic.js";
-import { parseSource, supportedExtensions } from "./source-adapters.js";
+import { adapterForFile, parseSource, supportedExtensions } from "./source-adapters.js";
 import { findStandard, referencesForStandard, resolveStandardId, ruleAppliesToStandard } from "./standards.js";
 import { applySuppressions } from "./suppressions.js";
-import type { DetectionMode, Finding, FindingImpact, FindingSource, FixKind, JsxAttribute, JsxElement, ResolvedScanOptions, RuleDefinition, RuntimeDiagnostic, RuntimePageResult, ScanOptions, ScanOutcome, ScanProgress, ScanResult, ScoreBreakdown, SemanticAnalysisSummary, Severity, SuppressedFinding } from "./types.js";
+import type { DetectionMode, Finding, FindingEvidenceOverride, FindingImpact, FindingSource, FixKind, JsxAttribute, JsxElement, ResolvedScanOptions, RuleDefinition, RuntimeDiagnostic, RuntimePageResult, ScanOptions, ScanOutcome, ScanProgress, ScanResult, ScoreBreakdown, SemanticAnalysisSummary, Severity, SuppressedFinding } from "./types.js";
 
 const ignoredDirectories = new Set([".git", ".cleardom", "node_modules", "dist", "build", ".next", "coverage"]);
 
@@ -31,7 +32,29 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}, on
     const source = await fs.readFile(file, "utf8");
     sources.set(file, source);
     const importSourceText = await adjacentTemplateImportSource(file, source);
-    findings.push(...scanSourceWithElements(source, file, semanticProject.elementsByFile.get(file) ?? parseSource(source, file, importSourceText), resolvedOptions));
+    let elements = semanticProject.elementsByFile.get(file);
+    if (!elements) {
+      const parsed = await parseWithProjectFrameworkCompiler(source, file, resolvedOptions.rootDir, importSourceText);
+      elements = parsed.elements;
+      if (parsed.diagnostic) semanticProject.diagnostics.push({ file, message: parsed.diagnostic, severity: parsed.compiler ? "info" : "warning", adapter: parsed.compiler ? "framework-compiler" : "lightweight" });
+      if (parsed.compiler) {
+        semanticProject.analysis.frameworkCompilers ??= {};
+        semanticProject.analysis.frameworkCompilers[parsed.compiler] = (semanticProject.analysis.frameworkCompilers[parsed.compiler] ?? 0) + 1;
+        semanticProject.analysis.filesFallback = Math.max(0, semanticProject.analysis.filesFallback - 1);
+        semanticProject.analysis.filesAnalyzed += 1;
+      }
+    }
+    findings.push(...scanSourceWithElements(source, file, elements, resolvedOptions));
+  }
+  if (semanticProject.analysis.frameworkCompilers && Object.keys(semanticProject.analysis.frameworkCompilers).length > 0) {
+    if (semanticProject.analysis.adapter === "lightweight") semanticProject.analysis.adapter = "framework-compiler";
+    const genericFallback = semanticProject.diagnostics.findIndex((diagnostic) => diagnostic.message.includes("non-JavaScript/TypeScript source"));
+    if (genericFallback >= 0) semanticProject.diagnostics.splice(genericFallback, 1);
+    if (semanticProject.analysis.filesFallback > 0) semanticProject.diagnostics.push({
+      message: `${semanticProject.analysis.filesFallback} source ${semanticProject.analysis.filesFallback === 1 ? "file used" : "files used"} the lightweight framework fallback.`,
+      severity: "info",
+      adapter: "lightweight"
+    });
   }
   const sourceFinishedAt = Date.now();
   let runtimeMs = 0;
@@ -52,20 +75,39 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}, on
     ]);
     onProgress?.({ phase: "runtime-browser" });
     onProgress?.({ phase: "runtime-start", pages: targets.length, viewports: resolvedOptions.runtime.viewports.length });
-    const runtime = await auditRuntimeUrls(targets, resolvedOptions, undefined, undefined, onProgress);
-    runtimeDiagnostics.push(...runtime.diagnostics);
-    runtimePages = runtime.pages;
-    findings.push(...runtime.findings);
+    try {
+      const runtime = await auditRuntimeUrls(targets, resolvedOptions, undefined, undefined, onProgress);
+      runtimeDiagnostics.push(...runtime.diagnostics);
+      runtimePages = runtime.pages;
+      findings.push(...runtime.findings);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      for (const target of targets) {
+        for (const viewport of resolvedOptions.runtime.viewports) {
+          runtimePages.push({ ...target, viewport, findings: 0 });
+          runtimeDiagnostics.push({
+            url: target.url,
+            route: target.route,
+            viewport: viewport.name,
+            stage: "browser",
+            severity: "error",
+            message: `${message} Recovery: run \`cleardom browser install\` or configure runtime.browser.executablePath, then retry \`cleardom check --runtime-url ${runtimeRecoveryOrigin(runtimeBaseUrl)}\`.`
+          });
+        }
+      }
+    }
     runtimeMs = Date.now() - sourceFinishedAt;
   }
 
-  const suppressionResult = applySuppressions(findings, sources, resolvedOptions);
+  const suppressionResult = applySuppressions(consolidateFindings(findings), sources, resolvedOptions);
   const baseline = await readBaseline(resolvedOptions.baseline, resolvedOptions.rootDir);
   const marked = withOwners(markBaselineFindings(suppressionResult.findings, baseline), resolvedOptions);
   const scoreBreakdown = buildScoreBreakdown(marked.activeFindings);
   const score = Math.round(Object.values(scoreBreakdown).reduce((total, value) => total + value, 0) / Object.values(scoreBreakdown).length);
 
   return {
+    schemaVersion: 1,
+    kind: "cleardom-scan-result",
     checkedFiles: files.length,
     findings: marked.findings,
     activeFindings: marked.activeFindings,
@@ -85,6 +127,10 @@ export async function scanPath(targetPath: string, options: ScanOptions = {}, on
     timings: { totalMs: Date.now() - startedAt, sourceMs: sourceFinishedAt - startedAt, runtimeMs },
     baseline
   };
+}
+
+function runtimeRecoveryOrigin(value: string): string {
+  try { return new URL(value).origin; } catch { return "http://localhost:3000"; }
 }
 
 async function adjacentTemplateImportSource(file: string, source: string): Promise<string> {
@@ -175,13 +221,15 @@ export async function scanUrl(url: string, options: ScanOptions = {}, chromePath
     findings.push(...runtime.findings);
     const runtimeMs = Date.now() - sourceFinishedAt;
 
-    const suppressionResult = applySuppressions(findings, sources, resolvedOptions);
+    const suppressionResult = applySuppressions(consolidateFindings(findings), sources, resolvedOptions);
     const baseline = await readBaseline(resolvedOptions.baseline, resolvedOptions.rootDir);
     const marked = withOwners(markBaselineFindings(suppressionResult.findings, baseline), resolvedOptions);
     const scoreBreakdown = buildScoreBreakdown(marked.activeFindings);
     const score = Math.round(Object.values(scoreBreakdown).reduce((total, value) => total + value, 0) / Object.values(scoreBreakdown).length);
 
     return {
+      schemaVersion: 1,
+      kind: "cleardom-scan-result",
       checkedFiles: targets.length,
       findings: marked.findings,
       activeFindings: marked.activeFindings,
@@ -241,12 +289,60 @@ function scanSourceWithElements(source: string, file: string, elements: JsxEleme
   return findings.sort((left, right) => left.file.localeCompare(right.file) || left.line - right.line || left.column - right.column || left.ruleId.localeCompare(right.ruleId));
 }
 
+export function consolidateFindings(findings: Finding[]): Finding[] {
+  const consolidated: Finding[] = [];
+  for (const finding of findings) {
+    const exact = consolidated.find((candidate) => candidate.fingerprint === finding.fingerprint);
+    if (exact) {
+      exact.occurrences = mergeOccurrences(exact, finding);
+      continue;
+    }
+    if (finding.runtime) {
+      const correlated = correlatedSourceFinding(consolidated, finding);
+      if (correlated) {
+        correlated.runtime ??= finding.runtime;
+        correlated.blocking = Boolean(correlated.blocking || finding.blocking);
+        correlated.occurrences = mergeOccurrences(correlated, finding);
+        continue;
+      }
+    }
+    consolidated.push({ ...finding, occurrences: finding.occurrences ?? [findingOccurrence(finding)] });
+  }
+  return consolidated;
+}
+
+function correlatedSourceFinding(candidates: Finding[], runtime: Finding): Finding | undefined {
+  const sourceCandidates = candidates.filter((candidate) => candidate.ruleId === runtime.ruleId && candidate.source !== "runtime" && candidate.source !== "native-runtime");
+  const dom = runtime.runtime?.evidence?.domSnippet ?? "";
+  const selector = runtime.runtime?.selector ?? "";
+  const matches = sourceCandidates.filter((candidate) => {
+    const id = candidate.target.match(/\[id=([^\]]+)\]/)?.[1];
+    if (id && (selector.includes(`#${id}`) || dom.includes(`id=\"${id}\"`) || dom.includes(`id='${id}'`))) return true;
+    const label = candidate.target.match(/\[aria-label=([^\]]+)\]/)?.[1];
+    return Boolean(label && (dom.includes(`aria-label=\"${label}\"`) || dom.includes(`aria-label='${label}'`)));
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function mergeOccurrences(left: Finding, right: Finding) {
+  const occurrences = [...(left.occurrences ?? [findingOccurrence(left)]), ...(right.occurrences ?? [findingOccurrence(right)])];
+  return [...new Map(occurrences.map((occurrence) => [`${occurrence.source}\0${occurrence.file}\0${occurrence.line}\0${occurrence.column}\0${occurrence.runtime?.route ?? ""}\0${occurrence.runtime?.viewport.name ?? ""}`, occurrence])).values()];
+}
+
+function findingOccurrence(finding: Finding) {
+  return { source: finding.source, file: finding.file, line: finding.line, column: finding.column, runtime: finding.runtime, native: finding.native };
+}
+
 export function shouldFail(result: ScanResult, failOn: ResolvedScanOptions["failOn"]): boolean {
   if (failOn === "none") return false;
-  if (failOn === "findings") return result.findings.length > 0;
-  if (failOn === "regression") return result.regressions.length > 0;
-  if (failOn === "critical") return result.activeFindings.some((finding) => finding.severity === "critical");
-  return result.activeFindings.some((finding) => finding.severity === "critical" || finding.severity === "warning");
+  if (failOn === "findings") return result.findings.some(isBlockingFinding);
+  if (failOn === "regression") return result.regressions.some(isBlockingFinding);
+  if (failOn === "critical") return result.activeFindings.some((finding) => isBlockingFinding(finding) && finding.severity === "critical");
+  return result.activeFindings.some((finding) => isBlockingFinding(finding) && (finding.severity === "critical" || finding.severity === "warning"));
+}
+
+export function isBlockingFinding(finding: Finding): boolean {
+  return finding.blocking ?? (finding.detectionMode === "automated" && finding.confidence === "high");
 }
 
 async function collectFiles(targetPath: string, options: ResolvedScanOptions, scanRoot = path.resolve(targetPath)): Promise<string[]> {
@@ -488,19 +584,21 @@ function createRuleContext(
     source,
     elements,
     options,
-    createFinding(rule: RuleDefinition, element: JsxElement, message: string): Finding {
+    createFinding(rule: RuleDefinition, element: JsxElement, message: string, evidence?: FindingEvidenceOverride): Finding {
       const target = ruleTarget(element);
       const location = semanticLocation(elements, element);
       return {
         ruleId: rule.id,
         title: rule.title,
         severity: effectiveSeverity,
-        confidence: rule.confidence,
+        confidence: evidence?.confidence ?? (evidence?.state === "unresolved" ? "medium" : rule.confidence),
         impact: ruleImpact(rule),
-        confidenceReason: confidenceReason(rule),
-        detectionMode: ruleDetectionMode(rule),
-        source: ruleSource(rule, options),
-        fixKind: ruleFixKind(rule),
+        confidenceReason: evidence?.confidenceReason ?? (evidence?.state === "unresolved" ? "Static evidence is unresolved; rendered output or human review must confirm whether a violation exists." : confidenceReason(rule)),
+        detectionMode: evidence?.detectionMode ?? (evidence?.state === "unresolved" ? "needs-review" : ruleDetectionMode(rule)),
+        evidenceState: evidence?.state ?? "proven-violation",
+        source: ruleSource(rule, options, file),
+        fixKind: evidence?.fixKind ?? (evidence?.state === "unresolved" ? "guided-fix" : ruleFixKind(rule)),
+        blocking: evidence?.blocking ?? (evidence?.state === "unresolved" ? false : ruleBlocking(rule, options, file)),
         category: rule.category,
         file,
         line: element.line,
@@ -514,7 +612,7 @@ function createRuleContext(
         semanticLocation: location,
         fingerprint: fingerprintFinding({
           ruleId: rule.id,
-          file,
+          file: fingerprintSourceFile(file, options.rootDir),
           target,
           semanticLocation: location
         }),
@@ -548,6 +646,20 @@ function createRuleContext(
       });
     }
   };
+}
+
+function fingerprintSourceFile(file: string, rootDir: string): string {
+  if (!path.isAbsolute(file)) return file;
+  const relative = path.relative(rootDir, file);
+  return relative && !relative.startsWith(`..${path.sep}`) && relative !== ".." ? relative : path.basename(file);
+}
+
+function ruleBlocking(rule: RuleDefinition, options: ResolvedScanOptions, file: string): boolean {
+  const configured = options.rules[rule.id];
+  if (configured && typeof configured === "object" && configured.blocking !== undefined) return configured.blocking;
+  const adapter = adapterForFile(file);
+  if (adapter && adapter.id !== "jsx") return false;
+  return ruleDetectionMode(rule) === "automated" && rule.confidence === "high";
 }
 
 function scoreCategory(findings: Finding[]): number {
@@ -590,9 +702,11 @@ function confidenceReason(rule: RuleDefinition): string {
   return "This rule maps to WCAG guidance that usually requires human judgment, user context, or runtime evidence.";
 }
 
-function ruleSource(rule: RuleDefinition, options: ResolvedScanOptions): FindingSource {
-  if (rule.source) return rule.source;
-  return options.semantic === "off" ? "static" : "semantic";
+function ruleSource(rule: RuleDefinition, options: ResolvedScanOptions, file: string): FindingSource {
+  if (rule.source === "runtime" || rule.source === "native-runtime") return rule.source;
+  const adapter = adapterForFile(file);
+  if (adapter && adapter.id !== "jsx") return "static";
+  return options.semantic === "off" ? "static" : (rule.source ?? "semantic");
 }
 
 function ruleFixKind(rule: RuleDefinition): FixKind {
@@ -776,12 +890,14 @@ function resolveInlineOptions(options: ScanOptions): ResolvedScanOptions {
     native: {
       enabled: options.native?.enabled ?? false,
       platforms: options.native?.platforms ?? ["ios"],
-      provider: options.native?.provider ?? "eas",
-      appId: options.native?.appId ?? "",
+      runner: "local",
+      appIds: options.native?.appIds ?? (options.native?.appId ? { [options.native.platforms?.[0] ?? "ios"]: options.native.appId } : {}),
+      devices: options.native?.devices ?? {},
       deepLinks: options.native?.deepLinks ?? [],
       screens: options.native?.screens ?? [],
       maxDurationMinutes: options.native?.maxDurationMinutes ?? 20
     },
+    telemetry: { enabled: options.telemetry?.enabled ?? true },
     pr: {
       maxComments: 20,
       severityThreshold: "info",

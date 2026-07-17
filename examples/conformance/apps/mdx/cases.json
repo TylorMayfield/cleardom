@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "stack": "mdx",
+  "cases": [
+    {
+      "id": "clean-named-control",
+      "fixture": "clean",
+      "ruleId": "CDOM_4_1_2_UNNAMED_CONTROL",
+      "detectionClass": "automated",
+      "routeOrScreen": "/",
+      "expectedEvidence": "no blocking finding",
+      "allowedPlatformDifferences": []
+    },
+    {
+      "id": "broken-unnamed-control",
+      "fixture": "broken",
+      "ruleId": "CDOM_4_1_2_UNNAMED_CONTROL",
+      "detectionClass": "automated",
+      "routeOrScreen": "/",
+      "expectedEvidence": "source location plus rendered selector and route",
+      "allowedPlatformDifferences": []
+    }
+  ]
+}

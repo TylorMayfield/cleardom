@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "include": [
+    "**/*.{html,js,jsx,ts,tsx,vue,svelte,astro,mdx}"
+  ],
+  "runtime": {
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:4173"
+  },
+  "native": {
+    "enabled": false
+  }
+}

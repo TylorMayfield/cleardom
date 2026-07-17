@@ -1,3 +1,4 @@
+import { attributeEvidence, isIntrinsicElement } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const anchorHrefRule: RuleDefinition = {
@@ -26,9 +27,13 @@ export const anchorHrefRule: RuleDefinition = {
     { label: "Action", code: '<button type="button" onClick={openReceipt}>View receipt</button>' }
   ],
   check(context) {
-    return context.elements
-      .filter((element) => element.tagName.toLowerCase() === "a")
-      .filter((element) => !context.hasAttribute(element, "href"))
-      .map((element) => context.createFinding(this, element, "Use href for navigation, or replace this with a button."));
+    return context.elements.flatMap((element) => {
+      if (!isIntrinsicElement(element, "a")) return [];
+      const href = attributeEvidence(element, context, "href");
+      const routerLink = attributeEvidence(element, context, "routerLink");
+      if (href === "non-empty" || routerLink === "non-empty") return [];
+      const unresolved = href === "unresolved" || routerLink === "unresolved";
+      return [context.createFinding(this, element, "Use href or routerLink for navigation, or replace this with a button.", unresolved ? { state: "unresolved" } : undefined)];
+    });
   }
 };

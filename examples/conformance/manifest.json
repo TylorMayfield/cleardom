@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "requiredStacks": [
+    "react",
+    "nextjs",
+    "remix",
+    "gatsby",
+    "vite-react",
+    "preact",
+    "solid",
+    "html",
+    "vue",
+    "svelte",
+    "astro",
+    "angular",
+    "mdx",
+    "electron",
+    "tauri",
+    "capacitor",
+    "ionic",
+    "browser-extension",
+    "react-native",
+    "expo"
+  ],
+  "applications": [
+    {
+      "stack": "react",
+      "clean": "examples/conformance/apps/react/clean",
+      "broken": "examples/conformance/apps/react/broken",
+      "caseManifest": "examples/conformance/apps/react/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "nextjs",
+      "clean": "examples/conformance/apps/nextjs/clean",
+      "broken": "examples/conformance/apps/nextjs/broken",
+      "caseManifest": "examples/conformance/apps/nextjs/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "remix",
+      "clean": "examples/conformance/apps/remix/clean",
+      "broken": "examples/conformance/apps/remix/broken",
+      "caseManifest": "examples/conformance/apps/remix/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "gatsby",
+      "clean": "examples/conformance/apps/gatsby/clean",
+      "broken": "examples/conformance/apps/gatsby/broken",
+      "caseManifest": "examples/conformance/apps/gatsby/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "vite-react",
+      "clean": "examples/conformance/apps/vite-react/clean",
+      "broken": "examples/conformance/apps/vite-react/broken",
+      "caseManifest": "examples/conformance/apps/vite-react/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "preact",
+      "clean": "examples/conformance/apps/preact/clean",
+      "broken": "examples/conformance/apps/preact/broken",
+      "caseManifest": "examples/conformance/apps/preact/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "solid",
+      "clean": "examples/conformance/apps/solid/clean",
+      "broken": "examples/conformance/apps/solid/broken",
+      "caseManifest": "examples/conformance/apps/solid/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "html",
+      "clean": "examples/conformance/apps/html/clean",
+      "broken": "examples/conformance/apps/html/broken",
+      "caseManifest": "examples/conformance/apps/html/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "vue",
+      "clean": "examples/conformance/apps/vue/clean",
+      "broken": "examples/conformance/apps/vue/broken",
+      "caseManifest": "examples/conformance/apps/vue/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "svelte",
+      "clean": "examples/conformance/apps/svelte/clean",
+      "broken": "examples/conformance/apps/svelte/broken",
+      "caseManifest": "examples/conformance/apps/svelte/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "astro",
+      "clean": "examples/conformance/apps/astro/clean",
+      "broken": "examples/conformance/apps/astro/broken",
+      "caseManifest": "examples/conformance/apps/astro/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "angular",
+      "clean": "examples/conformance/apps/angular/clean",
+      "broken": "examples/conformance/apps/angular/broken",
+      "caseManifest": "examples/conformance/apps/angular/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "mdx",
+      "clean": "examples/conformance/apps/mdx/clean",
+      "broken": "examples/conformance/apps/mdx/broken",
+      "caseManifest": "examples/conformance/apps/mdx/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "electron",
+      "clean": "examples/conformance/apps/electron/clean",
+      "broken": "examples/conformance/apps/electron/broken",
+      "caseManifest": "examples/conformance/apps/electron/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "tauri",
+      "clean": "examples/conformance/apps/tauri/clean",
+      "broken": "examples/conformance/apps/tauri/broken",
+      "caseManifest": "examples/conformance/apps/tauri/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "capacitor",
+      "clean": "examples/conformance/apps/capacitor/clean",
+      "broken": "examples/conformance/apps/capacitor/broken",
+      "caseManifest": "examples/conformance/apps/capacitor/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "ionic",
+      "clean": "examples/conformance/apps/ionic/clean",
+      "broken": "examples/conformance/apps/ionic/broken",
+      "caseManifest": "examples/conformance/apps/ionic/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "browser-extension",
+      "clean": "examples/conformance/apps/browser-extension/clean",
+      "broken": "examples/conformance/apps/browser-extension/broken",
+      "caseManifest": "examples/conformance/apps/browser-extension/cases.json",
+      "evidence": [
+        "source",
+        "runtime",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "react-native",
+      "clean": "examples/conformance/apps/react-native/clean",
+      "broken": "examples/conformance/apps/react-native/broken",
+      "caseManifest": "examples/conformance/apps/react-native/cases.json",
+      "evidence": [
+        "source",
+        "native-ios",
+        "native-android",
+        "fix",
+        "protection"
+      ]
+    },
+    {
+      "stack": "expo",
+      "clean": "examples/conformance/apps/expo/clean",
+      "broken": "examples/conformance/apps/expo/broken",
+      "caseManifest": "examples/conformance/apps/expo/cases.json",
+      "evidence": [
+        "source",
+        "native-ios",
+        "native-android",
+        "fix",
+        "protection"
+      ]
+    }
+  ],
+  "caseManifestRequiredFields": [
+    "ruleId",
+    "detectionClass",
+    "routeOrScreen",
+    "expectedEvidence",
+    "allowedPlatformDifferences"
+  ]
+}

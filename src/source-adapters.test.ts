@@ -1,5 +1,9 @@
 import * as assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 import { test } from "node:test";
+import { parseWithProjectFrameworkCompiler } from "./framework-compilers.js";
 import { adapterForFile, parseSource, sourceAdapters } from "./source-adapters.js";
 
 test("source adapters expose documented support tiers", () => {
@@ -16,6 +20,20 @@ test("source adapters expose documented support tiers", () => {
     ]
   );
   assert.equal(sourceAdapters.every((adapter) => adapter.label && adapter.supportSummary), true);
+});
+
+test("template adapters invoke a project-installed framework compiler and retain authored locations", async () => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), "cleardom-vue-compiler-"));
+  const compilerRoot = path.join(root, "node_modules", "@vue", "compiler-sfc");
+  await fs.mkdir(compilerRoot, { recursive: true });
+  await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ type: "module" }), "utf8");
+  await fs.writeFile(path.join(compilerRoot, "package.json"), JSON.stringify({ name: "@vue/compiler-sfc", type: "module", exports: "./index.js" }), "utf8");
+  await fs.writeFile(path.join(compilerRoot, "index.js"), "export function parse(source) { return { descriptor: {}, errors: source.includes('invalid-compiler-case') ? ['invalid'] : [] }; }", "utf8");
+  const file = path.join(root, "Button.vue");
+  const parsed = await parseWithProjectFrameworkCompiler("<template>\n<button></button>\n</template>", file, root);
+  assert.equal(parsed.compiler, "@vue/compiler-sfc");
+  assert.equal(parsed.elements.find((element) => element.tagName === "button")?.line, 2);
+  assert.match(parsed.diagnostic ?? "", /parsed with @vue\/compiler-sfc/);
 });
 
 test("JSX parser records component import sources for design-system mappings", () => {

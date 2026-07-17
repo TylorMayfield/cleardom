@@ -88,7 +88,7 @@ export function parseSource(source: string, filePath: string, importSourceText =
 }
 
 function prepareHtmlLikeSource(source: string): string {
-  return normalizeFrameworkAttributes(stripBlocks(source, ["script", "style"]));
+  return normalizeFrameworkAttributes(stripMarkupComments(stripBlocks(source, ["script", "style"])));
 }
 
 function prepareVueSource(source: string): string {
@@ -97,19 +97,19 @@ function prepareVueSource(source: string): string {
     ? preservePrefix(source, template.contentStart) + source.slice(template.contentStart, template.contentEnd)
     : stripBlocks(source, ["script", "style"]);
 
-  return normalizeFrameworkAttributes(templateSource);
+  return normalizeFrameworkAttributes(stripMarkupComments(templateSource));
 }
 
 function prepareSvelteSource(source: string): string {
-  return normalizeFrameworkAttributes(stripBlocks(source, ["script", "style"]));
+  return normalizeFrameworkAttributes(stripMarkupComments(stripBlocks(source, ["script", "style"])));
 }
 
 function prepareAstroSource(source: string): string {
-  return normalizeFrameworkAttributes(stripBlocks(stripAstroFrontmatter(source), ["script", "style"]));
+  return normalizeFrameworkAttributes(stripMarkupComments(stripBlocks(stripAstroFrontmatter(source), ["script", "style"])));
 }
 
 function prepareAngularSource(source: string): string {
-  return normalizeFrameworkAttributes(stripBlocks(source, ["script", "style"]));
+  return normalizeFrameworkAttributes(stripMarkupComments(stripBlocks(source, ["script", "style"])));
 }
 
 function prepareMdxSource(source: string): string {
@@ -119,7 +119,11 @@ function prepareMdxSource(source: string): string {
     .map((line) => /^\s*(?:import|export)\s/.test(line) ? preserveLine(line) : line)
     .join("\n");
 
-  return normalizeFrameworkAttributes(stripBlocks(withoutModuleDeclarations, ["script", "style"]));
+  return normalizeFrameworkAttributes(stripMarkupComments(stripBlocks(withoutModuleDeclarations, ["script", "style"])));
+}
+
+function stripMarkupComments(source: string): string {
+  return source.replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => preserveLine(comment));
 }
 
 function extractSingleFileComponentBlock(source: string, tagName: string): {
@@ -214,7 +218,10 @@ function stripMarkdownFences(source: string): string {
 }
 
 function normalizeFrameworkAttributes(source: string): string {
-  return source.replace(/\s((?::|v-bind:|\[attr\.|\[|bind:|class:|on:|@|\(|v-on:)[^\s=/>]+)(\]?|\))(?=\s*=|\s|\/?>)/g, (match, rawName: string, closing: string) => {
+  const expressionValues = source
+    .replace(/\s((?::|v-bind:|bind:)[^\s=/>]+)\s*=\s*(["'])(.*?)\2/g, (_match, rawName: string, _quote: string, value: string) => ` ${normalizeFrameworkAttributeName(rawName)}={${value}}`)
+    .replace(/\s(\[[^\]]+\])\s*=\s*(["'])(.*?)\2/g, (_match, rawName: string, _quote: string, value: string) => ` ${normalizeFrameworkAttributeName(rawName)}={${value}}`);
+  return expressionValues.replace(/\s((?::|v-bind:|\[attr\.|\[|bind:|class:|on:|@|\(|v-on:)[^\s=/>]+)(\]?|\))(?=\s*=|\s|\/?>)/g, (match, rawName: string, closing: string) => {
     const normalizedName = normalizeFrameworkAttributeName(`${rawName}${closing}`);
     return ` ${normalizedName}`;
   });

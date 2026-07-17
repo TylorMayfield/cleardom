@@ -7,7 +7,8 @@ import { writeBaseline } from "./baseline.js";
 import { compareScanResults } from "./compare.js";
 import { resolveScanOptions } from "./config.js";
 import { formatSarif } from "./format.js";
-import { scanPath, shouldFail } from "./scanner.js";
+import { isBlockingFinding, scanPath, shouldFail } from "./scanner.js";
+import { sanitizeTerminal } from "./sanitize.js";
 import type { ComparisonResult, Finding, OutputFormat, PackageConfig, PrBaselinePolicy, ResolvedScanOptions, ScanOptions, ScanResult, Severity } from "./types.js";
 
 const marker = "<!-- cleardom:pr-summary -->";
@@ -28,6 +29,7 @@ type PullRequestDiff = {
   files: GithubChangedFile[];
   changedFiles: Set<string>;
   addedLines: Map<string, Set<number>>;
+  renamedFiles: Record<string, string>;
 };
 
 export type GithubContext = {
@@ -45,6 +47,8 @@ export type GithubContext = {
 
 type GithubChangedFile = {
   filename: string;
+  previous_filename?: string;
+  status?: string;
   patch?: string;
 };
 
@@ -82,7 +86,7 @@ export async function runGithubPr(options: GithubPrOptions): Promise<{ result: S
     : resolvedOptions;
   const result = await scanPath(options.target, scanOptions);
   const comparison = context && !options.dryRun
-    ? await compareWithBaseTree(context, options.target, scanOptions, result)
+    ? await compareWithBaseTree(context, options.target, scanOptions, result, diff)
     : undefined;
 
   if (options.writeBaseline) {
@@ -107,7 +111,7 @@ export async function runGithubPr(options: GithubPrOptions): Promise<{ result: S
     }
   }
 
-  process.exitCode = comparison ? (filterBySeverity(comparison.newFindings, prOptions.severityThreshold).length > 0 ? 1 : 0) : (shouldFail(result, scanOptions.failOn) ? 1 : 0);
+  process.exitCode = comparison ? (filterBySeverity(comparison.newFindings.filter(isBlockingFinding), prOptions.severityThreshold).length > 0 ? 1 : 0) : (shouldFail(result, scanOptions.failOn) ? 1 : 0);
   return { result, comparison, posted: Boolean(context && !options.dryRun), summary };
 }
 
@@ -153,10 +157,10 @@ export function formatPullRequestComparisonSummary(comparison: ComparisonResult,
   const result = comparison.head;
   const lines = [
     marker,
-    `# ClearDOM PR review: ${comparison.newFindings.length === 0 ? "passed" : `${comparison.summary.newFindings} new ${comparison.summary.newFindings === 1 ? "finding" : "findings"}`}`,
+    `# ClearDOM PR review: ${comparison.newFindings.filter(isBlockingFinding).length === 0 ? "passed" : `${comparison.newFindings.filter(isBlockingFinding).length} new blocking ${comparison.newFindings.filter(isBlockingFinding).length === 1 ? "finding" : "findings"}`}`,
     "",
     `Score: **${result.score}/100**`,
-    `Status check: **${comparison.newFindings.length > 0 ? "failing" : "passing"}** - pull requests fail only on new findings.`,
+    `Status check: **${comparison.newFindings.some(isBlockingFinding) ? "failing" : "passing"}** - pull requests fail only on new high-confidence automated findings.`,
     `Checked: **${result.checkedFiles}** ${result.checkedFiles === 1 ? "file" : "files"} against **${result.standard.label}${result.standard.status === "draft" ? " (draft)" : ""}**`,
     `Semantic analysis: **${result.semanticAnalysis.adapter === "typescript" ? "TypeScript Program" : "lightweight fallback"}**`,
     `Coverage: **${outcomeCoverage(result)}**`,
@@ -185,7 +189,7 @@ export function formatPullRequestComparisonSummary(comparison: ComparisonResult,
   if (comparison.fixedFindings.length > 0) {
     lines.push("", "## Fixed Findings", "");
     for (const finding of comparison.fixedFindings.slice(0, 10)) {
-      lines.push(`- **${finding.ruleId}** ${markdownLocation(finding, options)}: ${finding.title}`);
+      lines.push(`- **${finding.ruleId}** ${markdownLocation(finding, options)}: ${sanitizeGithubMarkdown(finding.title)}`);
     }
     if (comparison.fixedFindings.length > 10) {
       lines.push("", `Showing 10 of ${comparison.fixedFindings.length} fixed findings.`);
@@ -227,21 +231,24 @@ jobs:
       checks: write
       statuses: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
+          node-version: 22.12
       - name: ClearDOM PR review
-        if: github.event_name == 'pull_request'
-        run: npx cleardom@latest review . --changed-files-only
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: npx cleardom@1 review . --changed-files-only
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+      - name: ClearDOM fork-safe review
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: npx cleardom@1 scan . --diff --fail-on findings
       - name: ClearDOM main scan
         if: github.event_name != 'pull_request'
-        run: npx cleardom@latest ci . --format sarif > cleardom.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+        run: npx cleardom@1 ci . --format sarif > cleardom.sarif
+      - uses: github/codeql-action/upload-sarif@641a925cfafe92d0fdf8b239ba4053e3f8d99d6d # v3
         if: always() && github.event_name != 'pull_request'
         with:
           sarif_file: cleardom.sarif
@@ -277,7 +284,7 @@ async function githubContext(): Promise<GithubContext | undefined> {
   };
 }
 
-async function compareWithBaseTree(context: GithubContext, target: string, options: ResolvedScanOptions, head: ScanResult): Promise<ComparisonResult> {
+async function compareWithBaseTree(context: GithubContext, target: string, options: ResolvedScanOptions, head: ScanResult, diff?: PullRequestDiff): Promise<ComparisonResult> {
   const worktree = await fs.mkdtemp(path.join(tmpdir(), "cleardom-base-"));
 
   try {
@@ -300,7 +307,7 @@ async function compareWithBaseTree(context: GithubContext, target: string, optio
     };
     const baseTarget = rebaseTarget(target, options.rootDir, worktree);
     const base = await scanPath(baseTarget, baseOptions);
-    return compareScanResults(base, head, { baseRoot: worktree, headRoot: options.rootDir });
+    return compareScanResults(base, head, { baseRoot: worktree, headRoot: options.rootDir, renamedFiles: diff?.renamedFiles });
   } finally {
     await execFileAsync("git", ["worktree", "remove", "--force", worktree], { cwd: options.rootDir }).catch(async () => {
       await fs.rm(worktree, { recursive: true, force: true });
@@ -330,23 +337,29 @@ async function pullRequestDiff(context: GithubContext): Promise<PullRequestDiff>
   return {
     files,
     changedFiles: new Set(files.map((file) => file.filename)),
-    addedLines: new Map(files.map((file) => [file.filename, parseAddedLines(file.patch ?? "")]))
+    addedLines: new Map(files.map((file) => [file.filename, parseAddedLines(file.patch ?? "")])),
+    renamedFiles: Object.fromEntries(files.filter((file) => file.status === "renamed" && file.previous_filename).map((file) => [normalizePath(file.previous_filename!), normalizePath(file.filename)]))
   };
 }
 
 async function postInlineComments(context: GithubContext, result: ScanResult, options: ResolvedScanOptions, maxComments: number, findings: Finding[], diff?: PullRequestDiff): Promise<void> {
   const resolvedDiff = diff ?? await pullRequestDiff(context);
   const existing = await githubRequestAll<GithubComment>(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/comments?per_page=100`);
-  const existingKeys = new Set(existing.filter((comment) => comment.body?.includes(inlineMarker)).map((comment) => `${comment.path}:${comment.line}:${extractRuleId(comment.body ?? "")}`));
+  const cleardomComments = existing.filter((comment) => comment.body?.includes(inlineMarker));
+  const existingKeys = new Set(cleardomComments.map((comment) => `${comment.path}:${comment.line}:${extractRuleId(comment.body ?? "")}`));
+  const desiredKeys = new Set<string>();
 
   let posted = 0;
+  let retained = 0;
   for (const finding of findings) {
-    if (posted >= maxComments) return;
     const file = relativeFindingPath(finding, options);
     const lines = resolvedDiff.addedLines.get(file);
     if (!lines?.has(finding.line)) continue;
 
     const key = `${file}:${finding.line}:${finding.ruleId}`;
+    if (retained >= maxComments) continue;
+    retained += 1;
+    desiredKeys.add(key);
     if (existingKeys.has(key)) continue;
 
     await githubRequest(context, `/repos/${context.repository}/pulls/${context.pullRequest.number}/comments`, {
@@ -360,6 +373,13 @@ async function postInlineComments(context: GithubContext, result: ScanResult, op
       })
     });
     posted += 1;
+  }
+
+  for (const comment of cleardomComments) {
+    const key = `${comment.path}:${comment.line}:${extractRuleId(comment.body ?? "")}`;
+    if (!desiredKeys.has(key)) {
+      await githubRequest(context, `/repos/${context.repository}/pulls/comments/${comment.id}`, { method: "DELETE" });
+    }
   }
 }
 
@@ -377,9 +397,9 @@ async function createCheckRun(
     start_line: finding.line,
     end_line: finding.line,
     annotation_level: checkAnnotationLevel(finding.severity),
-    message: finding.message,
-    title: `${finding.ruleId}: ${finding.title}`,
-    raw_details: finding.excerpt
+    message: sanitizeTerminal(finding.message),
+    title: sanitizeTerminal(`${finding.ruleId}: ${finding.title}`),
+    raw_details: undefined
   }));
 
   await githubRequest(context, `/repos/${context.repository}/check-runs`, {
@@ -390,7 +410,7 @@ async function createCheckRun(
       head_sha: context.pullRequest.headSha,
       status: "completed",
       conclusion: comparison
-        ? (comparison.newFindings.length > 0 ? "failure" : "success")
+        ? (comparison.newFindings.some(isBlockingFinding) ? "failure" : "success")
         : (shouldFail(result, options.failOn) ? "failure" : "success"),
       output: {
         title: `${name}: ${findings.length === 0 ? "passed" : `${findings.length} actionable ${findings.length === 1 ? "finding" : "findings"}`}`,
@@ -453,23 +473,23 @@ function inlineCommentBody(finding: Finding, result: ScanResult): string {
   const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
   return [
     inlineMarker,
-    `**${finding.ruleId}: ${finding.title}**`,
+    `**${finding.ruleId}: ${sanitizeGithubMarkdown(finding.title)}**`,
     "",
-    finding.message,
-    finding.owner ? `Owner: ${finding.owner}` : undefined,
-    rule?.guidance ? `Fix: ${rule.guidance}` : undefined,
-    rule?.remediation?.safeAutofix ? `Autofix: ${rule.remediation.safeAutofix}` : undefined,
+    sanitizeGithubMarkdown(finding.message),
+    finding.owner ? `Owner: ${sanitizeGithubMarkdown(finding.owner)}` : undefined,
+    rule?.guidance ? `Fix: ${sanitizeGithubMarkdown(rule.guidance)}` : undefined,
+    rule?.remediation?.safeAutofix ? `Autofix: ${sanitizeGithubMarkdown(rule.remediation.safeAutofix)}` : undefined,
     rule?.docsUrl ? `Docs: ${rule.docsUrl}` : undefined
   ].filter(Boolean).join("\n");
 }
 
 function pushFinding(lines: string[], finding: Finding, result: ScanResult, options: ResolvedScanOptions): void {
   const rule = result.rules.find((candidate) => candidate.id === finding.ruleId);
-  lines.push(`- **${finding.ruleId}** ${markdownLocation(finding, options)}: ${finding.title}`);
-  lines.push(`  ${finding.message}`);
-  if (finding.owner) lines.push(`  Owner: ${finding.owner}`);
-  if (rule?.guidance) lines.push(`  Fix: ${rule.guidance}`);
-  if (rule?.remediation?.safeAutofix) lines.push(`  Autofix: ${rule.remediation.safeAutofix}`);
+  lines.push(`- **${finding.ruleId}** ${markdownLocation(finding, options)}: ${sanitizeGithubMarkdown(finding.title)}`);
+  lines.push(`  ${sanitizeGithubMarkdown(finding.message)}`);
+  if (finding.owner) lines.push(`  Owner: ${sanitizeGithubMarkdown(finding.owner)}`);
+  if (rule?.guidance) lines.push(`  Fix: ${sanitizeGithubMarkdown(rule.guidance)}`);
+  if (rule?.remediation?.safeAutofix) lines.push(`  Autofix: ${sanitizeGithubMarkdown(rule.remediation.safeAutofix)}`);
   if (rule?.docsUrl) lines.push(`  Docs: ${rule.docsUrl}`);
 }
 
@@ -481,7 +501,7 @@ function pushFindingsByFile(lines: string[], findings: Finding[], result: ScanRe
   }
 
   for (const [file, fileFindings] of groups) {
-    lines.push(`### ${file}`, "");
+    lines.push(`### ${sanitizeGithubMarkdown(file)}`, "");
     for (const finding of fileFindings) {
       pushFinding(lines, finding, result, options);
     }
@@ -509,7 +529,7 @@ function pushPackageSummary(lines: string[], findings: Finding[], options: Resol
   lines.push("| Package | Active | Critical | Warnings | Info |");
   lines.push("| --- | ---: | ---: | ---: | ---: |");
   for (const row of rows) {
-    lines.push(`| ${row.label} | ${row.total} | ${row.critical} | ${row.warning} | ${row.info} |`);
+    lines.push(`| ${sanitizeGithubMarkdown(row.label)} | ${row.total} | ${row.critical} | ${row.warning} | ${row.info} |`);
   }
   lines.push("");
 }
@@ -531,13 +551,33 @@ function issueSummary(result: ScanResult): string {
 
 function markdownLocation(finding: Finding, options: ResolvedScanOptions): string {
   const file = relativeFindingPath(finding, options);
-  return `\`${file}:${finding.line}:${finding.column}\``;
+  return `\`${safeCodeSpan(`${file}:${finding.line}:${finding.column}`)}\``;
 }
 
 function relativeFindingPath(finding: Finding, options: ResolvedScanOptions): string {
-  if (/^https?:\/\//i.test(finding.file)) return finding.file;
+  if (/^https?:\/\//i.test(finding.file)) return publicGithubUrl(finding.file);
   const relative = path.relative(options.rootDir, finding.file);
   return relative && !relative.startsWith("..") ? normalizePath(relative) : normalizePath(path.relative(process.cwd(), finding.file));
+}
+
+export function publicGithubUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return "runtime-url";
+  }
+}
+
+export function sanitizeGithubMarkdown(value: string): string {
+  return sanitizeTerminal(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/([`*_{}\[\]()#+.!|<>])/g, "\\$1")
+    .replace(/\r?\n/g, " ");
+}
+
+function safeCodeSpan(value: string): string {
+  return sanitizeTerminal(value).replace(/`/g, "ˋ").replace(/\r?\n/g, " ");
 }
 
 async function defaultConfigPath(rootDir: string): Promise<string | undefined> {

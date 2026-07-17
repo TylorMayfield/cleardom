@@ -1,0 +1,11 @@
+{
+  "name": "@cleardom/conformance-remix-clean",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node ../../../serve-conformance.mjs ."
+  },
+  "dependencies": {
+    "@remix-run/react": "*"
+  }
+}

@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [22.12, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:fast
+      - run: pnpm docs:check
+      - run: pnpm pack:check
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.12
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:runtime
+      - run: pnpm test:conformance:runtime
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.12
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level high
+
+  native-contract:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.12
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: node --test dist/native.test.js
+
+  adapter-demos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.12
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:conformance
+
+  native-ios-host:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.12
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: xcrun simctl list devices available
+      - run: pnpm build && node --test dist/native.test.js
+
+  native-android-host:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.12
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: adb version
+      - run: pnpm build && node --test dist/native.test.js
+
+  corpus-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.12
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:corpus

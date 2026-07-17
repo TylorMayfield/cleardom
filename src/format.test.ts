@@ -79,6 +79,15 @@ test("terminal colors are opt-in and do not contaminate redirected output", () =
   assert.match(formatScanResult(result, false, "test", ".", true), /\u001b\[32m✓ Scan complete\u001b\[0m/);
 });
 
+test("terminal output strips untrusted control sequences", () => {
+  const finding = runtimeFinding("desktop", 1280, "malicious");
+  finding.message = "Unsafe\u001b]8;;https://attacker.invalid\u0007link\u001b]8;;\u0007 message";
+  finding.excerpt = "<button>\u001b[2J";
+  const output = formatScanResult(scanResult([finding]), true, "1.0.0", ".", false);
+  assert.doesNotMatch(output, /\u001b|\u0007/);
+  assert.match(output, /Unsafe.*link.*message/);
+});
+
 function runtimeFinding(viewport: string, width: number, fingerprint: string): Finding {
   return {
     ruleId: "CDOM_1_4_3_CONTRAST",
@@ -114,6 +123,8 @@ function runtimeFinding(viewport: string, width: number, fingerprint: string): F
 
 function scanResult(findings: Finding[]): ScanResult {
   return {
+    schemaVersion: 1,
+    kind: "cleardom-scan-result",
     checkedFiles: 1,
     findings,
     activeFindings: findings,

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "include": [
+    "**/*.{html,js,jsx,ts,tsx,vue,svelte,astro,mdx}"
+  ],
+  "runtime": {
+    "enabled": false
+  },
+  "native": {
+    "enabled": true,
+    "runner": "local",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "appIds": {
+      "ios": "dev.cleardom.reactnative",
+      "android": "dev.cleardom.reactnative"
+    },
+    "screens": [
+      {
+        "name": "account",
+        "actions": [
+          {
+            "assert": "role=button"
+          }
+        ]
+      }
+    ]
+  }
+}

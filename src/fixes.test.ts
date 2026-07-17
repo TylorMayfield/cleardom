@@ -78,6 +78,21 @@ test("verification keeps an unchanged rule stable when another fix changes its t
   assert.equal(verification.introduced.some((finding) => finding.ruleId === "CDOM_1_3_5_AUTOCOMPLETE"), false);
 });
 
+test("verification does not claim runtime findings are fixed when runtime evidence did not complete", () => {
+  const sourceFinding = scanSource('<button aria-label="Save"></button>', "/tmp/Form.tsx")[0]
+    ?? scanSource('<button></button>', "/tmp/Form.tsx")[0];
+  assert.ok(sourceFinding);
+  const runtimeFinding = { ...sourceFinding, source: "runtime" as const };
+  const verification = verifyFixRun([runtimeFinding], [runtimeFinding], [], {
+    source: { requestedFiles: 1, completedFiles: 1, semanticFiles: 1, fallbackFiles: 0 },
+    runtime: { requested: true, attemptedPages: 1, completedPages: 0, failedPages: 1 },
+    native: { requested: false, capturedStates: 0, findings: 0 },
+    findings: { automated: 1, needsReview: 0, manualGuidance: 0, safeAutoFix: 0, guidedFix: 1, manualReview: 0, suppressed: 0, baselined: 0, regressions: 1 }
+  });
+  assert.equal(verification.fixed.length, 0);
+  assert.deepEqual(verification.unverified, [runtimeFinding]);
+});
+
 test("safe fix metadata matches implemented non-speculative transforms", () => {
   assert.deepEqual(rules.filter((rule) => rule.fixable).map((rule) => rule.id).sort(), [
     "CDOM_2_4_3_POSITIVE_TABINDEX",
@@ -96,7 +111,7 @@ test("positive tabindex autofix removes the offensive focus order", async () => 
   const applied = await runSafeFixes(findings, true);
   const updated = await readFile(file, "utf8");
   assert.equal(applied.applied, 1);
-  assert.match(updated, /tabIndex=\{0\}/);
+  assert.doesNotMatch(updated, /tabIndex/);
   assert.equal(scanSource(updated, file).some((finding) => finding.ruleId === "CDOM_2_4_3_POSITIVE_TABINDEX"), false);
 });
 

@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolveScanOptions } from "./config.js";
 import { auditRuntimeUrl, auditRuntimeUrls } from "./runtime.js";
-import { scanPath } from "./scanner.js";
+import { scanPath, scanSource } from "./scanner.js";
 import type { ScanProgress } from "./types.js";
 
 const chromePath = process.env.CHROME_PATH
@@ -102,6 +102,24 @@ test("runtime semantic checks catch dynamically rendered accessibility failures"
     assert.equal(findings.every((finding) => finding.source === "runtime"), true);
     assert.equal(findings.some((finding) => finding.runtime?.selector === "#dynamic-button"), true);
     assert.equal(findings.filter((finding) => finding.ruleId === "CDOM_4_1_2_FORM_LABEL").length, 3);
+  } finally {
+    await server.close();
+  }
+});
+
+test("runtime evidence resolves a non-blocking dynamic source name", { skip: chromePath === undefined }, async () => {
+  const source = scanSource('<button aria-label={label}><span aria-hidden="true">x</span></button>', "Dynamic.tsx", { semantic: "off" })
+    .find((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL");
+  assert.equal(source?.detectionMode, "needs-review");
+  assert.equal(source?.blocking, false);
+
+  const server = await startServer(`<!doctype html><html lang="en"><head><title>Dynamic name</title></head><body><main><div id="root"></div></main><script>document.querySelector('#root').innerHTML = '<button id="resolved"><span aria-hidden="true">x</span></button>';</script></body></html>`);
+  try {
+    const options = await resolveScanOptions({ rules: disabledLayoutRuntimeRules() });
+    const runtime = (await auditRuntimeUrl(server.url, options, chromePath)).find((finding) => finding.ruleId === "CDOM_4_1_2_UNNAMED_CONTROL" && finding.runtime?.selector === "#resolved");
+    assert.equal(runtime?.detectionMode, "automated");
+    assert.equal(runtime?.confidence, "high");
+    assert.equal(runtime?.blocking, true);
   } finally {
     await server.close();
   }

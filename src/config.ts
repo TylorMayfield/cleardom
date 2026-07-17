@@ -1,5 +1,8 @@
 import { promises as fs } from "node:fs";
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Ajv2020, type ErrorObject } from "ajv/dist/2020.js";
 import { normalizeRuleId } from "./rules/index.js";
 import { resolveStandardId } from "./standards.js";
 import type { ComponentMapping, ComponentPreset, Finding, NativeScanConfig, OwnershipConfig, PrReviewConfig, ResolvedOwnership, ResolvedScanOptions, ResolvedSuppression, RuleOption, RuntimeBrowserConfig, RuntimeCrawlConfig, ScanConfig, ScanOptions, Severity, SuppressionConfig, SuppressionPolicyConfig } from "./types.js";
@@ -46,11 +49,15 @@ const defaultOptions: ResolvedScanOptions = {
   native: {
     enabled: false,
     platforms: ["ios"],
-    provider: "eas",
-    appId: "",
+    runner: "local",
+    appIds: {},
+    devices: {},
     deepLinks: [],
     screens: [],
     maxDurationMinutes: 20
+  },
+  telemetry: {
+    enabled: true
   },
   pr: {
     maxComments: 20,
@@ -64,6 +71,9 @@ const defaultOptions: ResolvedScanOptions = {
   packages: [],
   rootDir: process.cwd()
 };
+
+const configSchema = JSON.parse(readFileSync(fileURLToPath(new URL("../cleardom.schema.json", import.meta.url)), "utf8"));
+const validateConfigSchema = new Ajv2020({ allErrors: true, strict: false }).compile(configSchema);
 
 const componentPresetMappings: Record<ComponentPreset, Record<string, ComponentMapping>> = {
   radix: {
@@ -172,6 +182,7 @@ export async function resolveScanOptions(options: ScanOptions = {}, cwd = proces
     ),
     ownership: normalizeOwnership([...(config.ownership ?? []), ...(options.ownership ?? [])]),
     native: resolveNativeConfig(config.native, options.native),
+    telemetry: resolveTelemetryConfig(config.telemetry),
     pr: resolvePrConfig(config.pr, options.pr),
     packages: config.packages ?? [],
     configPath: options.configPath,
@@ -407,29 +418,149 @@ export function ownerForFinding(finding: Finding, options: ResolvedScanOptions):
   return match?.owner;
 }
 
-function resolveNativeConfig(config: NativeScanConfig | undefined, options: NativeScanConfig | undefined): Required<NativeScanConfig> {
+function resolveNativeConfig(config: NativeScanConfig | undefined, options: NativeScanConfig | undefined): ResolvedScanOptions["native"] {
   const merged = { ...defaultOptions.native, ...config, ...options };
+  if (merged.provider === "eas") {
+    throw new Error("native.provider=eas was removed in config schema 1. Remove provider and use the local agent-device runner. Run `cleardom doctor .` for native setup guidance.");
+  }
+  const platforms = merged.platforms && merged.platforms.length > 0 ? [...new Set(merged.platforms)] : defaultOptions.native.platforms;
+  const appIds = { ...(config?.appIds ?? {}), ...(options?.appIds ?? {}) };
+  const legacyAppId = options?.appId ?? config?.appId;
+  if (legacyAppId && platforms.length !== 1) {
+    throw new Error("native.appId cannot be migrated when both platforms are configured. Replace it with native.appIds.ios and native.appIds.android.");
+  }
+  if (legacyAppId && platforms[0]) appIds[platforms[0]] ??= legacyAppId;
   return {
     enabled: Boolean(merged.enabled),
-    platforms: merged.platforms && merged.platforms.length > 0 ? merged.platforms : defaultOptions.native.platforms,
-    provider: merged.provider ?? "eas",
-    appId: merged.appId ?? "",
+    platforms,
+    runner: "local",
+    appIds,
+    devices: { ...(config?.devices ?? {}), ...(options?.devices ?? {}) },
     deepLinks: merged.deepLinks ?? [],
     screens: merged.screens ?? [],
     maxDurationMinutes: merged.maxDurationMinutes ?? defaultOptions.native.maxDurationMinutes
   };
 }
 
+function resolveTelemetryConfig(config: ScanConfig["telemetry"]): Required<NonNullable<ScanConfig["telemetry"]>> {
+  const environment = process.env.CLEARDOM_TELEMETRY;
+  if (environment !== undefined && environment !== "0" && environment !== "1") {
+    throw new Error("CLEARDOM_TELEMETRY must be 0 or 1.");
+  }
+  return { enabled: environment === "1" || (environment === undefined && (config?.enabled ?? true)) };
+}
+
 async function readConfig(resolved: string, explicit: boolean): Promise<ScanConfig> {
   try {
     const raw = await fs.readFile(resolved, "utf8");
-    return JSON.parse(raw) as ScanConfig;
+    const parsed = JSON.parse(raw) as unknown;
+    validateConfig(parsed, resolved);
+    return parsed as ScanConfig;
   } catch (error) {
     if (explicit || !isMissingFile(error)) {
       throw new Error(`Could not read ClearDOM config at ${resolved}: ${error instanceof Error ? error.message : String(error)}`);
     }
     return {};
   }
+}
+
+const configKeys = new Set([
+  "$schema", "schemaVersion", "include", "exclude", "rules", "standard", "failOn", "format", "baseline", "verbose",
+  "runtimeUrl", "runtime", "semantic", "componentPresets", "components", "suppressions", "suppressionPolicy", "ownership",
+  "native", "telemetry", "pr", "packages"
+]);
+
+function validateConfig(value: unknown, file: string): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`ClearDOM config at ${file} must be a JSON object.`);
+  const record = value as Record<string, unknown>;
+  if (record.schemaVersion !== undefined && record.schemaVersion !== 1) {
+    throw new Error(`Unsupported ClearDOM config schemaVersion ${String(record.schemaVersion)} at ${file}. ClearDOM 1.x supports schemaVersion 1.`);
+  }
+  const unknown = Object.keys(record).filter((key) => !configKeys.has(key));
+  if (unknown.length > 0) throw new Error(`Unknown ClearDOM config ${unknown.length === 1 ? "key" : "keys"}: ${unknown.join(", ")}. See cleardom.schema.json.`);
+  validateObjectKeys(record.native, "native", new Set(["enabled", "platforms", "runner", "appIds", "devices", "appId", "provider", "deepLinks", "screens", "maxDurationMinutes"]));
+  const native = asRecord(record.native);
+  validateObjectKeys(native?.appIds, "native.appIds", new Set(["ios", "android"]));
+  validateObjectKeys(native?.devices, "native.devices", new Set(["ios", "android"]));
+  validateObjectKeys(record.telemetry, "telemetry", new Set(["enabled"]));
+  validateObjectKeys(record.runtime, "runtime", new Set(["baseUrl", "routes", "discoverRoutes", "viewports", "auth", "setupScript", "waitUntil", "waitForSelector", "waitForTimeoutMs", "timeoutMs", "cookies", "localStorage", "headers", "screenshot", "browser", "crawl", "interactions", "stories"]));
+  const runtime = asRecord(record.runtime);
+  validateObjectKeys(runtime?.browser, "runtime.browser", new Set(["mode", "executablePath"]));
+  validateObjectKeys(runtime?.crawl, "runtime.crawl", new Set(["enabled", "maxDepth", "maxRoutes", "include", "exclude"]));
+  validateObjectKeys(runtime?.interactions, "runtime.interactions", new Set(["presets", "scripts"]));
+  validateObjectKeys(runtime?.stories, "runtime.stories", new Set(["enabled", "baseUrl", "include", "exclude"]));
+  validateObjectKeys(runtime?.auth, "runtime.auth", new Set(["setupScript"]));
+  validateArrayObjectKeys(runtime?.viewports, "runtime.viewports", new Set(["name", "width", "height", "deviceScaleFactor", "isMobile"]));
+  validateArrayObjectKeys(runtime?.cookies, "runtime.cookies", new Set(["name", "value", "domain", "path", "url", "expires", "httpOnly", "secure", "sameSite"]));
+  validateObjectKeys(record.suppressionPolicy, "suppressionPolicy", new Set(["requireReason", "requireExpires", "requireApprovedBy"]));
+  validateObjectKeys(record.pr, "pr", new Set(["maxComments", "severityThreshold", "commentMode", "changedFilesOnly", "baselinePolicy", "statusCheckName", "uploadSarif"]));
+  validateArrayObjectKeys(record.native && asRecord(record.native)?.screens, "native.screens", new Set(["name", "deepLink", "actions", "timeoutMs", "screenshot"]));
+  for (const [screenIndex, screen] of (Array.isArray(asRecord(record.native)?.screens) ? asRecord(record.native)?.screens as unknown[] : []).entries()) {
+    const actions = asRecord(screen)?.actions;
+    validateNativeActions(actions, screenIndex);
+  }
+  validateArrayObjectKeys(record.suppressions, "suppressions", new Set(["rule", "rules", "file", "files", "reason", "expires", "approvedBy", "ticket", "owner"]));
+  validateArrayObjectKeys(record.ownership, "ownership", new Set(["files", "owner", "reviewers", "rules"]));
+  validateArrayObjectKeys(record.packages, "packages", new Set(["name", "path", "label", "include", "exclude", "rules", "standard", "failOn", "baseline", "semantic", "componentPresets", "components"]));
+  validateRecordObjectKeys(record.components, "components", componentMappingKeys);
+  validateRuleOptions(record.rules, "rules");
+  for (const [packageIndex, packageConfig] of (Array.isArray(record.packages) ? record.packages : []).entries()) {
+    const packageRecord = asRecord(packageConfig);
+    validateRecordObjectKeys(packageRecord?.components, `packages[${packageIndex}].components`, componentMappingKeys);
+    validateRuleOptions(packageRecord?.rules, `packages[${packageIndex}].rules`);
+  }
+  if (!validateConfigSchema(record)) {
+    const details = (validateConfigSchema.errors ?? []).slice(0, 5).map((error: ErrorObject) => `${error.instancePath || "/"} ${error.message ?? "is invalid"}`).join("; ");
+    throw new Error(`ClearDOM config does not match schemaVersion 1: ${details}. See cleardom.schema.json.`);
+  }
+}
+
+const componentMappingKeys = new Set(["role", "importSource", "asProp", "roleProps", "valueProps", "nameProps", "labelProps", "childLabelProps", "disabledProps", "decorativeProps", "wrapper"]);
+
+function validateObjectKeys(value: unknown, label: string, allowed: Set<string>): void {
+  if (value === undefined) return;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be a JSON object.`);
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) throw new Error(`Unknown ClearDOM ${label} ${unknown.length === 1 ? "key" : "keys"}: ${unknown.join(", ")}.`);
+}
+
+function validateArrayObjectKeys(value: unknown, label: string, allowed: Set<string>): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) throw new Error(`${label} must be a JSON array.`);
+  for (const [index, item] of value.entries()) validateObjectKeys(item, `${label}[${index}]`, allowed);
+}
+
+function validateRecordObjectKeys(value: unknown, label: string, allowed: Set<string>): void {
+  if (value === undefined) return;
+  const record = asRecord(value);
+  if (!record) throw new Error(`${label} must be a JSON object.`);
+  for (const [key, item] of Object.entries(record)) validateObjectKeys(item, `${label}.${key}`, allowed);
+}
+
+function validateRuleOptions(value: unknown, label: string): void {
+  if (value === undefined) return;
+  const record = asRecord(value);
+  if (!record) throw new Error(`${label} must be a JSON object.`);
+  for (const [key, option] of Object.entries(record)) {
+    if (typeof option === "string") continue;
+    validateObjectKeys(option, `${label}.${key}`, new Set(["enabled", "severity", "blocking"]));
+  }
+}
+
+function validateNativeActions(value: unknown, screenIndex: number): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) throw new Error(`native.screens[${screenIndex}].actions must be a JSON array.`);
+  const actionKeys = new Set(["press", "fill", "text", "swipe", "back", "waitFor", "timeoutMs", "assert"]);
+  for (const [actionIndex, action] of value.entries()) {
+    validateObjectKeys(action, `native.screens[${screenIndex}].actions[${actionIndex}]`, actionKeys);
+    const keys = Object.keys(asRecord(action) ?? {}).filter((key) => ["press", "fill", "swipe", "back", "waitFor", "assert"].includes(key));
+    if (keys.length !== 1) throw new Error(`native.screens[${screenIndex}].actions[${actionIndex}] must contain exactly one action.`);
+    if (keys[0] === "fill" && typeof asRecord(action)?.text !== "string") throw new Error(`native.screens[${screenIndex}].actions[${actionIndex}].text is required for fill.`);
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 function resolveConfigPath(configPath: string | undefined, cwd: string): { path: string; exists: boolean } {

@@ -2,29 +2,31 @@
 
 ClearDOM finds accessibility, readability, and assistive-tech regressions before they ship.
 
-It is a CLI-first scanner for React, Next.js, Electron, React Native, web-container platforms, and web apps. The v0.2 scanner is dependency-light: TypeScript for development, Node built-ins at runtime, and small in-repo source adapters for JSX, HTML, Vue, Svelte, Astro, Angular templates, and MDX.
+It is a CLI-first scanner for React, Next.js, Electron, React Native, web-container platforms, and web apps. ClearDOM uses compiler-backed analysis where the project exposes a supported compiler, a documented lightweight fallback for template sources, its own rendered web engine, and local simulator evidence for native applications.
+
+ClearDOM 1.x requires Node.js 22.12 or newer. Its explicit per-stack GA boundaries are documented in [the support matrix](docs/SUPPORT_MATRIX.md); automated guidance is never presented as legal certification.
 
 Product decisions are guided by [product.MD](product.MD).
 
 ## Quickstart
 
 ```sh
-npx cleardom@latest check
-npx cleardom@latest fix --apply
-npx cleardom@latest --diff
-npx cleardom@latest install
+npx cleardom@1 check
+npx cleardom@1 fix --apply
+npx cleardom@1 --diff
+npx cleardom@1 install
 ```
 
 `check` is the primary command. It detects the project, scans source, starts a detected web app when possible, runs rendered browser checks, and shuts the app down. Use `--diff` while you work to scan changed files only, or `--source-only` when you intentionally do not want browser checks.
 
 `fix --apply` applies only safe mechanical changes and automatically rescans the project. It reports fixed, remaining, and newly introduced findings. Without `--apply`, `fix` produces a focused coding-agent remediation prompt.
 
-Existing projects can adopt gradually: commit a baseline once with `npx cleardom@latest scan . --write-baseline cleardom-baseline.json`, then use `npx cleardom@latest ci .` to fail only on regressions.
+Existing projects can adopt gradually: commit a baseline once with `npx cleardom@1 scan . --write-baseline cleardom-baseline.json`, then use `npx cleardom@1 ci .` to fail only on regressions.
 
 ## PR reviewer in 60 seconds
 
 ```sh
-npx cleardom@latest install
+npx cleardom@1 install
 git add .github/workflows/cleardom.yml
 git commit -m "Add ClearDOM PR review"
 ```
@@ -34,7 +36,7 @@ The installed workflow runs `cleardom review . --changed-files-only` on every pu
 Preview the same comment locally before opening a PR:
 
 ```sh
-npx cleardom@latest review . --dry-run
+npx cleardom@1 review . --dry-run
 ```
 
 ## Local development
@@ -89,21 +91,23 @@ Run `cleardom help --all` for compatibility commands, CI controls, reports, base
 Run the complete check, apply verified fixes, then install the PR reviewer when the local signal looks useful.
 
 ```sh
-npx cleardom@latest check
-npx cleardom@latest fix --apply
-npx cleardom@latest install
+npx cleardom@1 check
+npx cleardom@1 fix --apply
+npx cleardom@1 install
 ```
 
 ClearDOM detects common app stacks and UI libraries from `package.json` and project files. React, Next.js, Vite React, Solid, Electron renderer, React Native, and Expo projects get JSX/TSX semantic source scanning and component presets automatically. Vue, Svelte, Astro, and Angular projects use template source adapters. Vanilla JavaScript web projects can scan HTML and authored source without a config file.
 
+Validated design-system package ranges and their pinned component examples are documented in [docs/DESIGN_SYSTEM_PRESETS.md](docs/DESIGN_SYSTEM_PRESETS.md).
+
 Use `init` when you want a committed project config, baseline, runtime browser settings, native simulator settings, ownership routing, or suppression policy:
 
 ```sh
-npx cleardom@latest init
-npx cleardom@latest doctor .
+npx cleardom@1 init
+npx cleardom@1 doctor .
 ```
 
-`doctor` is the setup safety pass, not the first required step. It reports the detected stack and the next useful command for React, Solid, Electron, template frameworks, vanilla web, and Expo/React Native projects. `check` starts detected web apps automatically; use `--runtime-url` only for a server you already manage. For Expo and React Native, simulator-backed checks stay opt-in until `native.appId` or `native.deepLinks` are configured.
+`doctor` is the setup safety pass, not the first required step. It reports the detected stack and the next useful command for React, Solid, Electron, template frameworks, vanilla web, and Expo/React Native projects. `check` starts detected web apps automatically; use `--runtime-url` only for a server you already manage. For Expo and React Native, local simulator/emulator checks stay opt-in until `native.appIds`, a deep link, and local device tooling are configured.
 
 Useful setup variants:
 
@@ -122,7 +126,7 @@ cleardom init --target packages/web
 ClearDOM can install the project-level workflow pieces that make it behave like a PR reviewer:
 
 ```sh
-npx cleardom@latest install
+npx cleardom@1 install
 ```
 
 By default this writes `.github/workflows/cleardom.yml` so pull requests get a sticky summary, capped inline comments on changed lines, and a ClearDOM status check. Existing workflow content is refreshed idempotently when rerunning the command.
@@ -137,7 +141,7 @@ cleardom agents upgrade
 cleardom agents uninstall --agent cursor
 ```
 
-The installed GitHub Actions workflow runs `cleardom review . --changed-files-only` on pull requests. In Actions, that command uses `GITHUB_TOKEN` to scan the PR head and base commit, create or update one sticky PR summary comment, and add capped inline comments on changed lines for newly introduced findings. Pull requests fail only on new findings in changed files, so legacy debt stays visible without blocking unrelated work. Outside Actions, use `--dry-run` to preview the same Markdown summary locally:
+The installed GitHub Actions workflow runs `cleardom review . --changed-files-only` on pull requests. In Actions, that command uses `GITHUB_TOKEN` to scan the PR head and base commit, create or update one sticky PR summary comment, and add capped inline comments on changed lines for newly introduced findings. Pull requests fail only on new high-confidence automated findings in changed files, so legacy debt and advisory review items stay visible without blocking unrelated work. Outside Actions, use `--dry-run` to preview the same Markdown summary locally:
 
 ```sh
 cleardom review . --dry-run
@@ -149,6 +153,8 @@ Create `cleardom.config.json` in the project root:
 
 ```json
 {
+  "$schema": "https://unpkg.com/cleardom@1/cleardom.schema.json",
+  "schemaVersion": 1,
   "include": ["src/**/*.{js,jsx,ts,tsx,html,vue,svelte,astro,mdx}", "src/**/*.component.html"],
   "exclude": ["src/**/*.test.tsx"],
   "standard": "wcag22-aa",
@@ -184,9 +190,10 @@ Create `cleardom.config.json` in the project root:
   },
   "native": {
     "enabled": false,
-    "provider": "eas",
+    "runner": "local",
     "platforms": ["ios"],
-    "appId": "",
+    "appIds": { "ios": "", "android": "" },
+    "devices": { "ios": "", "android": "" },
     "deepLinks": [],
     "screens": [
       {
@@ -200,6 +207,7 @@ Create `cleardom.config.json` in the project root:
     ],
     "maxDurationMinutes": 20
   },
+  "telemetry": { "enabled": true },
   "ownership": [],
   "suppressionPolicy": {
     "requireReason": true,
@@ -245,6 +253,8 @@ Component presets provide starter mappings for common UI libraries. Supported pr
 
 ## Framework coverage
 
+See [the ClearDOM 1.x support contract](docs/SUPPORT_MATRIX.md) for the complete React-family, template, web-container, Electron, React Native, and Expo matrix and its honest limitations.
+
 ClearDOM documents framework support in tiers:
 
 | Tier | Adapters | Support |
@@ -265,7 +275,7 @@ Web runtime checks use Chromium through `puppeteer-core` for issues that static 
 
 The `runtime` block supports explicit `routes`, safe route discovery from common framework file layouts, optional same-origin crawl, interaction presets/scripts, Storybook story scanning, multiple `viewports`, auth/setup scripts, custom headers, cookies, localStorage, wait strategy, selectors, timeouts, and screenshot evidence. URL scans and runtime scans reuse a single browser session. JSON and HTML reports include runtime diagnostics plus selector and screenshot evidence for runtime findings.
 
-React Native checks are static guidance for iOS and Android semantics. They flag missing labels and roles in source, including mapped design-system components. To collect simulator-backed evidence, fill in the scaffolded `native` block and run `cleardom native scan .`. ClearDOM waits for the paid EAS Simulator session to become ready, opens each configured app/deep link, records the initial accessibility tree, executes `press` and `fill` screen actions through `agent-device`, and records evidence after every state transition. Sessions are stopped on every exit path. Rendered VoiceOver and TalkBack behavior still needs manual verification on a device or simulator.
+React Native checks provide compiler-backed source guidance for iOS and Android semantics. For device evidence, configure platform-specific `native.appIds` and run `cleardom native scan .` against a local iOS Simulator or Android Emulator. ClearDOM checks the local tools, selected device, installed application, capabilities, and launch before scanning structured accessibility trees. Typed `press`, `fill`, `swipe`, `back`, `waitFor`, and `assert` actions capture evidence after every transition. Physical devices remain preview-only; VoiceOver, TalkBack, switch control, magnification, and testing with disabled users remain explicit manual procedures.
 
 Rule options can be `"off"`, `"critical"`, `"warning"`, `"info"`, or an object like:
 
@@ -299,19 +309,19 @@ jobs:
       security-events: write
       statuses: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 20
-      - run: npx cleardom@latest review . --changed-files-only
+          node-version: 22.12
+      - run: npx cleardom@1 review . --changed-files-only
         if: github.event_name == 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - run: npx cleardom@latest ci . --format sarif > cleardom.sarif
+      - run: npx cleardom@1 ci . --format sarif > cleardom.sarif
         if: github.event_name != 'pull_request'
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@641a925cfafe92d0fdf8b239ba4053e3f8d99d6d # v3
         if: always() && github.event_name != 'pull_request'
         with:
           sarif_file: cleardom.sarif
@@ -447,6 +457,14 @@ The score is automated guidance for developer workflow quality. It is not a lega
 
 ## Roadmap
 
-Current focus: high-confidence static checks, honest benchmark coverage, and low-friction developer feedback.
+Current focus: passing the evidence gates in [docs/RELEASE_GATES.md](docs/RELEASE_GATES.md), including per-stack conformance, a pinned OSS corpus, local native reliability, verified fixes, security hardening, and measured precision.
 
-Next likely engine work: broaden high-confidence runtime coverage for additional CSS-dependent accessibility issues while keeping noisy detections out of the default rules.
+Version 1.0 is not released merely when features exist. `pnpm release:gates` remains failing until all required corpus, performance, native, runtime, fix, telemetry-secret, and precision evidence is present on the release commit.
+
+The repository includes generated stack-owned conformance applications and a pinned OSS shadow corpus. Run `pnpm conformance:generate`, `pnpm test:conformance`, `pnpm test:conformance:runtime`, and `pnpm test:corpus` to reproduce those evidence inputs, then `pnpm evidence:assemble` after every required same-commit job has produced its fragment. Scanner output and reviewed corpus ground truth are deliberately stored separately; the final gate recomputes precision rather than trusting supplied decimals.
+
+## Telemetry and privacy
+
+Anonymous product telemetry is on by default, including in non-interactive and CI runs. Set `CLEARDOM_TELEMETRY=0` for the highest-precedence opt-out, set `"telemetry": { "enabled": false }` in project configuration, or run `cleardom telemetry disable` for a local preference. Precedence is environment, local preference, then project/default. Use `cleardom telemetry status|reset` to inspect the effective setting or delete the local installation identifier. ClearDOM never sends source, paths, URLs, repository names, labels, screenshots, configuration, Git data, or authentication values. Telemetry delivery failure never changes scan behavior.
+
+The random local installation identifier remains only on the developer machine until `cleardom telemetry reset` is run. The ClearDOM GA4 property must use the minimum two-month event-data retention before beta; release evidence records that setting. Aggregate, non-user-level reporting may outlive that window under GA4's service behavior. Disabling telemetry stops future events; resetting also deletes the local identifier.

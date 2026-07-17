@@ -175,7 +175,7 @@ function setupFlowChecks(options: ResolvedScanOptions, detection: StackDetection
       name: "Expo setup",
       status: options.componentPresets.includes("react-native") ? "pass" : "warn",
       message: options.componentPresets.includes("react-native")
-        ? `React Native component mappings are enabled. Native simulator checks are ${options.native.enabled ? "enabled" : "available but disabled"}; run cleardom native scan . after setting native.appId or deepLinks.`
+        ? `React Native component mappings are enabled. Local native checks are ${options.native.enabled ? "enabled" : "available but disabled"}; run cleardom native scan . after setting native.appIds or deepLinks and booting a simulator/emulator.`
         : "Add componentPresets: [\"react-native\"] so Pressable, TextInput, Image, and touchables are understood."
     });
   }
@@ -243,10 +243,19 @@ function label(status: DoctorStatus): string {
 async function nativeChecks(options: ResolvedScanOptions, cwd: string): Promise<DoctorCheck[]> {
   if (!options.native.enabled) return [];
   const checks: DoctorCheck[] = [];
-  checks.push({ name: "Native provider", status: options.native.provider === "eas" ? "pass" : "fail", message: `Configured provider: ${options.native.provider}` });
-  checks.push({ name: "Expo token", status: process.env.EXPO_TOKEN ? "pass" : "warn", message: process.env.EXPO_TOKEN ? "EXPO_TOKEN is set." : "EXPO_TOKEN is not set; EAS Simulator needs Expo auth in CI/headless environments." });
-  checks.push(await commandCheck("EAS CLI", ["npx", ["--yes", "eas-cli@latest", "--version"], cwd]));
-  checks.push(await gitignoreCheck(cwd));
+  checks.push({ name: "Native runner", status: "pass", message: "Configured runner: local agent-device" });
+  checks.push(await commandCheck("agent-device", ["npx", ["--yes", "agent-device@0.19.3", "--version"], cwd]));
+  for (const platform of options.native.platforms) {
+    checks.push(options.native.appIds[platform]
+      ? { name: `${platform} app identifier`, status: "pass", message: options.native.appIds[platform] }
+      : { name: `${platform} app identifier`, status: "fail", message: `Set native.appIds.${platform} to the installed application identifier.` });
+  }
+  if (options.native.platforms.includes("ios")) {
+    checks.push(process.platform === "darwin"
+      ? await commandCheck("Xcode simulator tools", ["xcrun", ["simctl", "list", "devices", "available"], cwd])
+      : { name: "Xcode simulator tools", status: "fail", message: "Local iOS scanning requires macOS with Xcode." });
+  }
+  if (options.native.platforms.includes("android")) checks.push(await commandCheck("Android ADB", ["adb", ["devices"], cwd]));
   return checks;
 }
 
@@ -256,19 +265,6 @@ async function commandCheck(name: string, command: [string, string[], string]): 
     return { name, status: "pass", message: result.stdout.trim() || "available" };
   } catch {
     return { name, status: "warn", message: `${name} was not available through npx.` };
-  }
-}
-
-async function gitignoreCheck(cwd: string): Promise<DoctorCheck> {
-  const gitignore = path.join(cwd, ".gitignore");
-  try {
-    const raw = await fs.readFile(gitignore, "utf8");
-    if (raw.split(/\r?\n/).some((line) => line.trim() === ".env.eas-simulator")) {
-      return { name: "EAS simulator env", status: "pass", message: ".env.eas-simulator is gitignored." };
-    }
-    return { name: "EAS simulator env", status: "warn", message: "Add .env.eas-simulator to .gitignore before native scans." };
-  } catch {
-    return { name: "EAS simulator env", status: "warn", message: "No .gitignore found; ensure .env.eas-simulator is not committed." };
   }
 }
 

@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "ClearDOM broken",
+    "slug": "cleardom-expo-broken",
+    "ios": {
+      "bundleIdentifier": "dev.cleardom.expo"
+    },
+    "android": {
+      "package": "dev.cleardom.expo"
+    }
+  }
+}

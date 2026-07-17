@@ -29,7 +29,7 @@ import { statusLiveRegionRule } from "./web-status-live-region.js";
 import { unnamedControlRule } from "./web-unnamed-control.js";
 import { useOfColorRule } from "./web-use-of-color.js";
 
-export const rules: RuleDefinition[] = [
+const ruleCatalog: RuleDefinition[] = [
   unnamedControlRule,
   nativeLabelRule,
   ambiguousLabelRule,
@@ -119,6 +119,24 @@ export const rules: RuleDefinition[] = [
   ariaReferenceRuntimeRule,
   ariaStateRuntimeRule
 ];
+
+const runtimeRuleIds = new Set([
+  contrastRuntimeRule, focusVisibleRuntimeRule, targetSizeRuntimeRule, reflowRuntimeRule, skipLinkRuntimeRule, textSpacingRuntimeRule,
+  hoverFocusContentRuntimeRule, keyboardTrapRuntimeRule, focusObscuredRuntimeRule, invalidAriaRoleRuntimeRule, ariaReferenceRuntimeRule, ariaStateRuntimeRule
+].map((rule) => rule.id));
+
+export const rules: RuleDefinition[] = ruleCatalog.map((rule) => Object.freeze({
+  ...rule,
+  detectionMode: rule.detectionMode ?? (rule.confidence === "high" ? "automated" : rule.confidence === "medium" ? "needs-review" : "manual-guidance"),
+  impact: rule.impact ?? (rule.severity === "critical" ? "serious" : rule.severity === "warning" ? "moderate" : "minor"),
+  confidenceReason: rule.confidenceReason ?? (rule.confidence === "high"
+    ? "The rule requires direct static or rendered evidence before reporting."
+    : rule.confidence === "medium"
+      ? "The evidence identifies a likely risk whose user impact depends on product context."
+      : "The criterion requires human judgment or assistive-technology testing."),
+  source: rule.source ?? (runtimeRuleIds.has(rule.id) ? "runtime" : "semantic"),
+  fixKind: rule.fixKind ?? (rule.fixable && rule.confidence === "high" ? "safe-auto-fix" : rule.confidence === "low" ? "manual-review" : "guided-fix")
+}));
 
 export const legacyRuleAliases: Record<string, string> = {
   CDOM001: "CDOM_4_1_2_UNNAMED_CONTROL",

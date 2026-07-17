@@ -1,6 +1,7 @@
 export type Severity = "critical" | "warning" | "info";
 export type Confidence = "high" | "medium" | "low";
 export type DetectionMode = "automated" | "needs-review" | "manual-guidance";
+export type RuleEvidenceState = "proven-violation" | "proven-pass" | "unresolved";
 export type FindingImpact = "blocking" | "serious" | "moderate" | "minor";
 export type FindingSource = "static" | "semantic" | "runtime" | "native-runtime";
 export type FixKind = "safe-auto-fix" | "guided-fix" | "manual-review";
@@ -12,7 +13,7 @@ export type OutputFormat = "text" | "json" | "sarif" | "html";
 export type SemanticMode = "auto" | "off" | "required";
 export type PrCommentMode = "off" | "summary" | "inline" | "both";
 export type PrBaselinePolicy = "new" | "all";
-export type SemanticAdapterId = "typescript" | "lightweight";
+export type SemanticAdapterId = "typescript" | "framework-compiler" | "lightweight";
 export type WcagVersion = "wcag10" | "wcag20" | "wcag21" | "wcag22" | "wcag30";
 export type WcagLevel = "a" | "aa" | "aaa";
 export type StandardId =
@@ -43,6 +44,7 @@ export type JsxElement = {
   parentId?: number;
   childIds: number[];
   ownText: string;
+  dynamicText?: boolean;
   selfClosing: boolean;
   start: number;
   end: number;
@@ -159,7 +161,7 @@ export type RuleContext = {
   source: string;
   elements: JsxElement[];
   options: ResolvedScanOptions;
-  createFinding: (rule: RuleDefinition, element: JsxElement, message: string) => Finding;
+  createFinding: (rule: RuleDefinition, element: JsxElement, message: string, evidence?: FindingEvidenceOverride) => Finding;
   getAttribute: (element: JsxElement, name: string) => JsxAttribute | undefined;
   hasAttribute: (element: JsxElement, name: string) => boolean;
   elementText: (element: JsxElement) => string;
@@ -168,12 +170,24 @@ export type RuleContext = {
   labelsFor: (element: JsxElement) => JsxElement[];
 };
 
+export type FindingEvidenceOverride = {
+  state: Exclude<RuleEvidenceState, "proven-pass">;
+  confidence?: Confidence;
+  confidenceReason?: string;
+  detectionMode?: DetectionMode;
+  blocking?: boolean;
+  fixKind?: FixKind;
+};
+
 export type RuleOption = "off" | Severity | {
   enabled?: boolean;
   severity?: Severity;
+  blocking?: boolean;
 };
 
 export type ScanConfig = {
+  schemaVersion?: 1;
+  $schema?: string;
   include?: string[];
   exclude?: string[];
   rules?: Record<string, RuleOption>;
@@ -191,6 +205,7 @@ export type ScanConfig = {
   suppressionPolicy?: SuppressionPolicyConfig;
   ownership?: OwnershipConfig[];
   native?: NativeScanConfig;
+  telemetry?: TelemetryConfig;
   pr?: PrReviewConfig;
   packages?: PackageConfig[];
 };
@@ -229,7 +244,17 @@ export type RuntimeCrawlConfig = {
   exclude?: string[];
 };
 
-export type RuntimeInteractionPreset = "menus" | "dialogs" | "accordions" | "forms" | "drawers";
+export type RuntimeInteractionPreset =
+  | "menus"
+  | "dialogs"
+  | "accordions"
+  | "forms"
+  | "drawers"
+  | "tabs"
+  | "popovers"
+  | "validation"
+  | "route-changes"
+  | "keyboard-navigation";
 
 export type RuntimeInteractionConfig = {
   presets?: RuntimeInteractionPreset[];
@@ -322,23 +347,46 @@ export type OwnershipConfig = {
 export type NativeScanConfig = {
   enabled?: boolean;
   platforms?: Array<"ios" | "android">;
-  provider?: "eas";
+  runner?: "local";
+  appIds?: NativeAppIds;
+  devices?: NativeDevices;
+  /** @deprecated Migrated to appIds.ios or appIds.android in schema version 1. */
   appId?: string;
+  /** @deprecated EAS execution was removed for ClearDOM 1.0. */
+  provider?: "eas";
   deepLinks?: string[];
   screens?: NativeScreenConfig[];
   maxDurationMinutes?: number;
+};
+
+export type NativeAppIds = {
+  ios?: string;
+  android?: string;
+};
+
+export type NativeDevices = {
+  ios?: string;
+  android?: string;
 };
 
 export type NativeScreenConfig = {
   name: string;
   deepLink?: string;
   actions?: NativeScreenAction[];
+  timeoutMs?: number;
+  screenshot?: boolean;
 };
 
-export type NativeScreenAction = {
-  press?: string;
-  fill?: string;
-  text?: string;
+export type NativeScreenAction =
+  | { press: string }
+  | { fill: string; text: string }
+  | { swipe: "up" | "down" | "left" | "right" }
+  | { back: true }
+  | { waitFor: string; timeoutMs?: number }
+  | { assert: string };
+
+export type TelemetryConfig = {
+  enabled?: boolean;
 };
 
 export type ComponentPreset = "radix" | "mui" | "react-aria" | "react-native" | "chakra" | "ant-design" | "headless-ui" | "mantine" | "react-bootstrap";
@@ -378,11 +426,23 @@ export type ResolvedScanOptions = {
   suppressions: ResolvedSuppression[];
   suppressionPolicy: Required<SuppressionPolicyConfig>;
   ownership: ResolvedOwnership[];
-  native: Required<NativeScanConfig>;
+  native: ResolvedNativeScanConfig;
+  telemetry: Required<TelemetryConfig>;
   pr: Required<PrReviewConfig>;
   packages: PackageConfig[];
   configPath?: string;
   rootDir: string;
+};
+
+export type ResolvedNativeScanConfig = {
+  enabled: boolean;
+  platforms: Array<"ios" | "android">;
+  runner: "local";
+  appIds: NativeAppIds;
+  devices: NativeDevices;
+  deepLinks: string[];
+  screens: NativeScreenConfig[];
+  maxDurationMinutes: number;
 };
 
 export type ResolvedRuntimeScanConfig = {
@@ -432,8 +492,10 @@ export type Finding = {
   impact: FindingImpact;
   confidenceReason: string;
   detectionMode: DetectionMode;
+  evidenceState?: Exclude<RuleEvidenceState, "proven-pass">;
   source: FindingSource;
   fixKind: FixKind;
+  blocking?: boolean;
   category: RuleCategory;
   file: string;
   line: number;
@@ -448,6 +510,16 @@ export type Finding = {
   fingerprint: string;
   baselineStatus: "active" | "baseline";
   owner?: string;
+  runtime?: RuntimeFindingEvidence;
+  native?: NativeFindingEvidence;
+  occurrences?: FindingOccurrence[];
+};
+
+export type FindingOccurrence = {
+  source: FindingSource;
+  file: string;
+  line: number;
+  column: number;
   runtime?: RuntimeFindingEvidence;
   native?: NativeFindingEvidence;
 };
@@ -481,7 +553,11 @@ export type NativeFindingEvidence = {
     label?: string;
     role?: string;
     state?: string;
+    hidden?: boolean;
+    bounds?: { x: number; y: number; width: number; height: number };
+    sourceHint?: string;
   };
+  actionStep?: string;
   screenshot?: string;
 };
 
@@ -511,9 +587,12 @@ export type SemanticAnalysisSummary = {
   adapter: SemanticAdapterId;
   filesAnalyzed: number;
   filesFallback: number;
+  frameworkCompilers?: Record<string, number>;
 };
 
 export type ScanResult = {
+  schemaVersion: 1;
+  kind: "cleardom-scan-result";
   checkedFiles: number;
   findings: Finding[];
   activeFindings: Finding[];
@@ -590,6 +669,8 @@ export type ScanProgress =
   | { phase: "runtime-page"; completed: number; total: number; route: string; viewport: RuntimeViewport };
 
 export type ComparisonResult = {
+  schemaVersion: 1;
+  kind: "cleardom-scan-comparison";
   base: ScanResult;
   head: ScanResult;
   newFindings: Finding[];

@@ -1,4 +1,4 @@
-import { elementRole, hasFormLabel } from "../rule-utils.js";
+import { elementRole, formLabelEvidence, isIntrinsicElement, isProvenHidden } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const placeholderLabelRule: RuleDefinition = {
@@ -32,10 +32,12 @@ export const placeholderLabelRule: RuleDefinition = {
     manualVerification: "Confirm the accessible name describes the field and add visible instructions when users need them after entering a value."
   },
   check(context) {
-    return context.elements
-      .filter((element) => ["input", "textarea", "select"].includes(element.tagName.toLowerCase()) || elementRole(element, context) === "textbox")
-      .filter((element) => context.hasAttribute(element, "placeholder"))
-      .filter((element) => !hasFormLabel(element, context))
-      .map((element) => context.createFinding(this, element, "Add a visible label, aria-label, or aria-labelledby."));
+    return context.elements.flatMap((element) => {
+      if (!(isIntrinsicElement(element, "input", "textarea", "select") || elementRole(element, context) === "textbox")) return [];
+      if (!context.hasAttribute(element, "placeholder") || isProvenHidden(element, context)) return [];
+      const evidence = formLabelEvidence(element, context);
+      if (evidence === "present") return [];
+      return [context.createFinding(this, element, "Add a visible label, aria-label, or aria-labelledby.", evidence === "unresolved" ? { state: "unresolved" } : undefined)];
+    });
   }
 };

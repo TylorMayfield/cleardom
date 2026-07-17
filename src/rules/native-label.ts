@@ -1,4 +1,4 @@
-import { accessibleName, elementRole, isDisabled, isReactNativeTouchControl } from "../rule-utils.js";
+import { accessibleNameEvidence, elementRole, isDisabled, isReactNativeTouchControl } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const nativeLabelRule: RuleDefinition = {
@@ -25,10 +25,12 @@ export const nativeLabelRule: RuleDefinition = {
     { label: "React Native", code: '<Pressable accessibilityRole="button" accessibilityLabel="Close cart"><XIcon /></Pressable>' }
   ],
   check(context) {
-    return context.elements
-      .filter((element) => isReactNativeControl(element, context) && !isDisabled(element, context))
-      .filter((element) => !accessibleName(element, context))
-      .map((element) => context.createFinding(this, element, "Add accessibilityLabel so assistive tech can announce this control."));
+    return context.elements.flatMap((element) => {
+      if (!isReactNativeControl(element, context) || isDisabled(element, context)) return [];
+      const evidence = accessibleNameEvidence(element, context);
+      if (evidence === "present") return [];
+      return [context.createFinding(this, element, "Add accessibilityLabel so assistive tech can announce this control.", evidence === "unresolved" ? { state: "unresolved" } : undefined)];
+    });
   }
 };
 

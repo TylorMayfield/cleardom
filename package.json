@@ -33,6 +33,17 @@
     "!dist/**/*.test.js",
     "!dist/**/*.test.d.ts",
     "README.md",
+    "CHANGELOG.md",
+    "cleardom.schema.json",
+    "rule-trust.json",
+    "SECURITY.md",
+    "docs/SUPPORT_MATRIX.md",
+    "docs/CONTRACTS.md",
+    "docs/DESIGN_SYSTEM_PRESETS.md",
+    "docs/MIGRATING_TO_1.md",
+    "docs/RELEASE_GATES.md",
+    "docs/release-evidence.example.json",
+    "examples/conformance/manifest.json",
     "LICENSE"
   ],
   "bin": {
@@ -40,6 +51,7 @@
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
+    "build:release": "node scripts/write-telemetry-secret.mjs && pnpm build",
     "test": "pnpm build && node --test dist/**/*.test.js",
     "test:fast": "pnpm build && node scripts/run-tests.mjs fast",
     "test:runtime": "pnpm build && node scripts/run-tests.mjs runtime",
@@ -47,17 +59,32 @@
     "docs:check": "pnpm build && node scripts/check-docs.mjs",
     "start": "pnpm build && node dist/cli.js",
     "benchmark": "pnpm build && node scripts/benchmark.mjs",
+    "test:conformance": "pnpm build && node --test dist/scenario-fixtures.test.js dist/source-adapters.test.js && node scripts/check-conformance-apps.mjs",
+    "test:conformance:runtime": "pnpm build && node scripts/check-conformance-runtime.mjs",
+    "conformance:generate": "node scripts/generate-conformance-apps.mjs",
+    "test:corpus": "pnpm build && node scripts/run-corpus-shadow.mjs && node scripts/check-corpus-ground-truth.mjs",
+    "evidence:assemble": "pnpm build && node scripts/assemble-release-evidence.mjs",
+    "evidence:record": "node scripts/record-evidence-fragment.mjs",
+    "release:gates": "node scripts/check-release-gates.mjs",
+    "pack:check": "pnpm pack --dry-run",
     "prepack": "pnpm build"
   },
   "dependencies": {
     "@puppeteer/browsers": "^2.10.13",
+    "agent-device": "0.19.3",
+    "ajv": "8.18.0",
     "puppeteer-core": "^25.2.1",
     "typescript": "^5.5.4"
   },
   "devDependencies": {
+    "@angular/compiler": "22.0.6",
+    "@astrojs/compiler": "4.0.0",
     "@axe-core/puppeteer": "^4.12.1",
+    "@mdx-js/mdx": "3.1.1",
     "@types/node": "^26.0.1",
-    "pa11y": "^9.1.1"
+    "@vue/compiler-sfc": "3.5.39",
+    "pa11y": "^9.1.1",
+    "svelte": "5.56.5"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [
@@ -66,6 +93,6 @@
   },
   "packageManager": "pnpm@11.7.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   }
 }

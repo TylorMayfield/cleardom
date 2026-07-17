@@ -157,12 +157,12 @@ Use ClearDOM as the accessibility and assistive-technology guardrail for this co
 
 ## Commands
 
-- Local check: \`npx cleardom@latest --fail-on none\`
-- Changed-files check: \`npx cleardom@latest --diff --fail-on none\`
-- Explain a finding: \`npx cleardom@latest explain CDOM_4_1_2_UNNAMED_CONTROL\`
-- Agent repair prompt: \`npx cleardom@latest fix --agent ${agent}\`
-- Regression gate: \`npx cleardom@latest ci .\`
-- Baseline existing issues once: \`npx cleardom@latest scan . --write-baseline cleardom-baseline.json\`
+- Local check: \`npx cleardom@1 --fail-on none\`
+- Changed-files check: \`npx cleardom@1 --diff --fail-on none\`
+- Explain a finding: \`npx cleardom@1 explain CDOM_4_1_2_UNNAMED_CONTROL\`
+- Agent repair prompt: \`npx cleardom@1 fix --agent ${agent}\`
+- Regression gate: \`npx cleardom@1 ci .\`
+- Baseline existing issues once: \`npx cleardom@1 scan . --write-baseline cleardom-baseline.json\`
 
 ## Workflow
 
@@ -172,7 +172,7 @@ Use ClearDOM as the accessibility and assistive-technology guardrail for this co
 4. Use \`cleardom fix\` when ClearDOM findings should be converted into a focused remediation task.
 5. Prefer semantic HTML and platform-native accessibility props over suppressing rules.
 6. Do not disable or downgrade a rule unless the user explicitly accepts that tradeoff.
-7. Re-run ClearDOM after fixes and report the score, active findings, and any remaining risk.
+7. Re-run ClearDOM after fixes and report fixed, remaining, introduced, and unverified findings with the command output.
 
 ## Common Fix Patterns
 
@@ -188,6 +188,6 @@ Use ClearDOM as the accessibility and assistive-technology guardrail for this co
 - Treat ClearDOM findings as deterministic project feedback, not stylistic suggestions.
 - Keep fixes small and local unless the user asks for broader cleanup.
 - If a finding appears false-positive, explain why and propose a narrow component mapping or rule configuration.
-- For ${agent}, keep this instruction block intact; rerun \`npx cleardom@latest install --agents\` to refresh it.
+- For ${agent}, keep this instruction block intact; rerun \`npx cleardom@1 install --agents\` to refresh it.
 ${blockEnd}`;
 }

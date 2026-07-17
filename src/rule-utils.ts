@@ -1,5 +1,8 @@
 import type { ComponentMapping, JsxElement, RuleContext } from "./types.js";
 
+export type EvidenceResolution = "present" | "absent" | "unresolved";
+export type AttributeEvidence = "non-empty" | "empty" | "missing" | "unresolved";
+
 export const ambiguousLabels = new Set([
   "click here",
   "here",
@@ -36,7 +39,7 @@ export function hasClickHandler(element: JsxElement, context: RuleContext): bool
 
 export function isWebInteractive(element: JsxElement, context: RuleContext): boolean {
   if (isDisabled(element, context)) return false;
-  const tag = element.tagName.toLowerCase();
+  const tag = element.tagName;
   const role = elementRole(element, context);
   return ["button", "a"].includes(tag)
     || isFrameworkLink(element, context)
@@ -44,7 +47,50 @@ export function isWebInteractive(element: JsxElement, context: RuleContext): boo
 }
 
 export function hasAccessibleName(element: JsxElement, context: RuleContext): boolean {
-  return Boolean(accessibleName(element, context));
+  return accessibleNameEvidence(element, context) === "present";
+}
+
+export function accessibleNameEvidence(element: JsxElement, context: RuleContext): EvidenceResolution {
+  let unresolved = false;
+  for (const prop of componentNameProps(element, context)) {
+    const evidence = attributeEvidence(element, context, prop);
+    if (evidence === "non-empty") return "present";
+    if (evidence === "unresolved") unresolved = true;
+  }
+
+  for (const name of ["aria-label", "accessibilityLabel", "title"]) {
+    const evidence = attributeEvidence(element, context, name);
+    if (evidence === "non-empty") return "present";
+    if (evidence === "unresolved") unresolved = true;
+  }
+
+  const labelledByEvidence = attributeEvidence(element, context, "aria-labelledby");
+  if (labelledByEvidence === "unresolved") unresolved = true;
+  if (labelledByEvidence === "non-empty") {
+    const labelledBy = staticAttributeValue(element, context, "aria-labelledby") ?? "";
+    const matches = labelledBy.split(/\s+/).map((id) => context.findById(id)).filter((match): match is JsxElement => Boolean(match));
+    if (matches.length === 0) return "present";
+    if (matches.some((match) => elementTextEvidence(match, context) === "present")) return "present";
+    if (matches.some((match) => elementTextEvidence(match, context) === "unresolved")) unresolved = true;
+  }
+
+  for (const label of context.labelsFor(element)) {
+    const evidence = elementTextEvidence(label, context);
+    if (evidence === "present") return "present";
+    if (evidence === "unresolved") unresolved = true;
+  }
+
+  const parent = context.parentOf(element);
+  if (parent?.tagName === "label") {
+    const evidence = elementTextEvidence(parent, context);
+    if (evidence === "present") return "present";
+    if (evidence === "unresolved") unresolved = true;
+  }
+
+  const content = elementTextEvidence(element, context);
+  if (content === "present") return "present";
+  if (content === "unresolved") unresolved = true;
+  return unresolved ? "unresolved" : "absent";
 }
 
 export function accessibleName(element: JsxElement, context: RuleContext): string {
@@ -126,28 +172,99 @@ export function staticAttributeValue(element: JsxElement, context: RuleContext, 
   return undefined;
 }
 
+export function attributeEvidence(element: JsxElement, context: RuleContext, name: string): AttributeEvidence {
+  const attribute = attributeWithAliases(element, context, name);
+  if (!attribute) return "missing";
+  if (attribute.kind === "boolean") return "empty";
+  const value = staticAttributeValue(element, context, name);
+  if (value === undefined) return "unresolved";
+  return value.trim() ? "non-empty" : "empty";
+}
+
 export function hasFormLabel(element: JsxElement, context: RuleContext): boolean {
+  return formLabelEvidence(element, context) === "present";
+}
+
+export function formLabelEvidence(element: JsxElement, context: RuleContext): EvidenceResolution {
+  let unresolved = false;
   for (const prop of componentFormLabelProps(element, context)) {
-    const value = staticAttributeValue(element, context, prop);
-    if (value?.trim()) return true;
+    const evidence = attributeEvidence(element, context, prop);
+    if (evidence === "non-empty") return "present";
+    if (evidence === "unresolved") unresolved = true;
   }
 
-  if (staticAttributeValue(element, context, "aria-label")?.trim()) return true;
+  const ariaLabel = attributeEvidence(element, context, "aria-label");
+  if (ariaLabel === "non-empty") return "present";
+  if (ariaLabel === "unresolved") unresolved = true;
 
+  const labelledByEvidence = attributeEvidence(element, context, "aria-labelledby");
+  if (labelledByEvidence === "unresolved") unresolved = true;
   const labelledBy = staticAttributeValue(element, context, "aria-labelledby");
   if (labelledBy?.trim()) {
-    return labelledBy
+    const matches = labelledBy
       .split(/\s+/)
       .map((id) => context.findById(id))
-      .some((match) => match && normalize(context.elementText(match)));
+      .filter((match): match is JsxElement => Boolean(match));
+    if (matches.some((match) => elementTextEvidence(match, context) === "present")) return "present";
+    if (matches.length === 0 || matches.some((match) => elementTextEvidence(match, context) === "unresolved")) unresolved = true;
   }
 
-  if (staticAttributeValue(element, context, "title")?.trim()) return true;
-  if (context.labelsFor(element).some((label) => normalize(context.elementText(label)))) return true;
-  if (componentWrapperLabels(element, context).some((label) => label.length > 0)) return true;
+  const title = attributeEvidence(element, context, "title");
+  if (title === "non-empty") return "present";
+  if (title === "unresolved") unresolved = true;
+  for (const label of context.labelsFor(element)) {
+    const evidence = elementTextEvidence(label, context);
+    if (evidence === "present") return "present";
+    if (evidence === "unresolved") unresolved = true;
+  }
+  if (componentWrapperLabels(element, context).some((label) => label.length > 0)) return "present";
 
   const parent = context.parentOf(element);
-  return parent?.tagName.toLowerCase() === "label" && normalize(context.elementText(parent)).length > 0;
+  if (parent?.tagName === "label") {
+    const evidence = elementTextEvidence(parent, context);
+    if (evidence === "present") return "present";
+    if (evidence === "unresolved") unresolved = true;
+  }
+  return unresolved ? "unresolved" : "absent";
+}
+
+export function isIntrinsicElement(element: JsxElement, ...names: string[]): boolean {
+  return names.includes(element.tagName);
+}
+
+export function isProvenHidden(element: JsxElement, context: RuleContext): boolean {
+  if (context.hasAttribute(element, "hidden") || context.hasAttribute(element, "inert")) return true;
+  if (staticAttributeValue(element, context, "aria-hidden") === "true") return true;
+  if (element.tagName === "input" && staticAttributeValue(element, context, "type")?.toLowerCase() === "hidden") return true;
+  const style = staticAttributeValue(element, context, "style") ?? "";
+  if (/(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:;|$)/i.test(style)) return true;
+  const className = staticAttributeValue(element, context, "class") ?? staticAttributeValue(element, context, "className");
+  if (!className) return false;
+  return className.split(/\s+/).filter(Boolean).some((name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const rule = new RegExp(`\\.${escaped}\\s*\\{[^}]*?(?:display\\s*:\\s*none|visibility\\s*:\\s*hidden)`, "i");
+    return rule.test(context.source);
+  });
+}
+
+function elementTextEvidence(element: JsxElement, context: RuleContext): EvidenceResolution {
+  if (staticAttributeValue(element, context, "aria-hidden") === "true") return "absent";
+  if (normalize(element.ownText)) return "present";
+  let unresolved = Boolean(element.dynamicText);
+  for (const childId of element.childIds) {
+    const child = context.elements[childId];
+    if (!child) continue;
+    if (child.tagName === "img") {
+      const alt = attributeEvidence(child, context, "alt");
+      if (alt === "non-empty") return "present";
+      if (alt === "unresolved") unresolved = true;
+      continue;
+    }
+    const childEvidence = elementTextEvidence(child, context);
+    if (childEvidence === "present") return "present";
+    if (childEvidence === "unresolved") unresolved = true;
+  }
+  return unresolved ? "unresolved" : "absent";
 }
 
 export function isDisabled(element: JsxElement, context: RuleContext): boolean {

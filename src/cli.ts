@@ -12,7 +12,7 @@ import { parseBaselinePolicy, parseCommentMode, parseComponentPreset, parseForma
 import { resolveScanOptions } from "./config.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
 import { formatAgentFixJson, formatAgentFixPrompt } from "./fix.js";
-import { buildFixPlan, formatFixPlan, formatFixRunResult, formatFixVerification, runSafeFixes, verifyFixRun } from "./fixes.js";
+import { buildFixPlan, formatFixPlan, formatFixRunResult, formatFixVerification, rollbackSafeFixes, runSafeFixes, verifyFixRun } from "./fixes.js";
 import { formatRules, formatSarif, formatScanHtml, formatScanJson, formatScanResult, formatStandards } from "./format.js";
 import { githubWorkflow, installGithubActions, runGithubPr } from "./github.js";
 import { runNativeScan } from "./native.js";
@@ -20,8 +20,9 @@ import { createScanProgressReporter } from "./progress.js";
 import { detectProjectStack, recommendedConfig, type StackDetection } from "./project.js";
 import { formatReport, type ReportFormat } from "./report.js";
 import { findRule, normalizeRuleId, rules, summarizeRule } from "./rules/index.js";
-import { scanPath, scanUrl, shouldFail } from "./scanner.js";
+import { isBlockingFinding, scanPath, scanUrl, shouldFail } from "./scanner.js";
 import { standards } from "./standards.js";
+import { durationBucket, resolveTelemetryPreference, telemetryPreference, trackTelemetry } from "./telemetry.js";
 import type { FailOn, Finding, OutputFormat, ScanConfig, ScanOptions } from "./types.js";
 
 const args = process.argv.slice(2).filter((arg, index) => index !== 0 || arg !== "--");
@@ -42,6 +43,7 @@ try {
   } else if (command === "agents") {
     await agentsCommand(args.slice(1));
   } else if (command === "github-pr" || command === "review") {
+    if (command === "github-pr") console.error("Deprecated: cleardom github-pr is now cleardom review; the alias remains available through 1.x.");
     await githubPrCommand(args.slice(1));
   } else if (command === "init") {
     await initConfig(args.slice(1));
@@ -69,12 +71,14 @@ try {
     await browserCommand(args.slice(1));
   } else if (command === "native") {
     await nativeCommand(args.slice(1));
+  } else if (command === "telemetry") {
+    await telemetryCommand(args.slice(1));
   } else {
     help();
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+  process.exitCode = 2;
 }
 
 function explain(ruleId: string): void {
@@ -261,6 +265,7 @@ async function installCommand(values: string[]): Promise<void> {
   }
 
   console.log(lines.join("\n"));
+  await trackTelemetry("install_complete", true, { version: await packageVersion(), command: "install", pr_installed: parsed.githubActions });
 }
 
 async function agentsCommand(values: string[]): Promise<void> {
@@ -385,6 +390,7 @@ async function runScan(command: "check" | "scan" | "ci", values: string[]): Prom
   let progressReporter: ReturnType<typeof createScanProgressReporter> | undefined;
   try {
     const resolvedOptions = await resolveOptionsForTarget(options, parsed.target);
+    resolvedOptions.telemetry.enabled = await resolveTelemetryPreference(resolvedOptions.telemetry.enabled);
     const outputFormat = parsed.format ?? resolvedOptions.format;
     const showProgress = outputFormat === "text" && !parsed.scoreOnly;
     progressReporter = showProgress ? createScanProgressReporter() : undefined;
@@ -399,10 +405,34 @@ async function runScan(command: "check" | "scan" | "ci", values: string[]): Prom
     const output = await formatScan(result, parsed.format ?? resolvedOptions.format, resolvedOptions.verbose, parsed.includeRules, parsed.scoreOnly, parsed.target);
     console.log(output);
     process.exitCode = shouldFail(result, resolvedOptions.failOn) ? 1 : 0;
+    await trackTelemetry("scan_complete", resolvedOptions.telemetry.enabled, {
+      version: await packageVersion(),
+      command,
+      duration_bucket: durationBucket(result.timings?.totalMs ?? 0),
+      completion: process.exitCode ? "blocking_findings" : "complete",
+      automated: result.outcome.findings.automated,
+      needs_review: result.outcome.findings.needsReview,
+      manual_guidance: result.outcome.findings.manualGuidance,
+      blocking: result.activeFindings.filter((finding) => finding.blocking).length,
+      suppressed: result.outcome.findings.suppressed,
+      baselined: result.outcome.findings.baselined,
+      runtime_requested: result.outcome.runtime.requested,
+      runtime_failed: result.outcome.runtime.failedPages,
+      native_requested: result.outcome.native.requested,
+      native_states: result.outcome.native.capturedStates
+    });
   } finally {
     progressReporter?.finish();
     await prepared?.close();
   }
+}
+
+async function telemetryCommand(values: string[]): Promise<void> {
+  const action = values[0] ?? "status";
+  if (action !== "enable" && action !== "disable" && action !== "status" && action !== "reset") {
+    throw new Error("Usage: cleardom telemetry enable|disable|status|reset");
+  }
+  console.log(await telemetryPreference(action));
 }
 
 async function resolveOptionsForTarget(options: ScanOptions, target: string) {
@@ -499,6 +529,7 @@ async function githubPrCommand(values: string[]): Promise<void> {
 }
 
 async function fixCommand(values: string[]): Promise<void> {
+  const fixStartedAt = Date.now();
   const parsed = parseFixArgs(values);
   if (parsed.verify && !parsed.apply) {
     throw new Error("--verify requires --apply. `cleardom fix --apply` verifies automatically.");
@@ -538,10 +569,28 @@ async function fixCommand(values: string[]): Promise<void> {
 
     if (parsed.apply) {
       const applied = await runSafeFixes(fixPrompt.findings, true);
-      const after = isUrlTarget(parsed.scan.target)
-        ? await scanUrl(parsed.scan.target, resolvedOptions)
-        : await scanPath(parsed.scan.target, resolvedOptions);
-      const verification = verifyFixRun(result.activeFindings, fixPrompt.findings, after.activeFindings);
+      let after;
+      try {
+        after = isUrlTarget(parsed.scan.target)
+          ? await scanUrl(parsed.scan.target, resolvedOptions)
+          : await scanPath(parsed.scan.target, resolvedOptions);
+      } catch (error) {
+        await rollbackSafeFixes(applied);
+        throw new Error(`Fix verification could not complete; ClearDOM rolled back the batch. ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const verification = verifyFixRun(result.activeFindings, fixPrompt.findings, after.activeFindings, after.outcome);
+      const blockingIntroduced = verification.introduced.filter(isBlockingFinding);
+      const rolledBack = blockingIntroduced.length > 0 || verification.unverified.length > 0 ? await rollbackSafeFixes(applied) : 0;
+      await trackTelemetry("fix_complete", resolvedOptions.telemetry.enabled, {
+        version: await packageVersion(),
+        command: "fix",
+        duration_bucket: durationBucket(Date.now() - fixStartedAt),
+        completion: rolledBack > 0 ? "rolled_back" : "verified",
+        fixed: verification.fixed.length,
+        introduced: verification.introduced.length,
+        remaining: verification.remaining.length,
+        blocking: blockingIntroduced.length
+      });
       if (parsed.scan.format === "json") {
         console.log(JSON.stringify({
           schemaVersion: 1,
@@ -560,17 +609,23 @@ async function fixCommand(values: string[]): Promise<void> {
           verification: {
             fixed: verification.fixed.map((finding) => finding.fingerprint),
             remaining: verification.remaining.map((finding) => finding.fingerprint),
-            introduced: verification.introduced.map((finding) => finding.fingerprint)
+            introduced: verification.introduced.map((finding) => finding.fingerprint),
+            blockingIntroduced: blockingIntroduced.map((finding) => finding.fingerprint),
+            unverified: verification.unverified.map((finding) => finding.fingerprint),
+            rolledBack
           },
           before: result.outcome,
           after: after.outcome
         }, null, 2));
-        if (verification.introduced.length > 0) process.exitCode = 1;
+        if (verification.unverified.length > 0) process.exitCode = 2;
+        else if (blockingIntroduced.length > 0) process.exitCode = 1;
         return;
       }
       const preparation = prepared?.messages.length ? `${prepared.messages.join("\n")}\n\n` : "";
-      console.log(`${preparation}${formatFixRunResult(applied, true)}\n\n${formatFixVerification(verification)}`);
-      if (verification.introduced.length > 0) process.exitCode = 1;
+      const rollbackMessage = rolledBack > 0 ? `\n\nRolled back ${rolledBack} edits because verification introduced blocking findings or could not complete.` : "";
+      console.log(`${preparation}${formatFixRunResult(applied, true)}\n\n${formatFixVerification(verification)}${rollbackMessage}`);
+      if (verification.unverified.length > 0) process.exitCode = 2;
+      else if (blockingIntroduced.length > 0) process.exitCode = 1;
       return;
     }
 
@@ -710,7 +765,7 @@ async function doctorCommand(values: string[]): Promise<void> {
   const parsed = parseScanArgs(values);
   const result = await runDoctor(parsed.options, path.resolve(parsed.target));
   console.log(formatDoctor(result));
-  process.exitCode = result.ok ? 0 : 1;
+  process.exitCode = result.ok ? 0 : 2;
 }
 
 async function reportCommand(values: string[]): Promise<void> {
@@ -949,7 +1004,9 @@ async function diffIncludes(target: string, options: ScanOptions): Promise<strin
 }
 
 async function changedFiles(rootDir: string): Promise<string[]> {
-  const base = await git(["merge-base", "HEAD", "origin/main"], rootDir)
+  const githubBase = process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : undefined;
+  const base = await (githubBase ? git(["merge-base", "HEAD", githubBase], rootDir) : Promise.reject(new Error("No GitHub base ref")))
+    .catch(() => git(["merge-base", "HEAD", "origin/main"], rootDir))
     .catch(() => git(["merge-base", "HEAD", "main"], rootDir))
     .catch(() => git(["rev-parse", "HEAD"], rootDir))
     .catch(() => "");

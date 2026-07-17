@@ -1,0 +1,11 @@
+{
+  "name": "@cleardom/conformance-angular-broken",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node ../../../serve-conformance.mjs ."
+  },
+  "dependencies": {
+    "@angular/core": "*"
+  }
+}

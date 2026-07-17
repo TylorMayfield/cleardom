@@ -26,6 +26,21 @@ test("compareScanResults classifies new, fixed, and unchanged findings by relati
   assert.equal(comparison.summary.unchangedFindings, 1);
 });
 
+test("compareScanResults preserves finding identity across a Git rename", () => {
+  const baseRoot = path.resolve("/tmp/cleardom-base");
+  const headRoot = path.resolve("/tmp/cleardom-head");
+  const before = finding(baseRoot, "src/OldButton.tsx", "CDOM_4_1_2_UNNAMED_CONTROL", "Add label.");
+  const after = finding(headRoot, "src/Button.tsx", "CDOM_4_1_2_UNNAMED_CONTROL", "Add label.");
+  const comparison = compareScanResults(scanResult([before]), scanResult([after]), {
+    baseRoot,
+    headRoot,
+    renamedFiles: { "src/OldButton.tsx": "src/Button.tsx" }
+  });
+  assert.equal(comparison.newFindings.length, 0);
+  assert.equal(comparison.fixedFindings.length, 0);
+  assert.deepEqual(comparison.unchangedFindings, [after]);
+});
+
 function finding(root: string, relativeFile: string, ruleId: string, message: string): Finding {
   const file = path.join(root, relativeFile);
   return {
@@ -56,6 +71,8 @@ function finding(root: string, relativeFile: string, ruleId: string, message: st
 
 function scanResult(findings: Finding[]): ScanResult {
   return {
+    schemaVersion: 1,
+    kind: "cleardom-scan-result",
     checkedFiles: 1,
     findings,
     activeFindings: findings,

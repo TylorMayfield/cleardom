@@ -1,4 +1,4 @@
-import { elementRole, hasFormLabel, staticAttributeValue } from "../rule-utils.js";
+import { elementRole, formLabelEvidence, isIntrinsicElement, isProvenHidden, staticAttributeValue } from "../rule-utils.js";
 import type { JsxElement, RuleContext, RuleDefinition } from "../types.js";
 
 export const formLabelRule: RuleDefinition = {
@@ -36,18 +36,19 @@ export const formLabelRule: RuleDefinition = {
     manualVerification: "Prefer a persistent visible label and confirm the announced name remains accurate after a value is entered."
   },
   check(context) {
-    return context.elements
-      .filter((element) => isLabelableFormControl(element, context))
-      .filter((element) => !hasFormLabel(element, context))
-      .map((element) => context.createFinding(this, element, "Add a label, aria-label, or aria-labelledby."));
+    return context.elements.flatMap((element) => {
+      if (!isLabelableFormControl(element, context) || isProvenHidden(element, context)) return [];
+      const evidence = formLabelEvidence(element, context);
+      if (evidence === "present") return [];
+      return [context.createFinding(this, element, "Add a label, aria-label, or aria-labelledby.", evidence === "unresolved" ? { state: "unresolved" } : undefined)];
+    });
   }
 };
 
 function isLabelableFormControl(element: JsxElement, context: RuleContext): boolean {
-  const tag = element.tagName.toLowerCase();
-  if (tag === "textarea" || tag === "select") return true;
+  if (isIntrinsicElement(element, "textarea", "select")) return true;
   if (elementRole(element, context) === "textbox") return true;
-  if (tag !== "input") return false;
+  if (!isIntrinsicElement(element, "input")) return false;
 
   const type = staticAttributeValue(element, context, "type")?.toLowerCase() ?? "text";
   return !["hidden", "button", "submit", "reset"].includes(type);

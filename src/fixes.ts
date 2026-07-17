@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import type { Finding, FixKind, ResolvedScanOptions, RuleSummary } from "./types.js";
+import type { Finding, FixKind, ResolvedScanOptions, RuleSummary, ScanOutcome } from "./types.js";
 
 export type FixAction = {
   finding: Finding;
@@ -24,6 +24,7 @@ export type FixRunResult = {
   applied: number;
   diff: string;
   error?: string;
+  originals?: Map<string, string>;
 };
 
 export type FixEditApplication = {
@@ -36,6 +37,7 @@ export type FixVerification = {
   fixed: Finding[];
   remaining: Finding[];
   introduced: Finding[];
+  unverified: Finding[];
 };
 
 export type FixPlanGroup = {
@@ -90,6 +92,7 @@ export async function planFixActions(findings: Finding[]): Promise<FixAction[]> 
 export async function runSafeFixes(findings: Finding[], apply: boolean): Promise<FixRunResult> {
   let actions = await planFixActions(findings);
   const edits = uniqueEdits(actions.flatMap((action) => action.edit ? [action.edit] : []));
+  const originals = apply ? new Map(await Promise.all([...new Set(edits.map((edit) => edit.file))].map(async (file) => [file, await fs.readFile(file, "utf8")] as const))) : undefined;
   const application = await applyFixEdits(edits, apply);
   const error = application.error;
   if (error) {
@@ -97,7 +100,29 @@ export async function runSafeFixes(findings: Finding[], apply: boolean): Promise
       ? { ...action, outcome: "skipped", reason: error, edit: undefined }
       : action);
   }
-  return { actions, ...application };
+  return { actions, ...application, originals };
+}
+
+export async function rollbackSafeFixes(result: FixRunResult): Promise<number> {
+  if (result.originals) {
+    for (const [file, source] of result.originals) await fs.writeFile(file, source, "utf8");
+    return result.actions.filter((action) => action.edit).length;
+  }
+  const edits = uniqueEdits(result.actions.flatMap((action) => action.edit ? [action.edit] : []));
+  const byFile = new Map<string, FixEdit[]>();
+  for (const edit of edits) byFile.set(edit.file, [...(byFile.get(edit.file) ?? []), edit]);
+  let restored = 0;
+  for (const [file, fileEdits] of byFile) {
+    let source = await fs.readFile(file, "utf8");
+    for (const edit of [...fileEdits].sort((left, right) => right.start - left.start)) {
+      const current = source.slice(edit.start, edit.start + edit.after.length);
+      if (current !== edit.after) throw new Error(`Could not roll back ${file}:${edit.line} because it changed after verification started.`);
+      source = `${source.slice(0, edit.start)}${edit.before}${source.slice(edit.start + edit.after.length)}`;
+      restored += 1;
+    }
+    await fs.writeFile(file, source, "utf8");
+  }
+  return restored;
 }
 
 function uniqueEdits(edits: FixEdit[]): FixEdit[] {
@@ -134,8 +159,15 @@ export async function applyFixEdits(edits: FixEdit[], apply: boolean): Promise<F
   }
 
   if (apply) {
-    for (const [file, output] of rendered) {
-      await fs.writeFile(file, output, "utf8");
+    const written: string[] = [];
+    try {
+      for (const [file, output] of rendered) {
+        await fs.writeFile(file, output, "utf8");
+        written.push(file);
+      }
+    } catch (error) {
+      for (const file of written) await fs.writeFile(file, originals.get(file) ?? "", "utf8");
+      return { applied: 0, diff: "", error: `Fix batch write failed and was rolled back: ${error instanceof Error ? error.message : String(error)}` };
     }
   }
 
@@ -162,13 +194,17 @@ export function formatFixRunResult(result: FixRunResult, apply: boolean): string
   return lines.join("\n");
 }
 
-export function verifyFixRun(before: Finding[], selected: Finding[], after: Finding[]): FixVerification {
+export function verifyFixRun(before: Finding[], selected: Finding[], after: Finding[], outcome?: ScanOutcome): FixVerification {
   const beforeIdentities = new Set(before.map(fixVerificationIdentity));
   const afterIdentities = new Set(after.map(fixVerificationIdentity));
+  const unverified = selected.filter((finding) => (finding.source === "runtime" && (!outcome?.runtime.requested || outcome.runtime.failedPages > 0))
+    || (finding.source === "native-runtime" && (!outcome?.native.requested || outcome.native.capturedStates === 0)));
+  const unverifiedIdentities = new Set(unverified.map(fixVerificationIdentity));
   return {
-    fixed: selected.filter((finding) => !afterIdentities.has(fixVerificationIdentity(finding))),
+    fixed: selected.filter((finding) => !unverifiedIdentities.has(fixVerificationIdentity(finding)) && !afterIdentities.has(fixVerificationIdentity(finding))),
     remaining: selected.filter((finding) => afterIdentities.has(fixVerificationIdentity(finding))),
-    introduced: after.filter((finding) => !beforeIdentities.has(fixVerificationIdentity(finding)))
+    introduced: after.filter((finding) => !beforeIdentities.has(fixVerificationIdentity(finding))),
+    unverified
   };
 }
 
@@ -182,7 +218,8 @@ export function formatFixVerification(verification: FixVerification): string {
     "",
     `Fixed: ${verification.fixed.length}`,
     `Remaining: ${verification.remaining.length}`,
-    `Introduced: ${verification.introduced.length}`
+    `Introduced: ${verification.introduced.length}`,
+    `Unverified: ${verification.unverified.length}`
   ];
   if (verification.introduced.length > 0) {
     lines.push("", "New findings:");
@@ -190,7 +227,7 @@ export function formatFixVerification(verification: FixVerification): string {
       lines.push(`  ${finding.ruleId} ${finding.file}:${finding.line}:${finding.column}`);
     }
   }
-  lines.push("", verification.introduced.length === 0 ? "✓ Applied fixes introduced no new findings." : "Review the new findings before committing these edits.");
+  lines.push("", verification.introduced.length === 0 && verification.unverified.length === 0 ? "✓ Applied fixes introduced no new findings and verification completed." : "Review new or unverified findings before committing these edits.");
   return lines.join("\n");
 }
 
@@ -208,7 +245,7 @@ export function buildFixPlan(findings: Finding[], rules: RuleSummary[], options:
       estimatedRisk: estimatedRisk(finding.fixKind),
       count: 0,
       files: [],
-      verification: `npx cleardom@latest scan ${shellQuote(target)} --fail-on none`
+      verification: `npx cleardom@1 scan ${shellQuote(target)} --fail-on none`
     };
     group.count += 1;
     const relative = isRuntimeLocation(finding.file) ? finding.file : path.relative(options.rootDir, finding.file).replace(/\\/g, "/");
@@ -255,10 +292,10 @@ type SafeEditCandidate = Pick<FixEdit, "after" | "description">;
 function safeEditForFinding(finding: Finding, line: string): SafeEditCandidate | undefined {
   if (finding.ruleId === "CDOM_2_4_3_POSITIVE_TABINDEX") {
     const after = line
-      .replace(/\btabIndex=\{[1-9]\d*\}/, "tabIndex={0}")
-      .replace(/\btabIndex=["'][1-9]\d*["']/, 'tabIndex="0"')
-      .replace(/\btabindex=["'][1-9]\d*["']/, 'tabindex="0"');
-    return after === line ? undefined : candidate(after, "Replace positive tab index with 0.");
+      .replace(/\s+\btabIndex=\{[1-9]\d*\}/, "")
+      .replace(/\s+\btabIndex=["'][1-9]\d*["']/, "")
+      .replace(/\s+\btabindex=["'][1-9]\d*["']/, "");
+    return after === line ? undefined : candidate(after, "Remove the positive tab index and restore document-order focus.");
   }
 
   if ((finding.ruleId === "CDOM_3_3_2_PLACEHOLDER_LABEL" || finding.ruleId === "CDOM_4_1_2_FORM_LABEL") && !/\baria-label=/.test(line)) {

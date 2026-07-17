@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "stack": "expo",
+  "cases": [
+    {
+      "id": "clean-named-control",
+      "fixture": "clean",
+      "ruleId": "CDOM_4_1_2_NATIVE_LABEL",
+      "detectionClass": "automated",
+      "routeOrScreen": "account",
+      "expectedEvidence": "no blocking finding",
+      "allowedPlatformDifferences": [
+        "bounds and traversal metadata vary by platform"
+      ]
+    },
+    {
+      "id": "broken-unnamed-control",
+      "fixture": "broken",
+      "ruleId": "CDOM_4_1_2_NATIVE_LABEL",
+      "detectionClass": "automated",
+      "routeOrScreen": "account",
+      "expectedEvidence": "source location plus iOS and Android accessibility nodes",
+      "allowedPlatformDifferences": [
+        "iOS and Android role vocabulary may differ"
+      ]
+    }
+  ]
+}

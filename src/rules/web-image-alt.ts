@@ -1,4 +1,4 @@
-import { isAriaHidden, staticAttributeValue } from "../rule-utils.js";
+import { attributeEvidence, isAriaHidden, isIntrinsicElement, isProvenHidden, staticAttributeValue } from "../rule-utils.js";
 import type { RuleDefinition } from "../types.js";
 
 export const imageAltRule: RuleDefinition = {
@@ -24,11 +24,12 @@ export const imageAltRule: RuleDefinition = {
     { label: "Decorative image", code: '<img src="/divider.png" alt="" aria-hidden="true" />' }
   ],
   check(context) {
-    return context.elements
-      .filter((element) => element.tagName.toLowerCase() === "img")
-      .filter((element) => !isDecorative(element, context))
-      .filter((element) => !staticAttributeValue(element, context, "alt")?.trim())
-      .map((element) => context.createFinding(this, element, "Add useful alt text or mark the image decorative."));
+    return context.elements.flatMap((element) => {
+      if (!isIntrinsicElement(element, "img") || isDecorative(element, context) || isProvenHidden(element, context)) return [];
+      const alt = attributeEvidence(element, context, "alt");
+      if (alt === "non-empty") return [];
+      return [context.createFinding(this, element, "Add useful alt text or mark the image decorative.", alt === "unresolved" ? { state: "unresolved" } : undefined)];
+    });
   }
 };
 
