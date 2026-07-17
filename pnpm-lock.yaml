@@ -18,8 +18,8 @@ importers:
         specifier: 8.18.0
         version: 8.18.0
       puppeteer-core:
-        specifier: ^25.2.1
-        version: 25.2.1
+        specifier: ^25.3.0
+        version: 25.3.0(yauzl@2.10.0)
       typescript:
         specifier: ^5.5.4
         version: 5.9.3
@@ -121,6 +121,19 @@ packages:
       proxy-agent: '>=8.0.1'
     peerDependenciesMeta:
       proxy-agent:
+        optional: true
+
+  '@puppeteer/browsers@3.0.6':
+    resolution: {integrity: sha512-B/gKoqlFkzhvzsI6jo9K1cZz9o5ypviVv/xu8CwA4grZzyVwN+XfkT+tu8T1zrauuEXv6VhS2oGX+6NL95WcKA==}
+    engines: {node: '>=22.12.0'}
+    hasBin: true
+    peerDependencies:
+      proxy-agent: '>=8.0.1'
+      yauzl: ^2.10.0 || ^3.4.0
+    peerDependenciesMeta:
+      proxy-agent:
+        optional: true
+      yauzl:
         optional: true
 
   '@sveltejs/acorn-typescript@1.0.11':
@@ -857,6 +870,10 @@ packages:
     resolution: {integrity: sha512-MwEZ4FFGJ1ZLOmu/04eISxoEMKtCnHyJBRFfgpwPPSYNG6gT6Xw1laNziFSV7uwDcx3jK+ATYIo9SfOd8Uhc3w==}
     engines: {node: '>=22.12.0'}
 
+  puppeteer-core@25.3.0:
+    resolution: {integrity: sha512-fm+wpUr2oigH1PXZvwgATrM2tYWHMDG8ASzTEe9uukCye4X5Ldx1K5BTHPFKITrIWvQQAQ256d1NpbEveBcKjA==}
+    engines: {node: '>=22.12.0'}
+
   puppeteer@24.43.1:
     resolution: {integrity: sha512-/FSOViCrqRdb1HDocpsM9Z1giA71gTQPUt3SpHGVRALKAy/rJr1fLFYZW9F23qPxqVxTHQnbh/5B5opJST3kAw==}
     engines: {node: '>=18'}
@@ -1199,6 +1216,13 @@ snapshots:
     dependencies:
       modern-tar: 0.7.6
       yargs: 18.0.0
+
+  '@puppeteer/browsers@3.0.6(yauzl@2.10.0)':
+    dependencies:
+      modern-tar: 0.7.6
+      yargs: 18.0.0
+    optionalDependencies:
+      yauzl: 2.10.0
 
   '@sveltejs/acorn-typescript@1.0.11(acorn@8.17.0)':
     dependencies:
@@ -2167,6 +2191,20 @@ snapshots:
       - bufferutil
       - proxy-agent
       - utf-8-validate
+
+  puppeteer-core@25.3.0(yauzl@2.10.0):
+    dependencies:
+      '@puppeteer/browsers': 3.0.6(yauzl@2.10.0)
+      chromium-bidi: 16.0.1(devtools-protocol@0.0.1638949)
+      devtools-protocol: 0.0.1638949
+      typed-query-selector: 2.12.2
+      webdriver-bidi-protocol: 0.4.2
+      ws: 8.21.0
+    transitivePeerDependencies:
+      - bufferutil
+      - proxy-agent
+      - utf-8-validate
+      - yauzl
 
   puppeteer@24.43.1(typescript@5.9.3):
     dependencies:
