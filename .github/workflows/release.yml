@@ -9,7 +9,46 @@ permissions:
   id-token: write
 
 jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.12
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - id: release-stage
+        name: Derive release stage from tag
+        run: echo "value=$(node scripts/print-release-stage.mjs)" >> "$GITHUB_OUTPUT"
+      - run: pnpm test
+      - run: pnpm docs:check
+      - run: pnpm test:conformance
+        env:
+          CLEARDOM_RELEASE_STAGE: ${{ steps.release-stage.outputs.value }}
+      - run: pnpm test:conformance:runtime
+        env:
+          CLEARDOM_RELEASE_STAGE: ${{ steps.release-stage.outputs.value }}
+      - run: pnpm test:corpus
+        env:
+          CLEARDOM_RELEASE_STAGE: ${{ steps.release-stage.outputs.value }}
+      - run: pnpm test:contracts -- --stage "${{ steps.release-stage.outputs.value }}"
+        env:
+          CLEARDOM_RELEASE_STAGE: ${{ steps.release-stage.outputs.value }}
+      - if: steps.release-stage.outputs.value != 'alpha'
+        run: pnpm evidence:ga4 -- --stage "${{ steps.release-stage.outputs.value }}"
+        env:
+          CLEARDOM_RELEASE_STAGE: ${{ steps.release-stage.outputs.value }}
+          CLEARDOM_GA4_API_SECRET: ${{ secrets.CLEARDOM_GA4_API_SECRET }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-evidence-${{ github.sha }}
+          path: .cleardom/evidence/*.json
+          include-hidden-files: true
+          if-no-files-found: error
+
   publish:
+    needs: evidence
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -19,25 +58,30 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
-      - run: pnpm docs:check
-      - run: pnpm test:conformance
-      - run: pnpm test:conformance:runtime
-      - run: pnpm test:corpus
-      - run: pnpm evidence:assemble
-      - run: pnpm release:gates
+      - id: release-stage
+        name: Derive release stage from tag
+        run: echo "value=$(node scripts/print-release-stage.mjs)" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-evidence-${{ github.sha }}
+          path: .cleardom/evidence
+      - run: pnpm evidence:package -- --stage "${{ steps.release-stage.outputs.value }}"
         env:
+          CLEARDOM_RELEASE_STAGE: ${{ steps.release-stage.outputs.value }}
           CLEARDOM_GA4_API_SECRET: ${{ secrets.CLEARDOM_GA4_API_SECRET }}
-      - run: pnpm build:release
+      - run: pnpm evidence:assemble -- --stage "${{ steps.release-stage.outputs.value }}"
         env:
+          CLEARDOM_RELEASE_STAGE: ${{ steps.release-stage.outputs.value }}
+      - run: pnpm release:gates -- --stage "${{ steps.release-stage.outputs.value }}"
+        env:
+          CLEARDOM_RELEASE_STAGE: ${{ steps.release-stage.outputs.value }}
           CLEARDOM_GA4_API_SECRET: ${{ secrets.CLEARDOM_GA4_API_SECRET }}
-      - run: pnpm sbom --prod --sbom-format cyclonedx --sbom-spec-version 1.6 > cleardom-sbom.json
-      - run: pnpm pack:check
-      - run: pnpm pack
-      - run: sha256sum cleardom-*.tgz > SHA256SUMS
-      - run: npm publish --provenance --access public
+      - run: npm publish cleardom-*.tgz --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - run: gh release upload "${GITHUB_REF_NAME}" cleardom-*.tgz cleardom-sbom.json SHA256SUMS --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - run: pnpm release:gates:postpublish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

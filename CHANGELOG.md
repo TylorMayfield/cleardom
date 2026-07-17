@@ -1,8 +1,10 @@
 # Changelog
 
-## 1.0.0 - Unreleased
+## 1.0.0-alpha.1 - Unreleased
 
 ClearDOM 1.0 is gated by measured conformance, precision, completion, fix-safety, performance, security, accessibility, and cross-platform evidence. It is not released while `pnpm release:gates` fails.
+
+This first alpha establishes the stable scanner/native/evidence contracts and the stage-aware release pipeline. It intentionally does not claim beta or release-candidate readiness: GA4 configuration, independent holdout precision, real-device conformance, performance, security, platform, and supply-chain measurements remain later-stage gates.
 
 ### Added
 

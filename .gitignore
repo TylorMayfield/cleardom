@@ -4,5 +4,6 @@ dist/
 *.log
 examples/wcag-benchmark/reports/
 .cleardom/corpus-results/
+.cleardom/corpus-candidates.json
 .cleardom/evidence/
 .cleardom/release-evidence.json

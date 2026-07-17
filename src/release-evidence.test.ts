@@ -19,18 +19,27 @@ test("precision uses current detection mode while preserving historical false po
 });
 
 test("evidence assembly rejects missing, stale, duplicate, and secret-bearing fragments", () => {
-  const fragment = (category: string, values: Record<string, unknown> = {}, commit = "abc"): EvidenceFragment => ({ schemaVersion: 1, kind: "cleardom-release-evidence-fragment", category, commit, values });
-  assert.throws(() => assembleEvidence("abc", [fragment("precision")], ["precision", "security"]), /Missing release evidence/);
-  assert.throws(() => assembleEvidence("abc", [fragment("precision", {}, "old")], ["precision"]), /bound to old/);
-  assert.throws(() => assembleEvidence("abc", [fragment("precision"), fragment("precision")], ["precision"]), /Duplicate/);
-  assert.throws(() => assembleEvidence("abc", [fragment("security", { apiSecret: "do-not-store" })], ["security"]), /Secret-like key/);
-  assert.throws(() => assembleEvidence("abc", [fragment("one", { metric: 1 }), fragment("two", { metric: 2 })], ["one", "two"]), /Duplicate release evidence value/);
+  const fragment = (category: string, values: Record<string, unknown> = {}, commit = "abc", stage: EvidenceFragment["stage"] = "rc"): EvidenceFragment => ({ schemaVersion: 1, kind: "cleardom-release-evidence-fragment", category, commit, stage, values });
+  assert.throws(() => assembleEvidence("abc", "rc", [fragment("precision")], ["precision", "security"]), /Missing release evidence/);
+  assert.throws(() => assembleEvidence("abc", "rc", [fragment("precision", {}, "old")], ["precision"]), /bound to old/);
+  assert.throws(() => assembleEvidence("abc", "rc", [fragment("precision", {}, "abc", "beta")], ["precision"]), /targets beta/);
+  assert.throws(() => assembleEvidence("abc", "rc", [fragment("precision"), fragment("precision")], ["precision"]), /Duplicate/);
+  assert.throws(() => assembleEvidence("abc", "rc", [fragment("security", { apiSecret: "do-not-store" })], ["security"]), /Secret-like key/);
+  assert.throws(() => assembleEvidence("abc", "rc", [fragment("one", { metric: 1 }), fragment("two", { metric: 2 })], ["one", "two"]), /Duplicate release evidence value/);
 });
 
 test("evidence assembly merges unique same-commit measurements", () => {
   const fragments: EvidenceFragment[] = [
-    { schemaVersion: 1, kind: "cleardom-release-evidence-fragment", category: "precision", commit: "abc", values: { aggregateAutomatedPrecision: 1 } },
-    { schemaVersion: 1, kind: "cleardom-release-evidence-fragment", category: "security", commit: "abc", values: { securityReviewClear: true } }
+    { schemaVersion: 1, kind: "cleardom-release-evidence-fragment", category: "precision", commit: "abc", stage: "rc", values: { aggregateAutomatedPrecision: 1 } },
+    { schemaVersion: 1, kind: "cleardom-release-evidence-fragment", category: "security", commit: "abc", stage: "rc", values: { securityReviewClear: true } }
   ];
-  assert.deepEqual(assembleEvidence("abc", fragments, ["precision", "security"]), { schemaVersion: 1, commit: "abc", aggregateAutomatedPrecision: 1, securityReviewClear: true });
+  assert.deepEqual(assembleEvidence("abc", "rc", fragments, ["precision", "security"]), { schemaVersion: 1, commit: "abc", stage: "rc", aggregateAutomatedPrecision: 1, securityReviewClear: true });
+});
+
+test("evidence assembly ignores artifacts that are not required by the requested stage", () => {
+  const fragments: EvidenceFragment[] = [
+    { schemaVersion: 1, kind: "cleardom-release-evidence-fragment", category: "contracts", commit: "abc", stage: "alpha", values: { contractsStable: true } },
+    { schemaVersion: 1, kind: "cleardom-release-evidence-fragment", category: "precision", commit: "stale", stage: "final", values: { aggregateAutomatedPrecision: 0 } }
+  ];
+  assert.deepEqual(assembleEvidence("abc", "alpha", fragments, ["contracts"]), { schemaVersion: 1, commit: "abc", stage: "alpha", contractsStable: true });
 });

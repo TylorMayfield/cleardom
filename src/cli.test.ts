@@ -9,12 +9,14 @@ import { resolveScanOptions } from "./config.js";
 
 const execFileAsync = promisify(execFile);
 const cliPath = path.resolve("dist/cli.js");
+const packageVersion = JSON.parse(await fs.readFile(path.resolve("package.json"), "utf8")).version;
+const versionBanner = new RegExp(`ClearDOM v${packageVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
 
 test("scan prints text output", async () => {
   const fixture = await createFixture('<button aria-label="Close"><X /></button>');
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
-  assert.match(result.stdout, /ClearDOM v0\.2\.4/);
+  assert.match(result.stdout, versionBanner);
   assert.match(result.stderr, /Running source checks/);
   assert.doesNotMatch(result.stdout, /Running source checks/);
   assert.match(result.stdout, /✓ Scan complete/);
@@ -26,7 +28,7 @@ test("default command scans the current project path", async () => {
   const fixture = await createFixture('<button aria-label="Close"><X /></button>');
   const result = await execFileAsync(process.execPath, [cliPath, fixture]);
 
-  assert.match(result.stdout, /ClearDOM v0\.2\.4/);
+  assert.match(result.stdout, versionBanner);
   assert.match(result.stdout, /Score: 100\/100 \(Excellent\)/);
   assert.match(result.stdout, /0 findings across 1 file/);
 });
@@ -45,7 +47,7 @@ test("version flags print package version without scanning", async () => {
   for (const flag of ["--version", "-v"]) {
     const result = await execFileAsync(process.execPath, [cliPath, flag]);
 
-    assert.equal(result.stdout.trim(), "0.2.4");
+    assert.equal(result.stdout.trim(), packageVersion);
     assert.doesNotMatch(result.stdout, /ClearDOM score:/);
   }
 });
@@ -87,7 +89,7 @@ test("scan text output leads with fixes and keeps details behind verbose", async
   const fixture = await createFixture("<button />");
   const result = await execFileAsync(process.execPath, [cliPath, "scan", fixture]);
 
-  assert.match(result.stdout, /ClearDOM v0\.2\.4/);
+  assert.match(result.stdout, versionBanner);
   assert.match(result.stdout, /Detected:/);
   assert.match(result.stdout, /✓ Scan complete/);
   assert.match(result.stdout, /Score: 95\/100 \(Excellent\)/);

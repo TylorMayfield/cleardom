@@ -6,6 +6,7 @@
     "blockingRulePrecision": 0.95,
     "aggregateAutomatedPrecision": 0.95,
     "minimumReviewedAutomatedFindingsPerBlockingRule": 20,
+    "minimumReviewedHoldoutFindingsPerBlockingRule": 5,
     "sourceCompletion": 0.99,
     "runtimeCompletion": 0.97,
     "nativeCompletion": 0.95,
@@ -16,19 +17,13 @@
     "runtimeTenRoutesMaxMs": 180000,
     "nativeScreenMaxMs": 30000
   },
-  "requiredEvidenceFragments": [
-    "precision",
-    "conformance-source",
-    "conformance-runtime",
-    "native",
-    "performance",
-    "fix-safety",
-    "security",
-    "platform",
-    "supply-chain",
-    "release-history"
-  ],
-  "requiredEvidence": [
+  "requiredEvidenceFragmentsByStage": {
+    "alpha": ["contracts"],
+    "beta": ["contracts", "conformance-source", "conformance-runtime", "native", "ga4", "release-history"],
+    "rc": ["contracts", "conformance-source", "conformance-runtime", "native", "ga4", "precision", "performance", "fix-safety", "security", "platform", "supply-chain", "release-history"],
+    "final": ["contracts", "conformance-source", "conformance-runtime", "native", "ga4", "precision", "performance", "fix-safety", "security", "platform", "supply-chain", "release-history"]
+  },
+  "requiredEvidencePrepublish": [
     "fingerprintsStable",
     "renameClassificationCorrect",
     "securityReviewClear",
@@ -42,9 +37,13 @@
     "androidLinuxPassed",
     "androidWindowsPassed",
     "packageContentsReproducible",
+    "sbomGenerated",
+    "checksumsGenerated",
+    "ga4TwoMonthRetentionVerified"
+  ],
+  "requiredEvidencePostpublish": [
     "npmProvenanceVerified",
     "sbomPublished",
-    "checksumsPublished",
-    "ga4TwoMonthRetentionVerified"
+    "checksumsPublished"
   ]
 }

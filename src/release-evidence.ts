@@ -58,15 +58,23 @@ export type EvidenceFragment = {
   kind: "cleardom-release-evidence-fragment";
   category: string;
   commit: string;
+  stage: ReleaseStage;
   values: Record<string, unknown>;
 };
 
-export function assembleEvidence(commit: string, fragments: EvidenceFragment[], requiredCategories: string[]): Record<string, unknown> {
+export type ReleaseStage = "alpha" | "beta" | "rc" | "final";
+
+export function assembleEvidence(commit: string, stage: ReleaseStage, fragments: EvidenceFragment[], requiredCategories: string[]): Record<string, unknown> {
+  const required = new Set(requiredCategories);
   const categories = new Set<string>();
-  const values: Record<string, unknown> = { schemaVersion: 1, commit };
+  const values: Record<string, unknown> = { schemaVersion: 1, commit, stage };
   for (const fragment of fragments) {
+    // A shared evidence directory can contain artifacts from other release
+    // stages. They are not inputs to this assembly and must not poison it.
+    if (!required.has(fragment.category)) continue;
     if (fragment.schemaVersion !== 1 || fragment.kind !== "cleardom-release-evidence-fragment") throw new Error("Release evidence fragment has an unsupported contract.");
     if (fragment.commit !== commit) throw new Error(`Release evidence fragment ${fragment.category} is bound to ${fragment.commit}, not ${commit}.`);
+    if (fragment.stage !== stage) throw new Error(`Release evidence fragment ${fragment.category} targets ${String(fragment.stage)}, not ${stage}.`);
     if (!fragment.category || categories.has(fragment.category)) throw new Error(`Duplicate or empty release evidence category: ${fragment.category || "<empty>"}.`);
     categories.add(fragment.category);
     rejectSecrets(fragment.values);

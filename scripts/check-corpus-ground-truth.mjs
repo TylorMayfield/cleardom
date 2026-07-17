@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { calculateReviewedPrecision } from "../dist/release-evidence.js";
+import { resolveReleaseStage } from "./evidence-fragment.mjs";
 
 const root = process.cwd();
 const manifest = JSON.parse(await fs.readFile(path.join(root, "examples", "oss-corpus", "manifest.json"), "utf8"));
@@ -21,8 +22,10 @@ for (const project of manifest.projects ?? []) {
   const record = truth.projects?.find((entry) => entry.id === project.groundTruthId);
   if (!result) { failures.push(`${project.id} has no shadow result.`); continue; }
   if (!record) { failures.push(`${project.id} has no ground-truth record.`); continue; }
+  if (!manifest.projectContract?.evaluationSets?.includes(project.evaluationSet)) failures.push(`${project.id} has invalid evaluationSet ${String(project.evaluationSet)}.`);
   if (record.commit !== project.commit) failures.push(`${project.id} ground truth is not bound to ${project.commit}.`);
   if (record.reviewStatus !== "reviewed") failures.push(`${project.id} ground truth is not reviewed.`);
+  if (project.evaluationSet === "holdout" && (!Array.isArray(record.reviewers) || record.reviewers.length === 0)) failures.push(`${project.id} holdout ground truth has no independent reviewer.`);
   const findings = new Map((result.scan.activeFindings ?? []).map((finding) => [finding.fingerprint, finding]));
   const labels = new Map((record.labels ?? []).map((label) => [label.fingerprint, label]));
   for (const finding of findings.values()) if (!labels.has(finding.fingerprint)) failures.push(`${project.id} finding ${finding.fingerprint} (${finding.ruleId}) is unlabeled.`);
@@ -44,7 +47,10 @@ if (failures.length) {
   process.exit(1);
 }
 const findingsByProject = new Map([...results].map(([id, result]) => [id, result.scan.activeFindings ?? []]));
-const precision = calculateReviewedPrecision(truth.projects ?? [], findingsByProject);
+const evaluationSetById = new Map((manifest.projects ?? []).map((project) => [project.groundTruthId, project.evaluationSet]));
+const reviewedProjects = (truth.projects ?? []).map((project) => ({ ...project, evaluationSet: evaluationSetById.get(project.id) }));
+const precision = calculateReviewedPrecision(reviewedProjects, findingsByProject);
+const holdoutPrecision = calculateReviewedPrecision(reviewedProjects.filter((project) => project.evaluationSet === "holdout"), findingsByProject);
 const precisionByRule = Object.fromEntries(Object.entries(precision.byRule).map(([ruleId, count]) => [ruleId, count.precision]));
 const sampleSizeByRule = Object.fromEntries(Object.entries(precision.byRule).map(([ruleId, count]) => [ruleId, count.sampleSize]));
 const observedRulePrecisions = Object.values(precision.byRule).map((count) => count.precision).filter((value) => typeof value === "number");
@@ -56,11 +62,17 @@ await fs.writeFile(path.join(evidenceDirectory, "corpus-precision.json"), `${JSO
   kind: "cleardom-release-evidence-fragment",
   category: "precision",
   commit,
+  stage: resolveReleaseStage(),
   values: {
     blockingRulePrecision: observedRulePrecisions.length ? Math.min(...observedRulePrecisions) : null,
     blockingRulePrecisionByRule: precisionByRule,
     precisionSampleSizeByRule: sampleSizeByRule,
     precisionCountsByRule: precision.byRule,
+    holdoutPrecisionByRule: Object.fromEntries(Object.entries(holdoutPrecision.byRule).map(([ruleId, count]) => [ruleId, count.precision])),
+    holdoutSampleSizeByRule: Object.fromEntries(Object.entries(holdoutPrecision.byRule).map(([ruleId, count]) => [ruleId, count.sampleSize])),
+    holdoutPrecisionCountsByRule: holdoutPrecision.byRule,
+    holdoutAggregateAutomatedPrecision: holdoutPrecision.aggregate.precision,
+    holdoutAggregateAutomatedPrecisionCounts: holdoutPrecision.aggregate,
     aggregateAutomatedPrecision: precision.aggregate.precision,
     aggregateAutomatedPrecisionCounts: precision.aggregate,
     resolvedCorpusFalsePositives: precision.resolvedFalsePositives,

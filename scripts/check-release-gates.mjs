@@ -2,10 +2,12 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { resolveReleaseStage } from "./evidence-fragment.mjs";
 
 const root = process.cwd();
 const failures = [];
-const stage = releaseStage();
+const stageFlag = process.argv.indexOf("--stage");
+const stage = resolveReleaseStage(stageFlag >= 0 ? process.argv[stageFlag + 1] : undefined);
 const stageRank = { alpha: 0, beta: 1, rc: 2, final: 3 }[stage];
 const gates = JSON.parse(await fs.readFile(path.join(root, "release-gates.json"), "utf8"));
 const packageJson = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
@@ -36,7 +38,8 @@ if (!builtRules) {
   for (const ruleId of trustEntries.keys()) if (!blockingRuleIds.includes(ruleId)) failures.push(`Rule trust entry ${ruleId} is not currently default-blocking.`);
 }
 
-if (stageRank >= 1 && !process.env.CLEARDOM_GA4_API_SECRET) failures.push("CLEARDOM_GA4_API_SECRET has not been provisioned for the beta/final build.");
+if (stageRank >= 1 && !process.env.CLEARDOM_GA4_API_SECRET) failures.push("CLEARDOM_GA4_API_SECRET has not been provisioned for the beta/RC/final build.");
+else if (stageRank >= 1 && !/^[A-Za-z0-9_-]{8,128}$/.test(process.env.CLEARDOM_GA4_API_SECRET)) failures.push("CLEARDOM_GA4_API_SECRET has an unexpected format.");
 
 const conformanceByStack = new Map((conformance.applications ?? []).map((application) => [application.stack, application]));
 const conformanceFixtureOwners = new Map();
@@ -69,6 +72,7 @@ const familyCounts = new Map();
 const groundTruthCache = new Map();
 for (const project of stageRank >= 2 ? corpus.projects ?? [] : []) {
   for (const key of corpus.projectContract?.required ?? []) if (project[key] === undefined) failures.push(`OSS corpus entry is missing ${key}.`);
+  if (!corpus.projectContract?.evaluationSets?.includes(project.evaluationSet)) failures.push(`OSS corpus ${project.id ?? "entry"} has invalid evaluationSet ${String(project.evaluationSet)}.`);
   if (!/^[a-f0-9]{40}$/.test(project.commit ?? "")) failures.push(`OSS corpus ${project.id ?? "entry"} must pin a full commit SHA.`);
   if (project.licenseReviewed !== true) failures.push(`OSS corpus ${project.repository ?? "entry"} lacks recorded license review.`);
   for (const key of ["source", "reviewedBy", "reviewedAt"]) if (!project.licenseReview?.[key]) failures.push(`OSS corpus ${project.id ?? "entry"} license review is missing ${key}.`);
@@ -104,6 +108,7 @@ if (!evidence) {
 } else {
   const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
   if (evidence.commit !== currentCommit) failures.push(`Release evidence commit must equal ${currentCommit}; received ${String(evidence.commit)}.`);
+  if (evidence.stage !== stage) failures.push(`Release evidence stage must equal ${stage}; received ${String(evidence.stage)}.`);
   for (const field of ["contractsStable", "nativeRunnerStable"]) {
     if (evidence[field] !== true) failures.push(`${field} evidence must be true; received ${String(evidence[field])}.`);
   }
@@ -134,6 +139,7 @@ if (!evidence) {
     else {
       if (precisionFragment.kind !== "cleardom-release-evidence-fragment" || precisionFragment.category !== "precision") failures.push("Corpus precision evidence has an invalid contract.");
       if (precisionFragment.commit !== currentCommit) failures.push(`Corpus precision evidence commit must equal ${currentCommit}; received ${String(precisionFragment.commit)}.`);
+      if (precisionFragment.stage !== stage) failures.push(`Corpus precision evidence stage must equal ${stage}; received ${String(precisionFragment.stage)}.`);
     }
     if (recomputedPrecision) {
       compareNumber("aggregate automated precision", evidence.aggregateAutomatedPrecision, recomputedPrecision.aggregate.precision);
@@ -144,6 +150,7 @@ if (!evidence) {
       const recomputed = recomputedPrecision?.byRule?.[ruleId];
       requireMinimum(`${ruleId} precision`, evidence.blockingRulePrecisionByRule?.[ruleId], threshold.blockingRulePrecision);
       requireMinimum(`${ruleId} reviewed automated sample size`, evidence.precisionSampleSizeByRule?.[ruleId], threshold.minimumReviewedAutomatedFindingsPerBlockingRule);
+      requireMinimum(`${ruleId} reviewed holdout sample size`, evidence.holdoutSampleSizeByRule?.[ruleId], threshold.minimumReviewedHoldoutFindingsPerBlockingRule);
       if (!recomputed) {
         failures.push(`${ruleId} has no current reviewed automated corpus findings.`);
         continue;
@@ -153,9 +160,17 @@ if (!evidence) {
       compareNumber(`${ruleId} evidence sample size`, evidence.precisionSampleSizeByRule?.[ruleId], recomputed.sampleSize);
       compareNumber(`${ruleId} fragment sample size`, precisionFragment?.values?.precisionSampleSizeByRule?.[ruleId], recomputed.sampleSize);
       compareCounts(`${ruleId} precision counts`, precisionFragment?.values?.precisionCountsByRule?.[ruleId], recomputed);
+      const recomputedHoldout = recomputedPrecision?.holdout?.byRule?.[ruleId];
+      if (!recomputedHoldout) {
+        failures.push(`${ruleId} has no independently reviewed automated holdout findings.`);
+      } else {
+        compareNumber(`${ruleId} holdout evidence sample size`, evidence.holdoutSampleSizeByRule?.[ruleId], recomputedHoldout.sampleSize);
+        compareNumber(`${ruleId} holdout fragment sample size`, precisionFragment?.values?.holdoutSampleSizeByRule?.[ruleId], recomputedHoldout.sampleSize);
+        compareCounts(`${ruleId} holdout precision counts`, precisionFragment?.values?.holdoutPrecisionCountsByRule?.[ruleId], recomputedHoldout);
+      }
     }
   }
-  for (const field of stageRank >= 2 ? gates.requiredEvidence ?? [] : []) {
+  for (const field of stageRank >= 2 ? gates.requiredEvidencePrepublish ?? [] : []) {
     if (evidence[field] !== true) failures.push(`${field} evidence must be true; received ${String(evidence[field])}.`);
   }
 }
@@ -195,7 +210,11 @@ async function recomputeCorpusPrecision() {
       if (result?.project?.id) findings.set(result.project.id, result.scan?.activeFindings ?? []);
     }
     const truth = await readJson(path.join(root, "examples", "oss-corpus", "ground-truth.json"));
-    return module.calculateReviewedPrecision(truth?.projects ?? [], findings);
+    const evaluationSetById = new Map((corpus.projects ?? []).map((project) => [project.groundTruthId, project.evaluationSet]));
+    const reviewedProjects = (truth?.projects ?? []).map((project) => ({ ...project, evaluationSet: evaluationSetById.get(project.id) }));
+    const combined = module.calculateReviewedPrecision(reviewedProjects, findings);
+    const holdout = module.calculateReviewedPrecision(reviewedProjects.filter((project) => project.evaluationSet === "holdout"), findings);
+    return { ...combined, holdout };
   } catch (error) {
     failures.push(`Could not recompute corpus precision: ${error instanceof Error ? error.message : String(error)}.`);
     return undefined;
@@ -244,15 +263,4 @@ async function validateCaseManifest(stack, file) {
       if (testCase[field] === undefined) failures.push(`${stack} conformance case ${index + 1} is missing ${field}.`);
     }
   }
-}
-
-function releaseStage() {
-  const stageFlag = process.argv.indexOf("--stage");
-  const requested = stageFlag >= 0 ? process.argv[stageFlag + 1] : undefined;
-  if (requested && ["alpha", "beta", "rc", "final"].includes(requested)) return requested;
-  const ref = process.env.GITHUB_REF_NAME ?? "";
-  if (ref.includes("-alpha.")) return "alpha";
-  if (ref.includes("-beta.")) return "beta";
-  if (ref.includes("-rc.")) return "rc";
-  return "final";
 }

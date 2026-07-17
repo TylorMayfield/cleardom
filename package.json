@@ -1,6 +1,6 @@
 {
   "name": "cleardom",
-  "version": "0.2.4",
+  "version": "1.0.0-alpha.1",
   "description": "Developer-first accessibility doctor for React, Electron, React Native, and web apps.",
   "type": "module",
   "license": "MIT",
@@ -51,7 +51,7 @@
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
-    "build:release": "node scripts/write-telemetry-secret.mjs && pnpm build",
+    "build:release": "node scripts/build-release.mjs",
     "test": "pnpm build && node --test dist/**/*.test.js",
     "test:fast": "pnpm build && node scripts/run-tests.mjs fast",
     "test:runtime": "pnpm build && node scripts/run-tests.mjs runtime",
@@ -63,11 +63,16 @@
     "test:conformance:runtime": "pnpm build && node scripts/check-conformance-runtime.mjs",
     "conformance:generate": "node scripts/generate-conformance-apps.mjs",
     "test:corpus": "pnpm build && node scripts/run-corpus-shadow.mjs && node scripts/check-corpus-ground-truth.mjs",
+    "corpus:discover": "pnpm build && node scripts/discover-corpus-candidates.mjs",
+    "test:contracts": "pnpm build && node scripts/check-contract-evidence.mjs",
     "evidence:assemble": "pnpm build && node scripts/assemble-release-evidence.mjs",
     "evidence:record": "node scripts/record-evidence-fragment.mjs",
+    "evidence:package": "node scripts/check-package-evidence.mjs",
+    "evidence:ga4": "node scripts/check-ga4-evidence.mjs",
     "release:gates": "node scripts/check-release-gates.mjs",
+    "release:gates:postpublish": "node scripts/check-postpublish-gates.mjs",
     "pack:check": "pnpm pack --dry-run",
-    "prepack": "pnpm build"
+    "prepack": "pnpm build:release"
   },
   "dependencies": {
     "@puppeteer/browsers": "^2.10.13",
